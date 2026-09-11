@@ -12,587 +12,438 @@ export class ParagliderRig {
   private scene: Scene
   private canopyRoot: TransformNode
   private pilotRoot: TransformNode
+  private pilotBodyPivot: TransformNode
 
+  // Glider 3D Mesh
   private canopyMesh: Mesh
+
+  // Stylized Articulated Pilot
+  private helmetMesh: Mesh
+  private visorMesh: Mesh
+  private neckMesh: Mesh
+  private torsoMesh: Mesh
+  private harnessMesh: Mesh
+  private leftArmNode: TransformNode
+  private rightArmNode: TransformNode
   private leftHandNode: TransformNode
   private rightHandNode: TransformNode
-  private leftArmMesh: Mesh
-  private rightArmMesh: Mesh
-  private leftForearmMesh: Mesh
-  private rightForearmMesh: Mesh
+  private leftLegNode: TransformNode
+  private rightLegNode: TransformNode
+  private leftKneeNode: TransformNode
+  private rightKneeNode: TransformNode
 
-  // Carabiners and Riser Hardware (Firmly attached to harness)
-  private leftCarabiner: Mesh
-  private rightCarabiner: Mesh
-  private leftRiserStrap: Mesh
-  private rightRiserStrap: Mesh
-  private leftPulleyRing: Mesh
-  private rightPulleyRing: Mesh
-
-  // Full Dynamic Suspension & Brake Line Cascades (36 lines total)
+  // Line Networks
   private suspensionLinesMesh: LinesMesh
   private brakeLinesMesh: LinesMesh
 
-  private frontRibbonPath: Vector3[] = []
-  private midRibbonPath: Vector3[] = []
-  private backRibbonPath: Vector3[] = []
-  private originalBackRibbonPath: Vector3[] = []
-  private originalFrontRibbonPath: Vector3[] = []
+  // Aerofoil Rib Paths
+  private cellAttachmentPoints: Vector3[] = []
+  private trailingEdgePoints: Vector3[] = []
 
   constructor(scene: Scene) {
     this.scene = scene
 
     this.canopyRoot = new TransformNode('canopy-root', scene)
     this.pilotRoot = new TransformNode('pilot-root', scene)
+    this.pilotBodyPivot = new TransformNode('pilot-body-pivot', scene)
+    this.pilotBodyPivot.parent = this.pilotRoot
 
-    // 1. Build Materials (Vibrant Stylized Alpine Look)
-    const canopyMat = new StandardMaterial('canopy-mat', scene)
-    canopyMat.diffuseColor = new Color3(0.98, 0.35, 0.12) // Sunset orange
-    canopyMat.specularColor = new Color3(0.12, 0.12, 0.12)
-    canopyMat.backFaceCulling = false
+    // 1. High-End Stylized Materials
+    const canopyTopMat = new StandardMaterial('canopy-top-mat', scene)
+    canopyTopMat.diffuseColor = new Color3(0.96, 0.18, 0.12) // Neon speedwing crimson
+    canopyTopMat.specularColor = new Color3(0.25, 0.25, 0.25)
+    canopyTopMat.backFaceCulling = false
 
-    const pilotJacketMat = new StandardMaterial('jacket-mat', scene)
-    pilotJacketMat.diffuseColor = new Color3(0.08, 0.45, 0.65) // Alpine teal jacket
+    const pilotSuitMat = new StandardMaterial('pilot-suit-mat', scene)
+    pilotSuitMat.diffuseColor = new Color3(0.15, 0.20, 0.28) // Deep charcoal navy flight suit
+    pilotSuitMat.specularColor = new Color3(0.06, 0.06, 0.06)
 
-    const harnessMat = new StandardMaterial('harness-mat', scene)
-    harnessMat.diffuseColor = new Color3(0.12, 0.15, 0.18) // Dark charcoal harness
+    const pilotAccentMat = new StandardMaterial('pilot-accent-mat', scene)
+    pilotAccentMat.diffuseColor = new Color3(0.12, 0.72, 0.88) // Electric cyan straps & accents
+    pilotAccentMat.specularColor = new Color3(0.1, 0.1, 0.1)
 
     const helmetMat = new StandardMaterial('helmet-mat', scene)
-    helmetMat.diffuseColor = new Color3(0.98, 0.25, 0.15) // High-vis orange helmet
+    helmetMat.diffuseColor = new Color3(0.98, 0.98, 1.0) // Gloss white action helmet
+    helmetMat.specularColor = new Color3(0.9, 0.9, 0.95)
 
-    const metalMat = new StandardMaterial('carabiner-metal-mat', scene)
-    metalMat.diffuseColor = new Color3(0.82, 0.86, 0.92) // Silver alloy
-    metalMat.specularColor = new Color3(0.9, 0.9, 0.95)
+    const visorMat = new StandardMaterial('visor-mat', scene)
+    visorMat.diffuseColor = new Color3(0.04, 0.04, 0.06) // Mirrored iridium visor
+    visorMat.specularColor = new Color3(0.95, 0.85, 0.35) // Gold sun glint
 
-    const riserWebbingMat = new StandardMaterial('riser-webbing-mat', scene)
-    riserWebbingMat.diffuseColor = new Color3(0.06, 0.08, 0.12) // Heavy-duty black riser webbing
+    const skinMat = new StandardMaterial('skin-mat', scene)
+    skinMat.diffuseColor = new Color3(0.88, 0.68, 0.54) // Natural skin/neck
 
-    // 2. Build Curved Paraglider Canopy (24 span segments - 8.8m speedwing)
-    const spanSteps = 24
+    const metalMat = new StandardMaterial('metal-mat', scene)
+    metalMat.diffuseColor = new Color3(0.85, 0.88, 0.94) // Anodized aluminum carabiners
+    metalMat.specularColor = new Color3(0.95, 0.95, 0.95)
+
+    const bootMat = new StandardMaterial('boot-mat', scene)
+    bootMat.diffuseColor = new Color3(0.18, 0.22, 0.32) // Sport trail shoes
+    bootMat.specularColor = new Color3(0.1, 0.1, 0.1)
+
+    const sockMat = new StandardMaterial('sock-mat', scene)
+    sockMat.diffuseColor = new Color3(0.08, 0.72, 0.45) // Sporty electric green/teal socks (like media_1789151841324.jpg!)
+
+    const soleMat = new StandardMaterial('sole-mat', scene)
+    soleMat.diffuseColor = new Color3(0.96, 0.96, 0.98) // White trail shoe EVA outsole
+    soleMat.specularColor = new Color3(0.3, 0.3, 0.3)
+
+    // 2. Build 3D Elliptical Aerofoil Speedwing Canopy (32 Cells)
+    const numCells = 32
     const halfSpan = 4.4 // 8.8m span
-    for (let i = 0; i <= spanSteps; i++) {
-      const t = i / spanSteps
-      const x = -halfSpan + t * halfSpan * 2
+    const chord = 2.35 // 2.35m chord
+
+    const upperRibbon: Vector3[] = []
+    const lowerRibbon: Vector3[] = []
+
+    for (let c = 0; c <= numCells; c++) {
+      const u = c / numCells
+      const x = -halfSpan + u * halfSpan * 2
       const normX = Math.abs(x) / halfSpan
 
-      // Parabolic arch and aerodynamic sweep (wingtips sweep backward -Z)
-      const archY = (1 - Math.pow(normX, 1.8)) * 1.55
-      const sweepZ = Math.pow(normX, 1.6) * 0.65
+      // Elliptical arch and aerodynamic wingtip sweep
+      const archY = (1 - Math.pow(normX, 1.9)) * 1.58
+      const sweepZ = Math.pow(normX, 1.7) * 0.75
+      const taperChord = chord * (1 - normX * 0.42)
+      const maxThick = taperChord * 0.16 // 16% cambered aerofoil
 
-      // Forward is +Z (leading edge with A-lines), rear is -Z (trailing edge with brakes)
-      const leading = new Vector3(x, archY, 1.15 - sweepZ)
-      const mid = new Vector3(x, archY + 0.22, 0.05 - sweepZ)
-      const trailing = new Vector3(x, archY - 0.08, -1.15 - sweepZ)
+      // Leading edge (+Z) and Trailing edge (-Z)
+      const leZ = sweepZ + taperChord * 0.48
+      const teZ = sweepZ - taperChord * 0.52
 
-      this.frontRibbonPath.push(leading)
-      this.originalFrontRibbonPath.push(leading.clone())
-      this.midRibbonPath.push(mid)
-      this.backRibbonPath.push(trailing.clone())
-      this.originalBackRibbonPath.push(trailing.clone())
+      upperRibbon.push(new Vector3(x, archY + maxThick * 0.65, leZ))
+      upperRibbon.push(new Vector3(x, archY, teZ))
+
+      lowerRibbon.push(new Vector3(x, archY - maxThick * 0.35, leZ))
+      lowerRibbon.push(new Vector3(x, archY - 0.02, teZ))
+
+      if (c % 2 === 0) {
+        this.cellAttachmentPoints.push(new Vector3(x, archY - maxThick * 0.32, (leZ + teZ) * 0.5))
+      }
+      this.trailingEdgePoints.push(new Vector3(x, archY, teZ))
+    }
+
+    // Build unified dual-surface canopy
+    const upperPaths: Vector3[][] = []
+    const lowerPaths: Vector3[][] = []
+    for (let i = 0; i <= numCells; i++) {
+      upperPaths.push([upperRibbon[i * 2], upperRibbon[i * 2 + 1]])
+      lowerPaths.push([lowerRibbon[i * 2], lowerRibbon[i * 2 + 1]])
     }
 
     this.canopyMesh = MeshBuilder.CreateRibbon(
-      'canopy-ribbon',
-      {
-        pathArray: [this.frontRibbonPath, this.midRibbonPath, this.backRibbonPath],
-        updatable: true,
-        sideOrientation: Mesh.DOUBLESIDE,
-      },
+      'speedwing-canopy',
+      { pathArray: [upperRibbon.filter((_, idx) => idx % 2 === 0), upperRibbon.filter((_, idx) => idx % 2 === 1)], updatable: true },
       scene,
     )
+    this.canopyMesh.material = canopyTopMat
     this.canopyMesh.parent = this.canopyRoot
-    this.canopyMesh.material = canopyMat
 
-    // 3. Build Pilot Model (Torso, Helmet, Harness, Legs)
-    const torso = MeshBuilder.CreateCylinder(
-      'pilot-torso',
-      { height: 0.85, diameterTop: 0.42, diameterBottom: 0.48, tessellation: 8 },
+    const underMesh = MeshBuilder.CreateRibbon(
+      'speedwing-under',
+      { pathArray: [lowerRibbon.filter((_, idx) => idx % 2 === 0), lowerRibbon.filter((_, idx) => idx % 2 === 1)], updatable: true },
       scene,
     )
-    torso.parent = this.pilotRoot
-    torso.position.set(0, 0.45, 0.05)
-    torso.rotation.x = Math.PI / 10
-    torso.material = pilotJacketMat
+    underMesh.material = pilotAccentMat
+    underMesh.parent = this.canopyRoot
 
-    const helmet = MeshBuilder.CreateSphere(
-      'pilot-helmet',
-      { diameter: 0.38, segments: 10 },
-      scene,
-    )
-    helmet.parent = this.pilotRoot
-    helmet.position.set(0, 0.95, 0.12)
-    helmet.material = helmetMat
+    // 3. Build Organic Stylized Character Model (Sphere-Packed / Clean Proportions)
+    // Head & Helmet
+    this.helmetMesh = MeshBuilder.CreateSphere('pilot-helmet', { diameter: 0.38, segments: 14 }, scene)
+    this.helmetMesh.position.set(0, 0.72, 0.04)
+    this.helmetMesh.material = helmetMat
+    this.helmetMesh.parent = this.pilotBodyPivot
 
-    const harness = MeshBuilder.CreateCapsule(
-      'pilot-harness',
-      { height: 1.1, radius: 0.32 },
-      scene,
-    )
-    harness.parent = this.pilotRoot
-    harness.position.set(0, 0.05, 0)
-    harness.rotation.x = Math.PI / 3.4
-    harness.material = harnessMat
+    this.visorMesh = MeshBuilder.CreateSphere('pilot-visor', { diameter: 0.32, segments: 10 }, scene)
+    this.visorMesh.scaling.set(1.04, 0.52, 0.88)
+    this.visorMesh.position.set(0, 0.71, 0.16)
+    this.visorMesh.material = visorMat
+    this.visorMesh.parent = this.pilotBodyPivot
 
-    // Legs stretched forward in pod harness
-    for (const side of [-1, 1]) {
-      const leg = MeshBuilder.CreateCapsule(
-        `pilot-leg-${side}`,
-        { height: 1.05, radius: 0.12 },
-        scene,
-      )
-      leg.parent = this.pilotRoot
-      leg.position.set(side * 0.16, -0.32, 0.45)
-      leg.rotation.x = Math.PI / 2.5
-      leg.material = harnessMat
+    // Neck / Buff
+    this.neckMesh = MeshBuilder.CreateCylinder('pilot-neck', { height: 0.15, diameter: 0.22, tessellation: 10 }, scene)
+    this.neckMesh.position.set(0, 0.54, 0.02)
+    this.neckMesh.material = skinMat
+    this.neckMesh.parent = this.pilotBodyPivot
+
+    // Torso / Flight Jacket (Sculpted with rounded chest)
+    this.torsoMesh = MeshBuilder.CreateSphere('pilot-chest', { diameter: 0.56, segments: 10 }, scene)
+    this.torsoMesh.scaling.set(0.95, 1.25, 0.82)
+    this.torsoMesh.position.set(0, 0.28, 0.02)
+    this.torsoMesh.rotation.x = 0.25 // Natural seated recline
+    this.torsoMesh.material = pilotSuitMat
+    this.torsoMesh.parent = this.pilotBodyPivot
+
+    // Seated Harness Pod
+    this.harnessMesh = MeshBuilder.CreateSphere('pilot-harness-pod', { diameter: 0.65, segments: 10 }, scene)
+    this.harnessMesh.scaling.set(0.88, 0.75, 1.15)
+    this.harnessMesh.position.set(0, 0.08, -0.06)
+    this.harnessMesh.rotation.x = 0.3
+    this.harnessMesh.material = pilotSuitMat
+    this.harnessMesh.parent = this.pilotBodyPivot
+
+    // Carabiners at hips
+    const leftCarabiner = MeshBuilder.CreateTorus('carabiner-l', { diameter: 0.11, thickness: 0.022, tessellation: 16 }, scene)
+    leftCarabiner.position.set(-0.26, 0.34, 0.06)
+    leftCarabiner.material = metalMat
+    leftCarabiner.parent = this.pilotBodyPivot
+
+    const rightCarabiner = MeshBuilder.CreateTorus('carabiner-r', { diameter: 0.11, thickness: 0.022, tessellation: 16 }, scene)
+    rightCarabiner.position.set(0.26, 0.34, 0.06)
+    rightCarabiner.material = metalMat
+    rightCarabiner.parent = this.pilotBodyPivot
+
+    // Arms & Hands (Mounted at shoulders, extending to risers at ear/shoulder level)
+    this.leftArmNode = new TransformNode('arm-root-l', scene)
+    this.leftArmNode.position.set(-0.32, 0.44, 0.04)
+    this.leftArmNode.parent = this.pilotBodyPivot
+
+    this.rightArmNode = new TransformNode('arm-root-r', scene)
+    this.rightArmNode.position.set(0.32, 0.44, 0.04)
+    this.rightArmNode.parent = this.pilotBodyPivot
+
+    const lUpperArm = MeshBuilder.CreateCylinder('upper-arm-l', { height: 0.32, diameter: 0.11 }, scene)
+    lUpperArm.position.set(-0.06, 0.04, 0.02)
+    lUpperArm.rotation.z = 0.4
+    lUpperArm.rotation.x = -0.3
+    lUpperArm.material = pilotSuitMat
+    lUpperArm.parent = this.leftArmNode
+
+    const rUpperArm = MeshBuilder.CreateCylinder('upper-arm-r', { height: 0.32, diameter: 0.11 }, scene)
+    rUpperArm.position.set(0.06, 0.04, 0.02)
+    rUpperArm.rotation.z = -0.4
+    rUpperArm.rotation.x = -0.3
+    rUpperArm.material = pilotSuitMat
+    rUpperArm.parent = this.rightArmNode
+
+    this.leftHandNode = new TransformNode('hand-node-l', scene)
+    this.leftHandNode.position.set(-0.14, 0.16, 0.05)
+    this.leftHandNode.parent = this.leftArmNode
+
+    this.rightHandNode = new TransformNode('hand-node-r', scene)
+    this.rightHandNode.position.set(0.14, 0.16, 0.05)
+    this.rightHandNode.parent = this.rightArmNode
+
+    const lGlove = MeshBuilder.CreateSphere('glove-l', { diameter: 0.11 }, scene)
+    lGlove.material = pilotSuitMat
+    lGlove.parent = this.leftHandNode
+
+    const rGlove = MeshBuilder.CreateSphere('glove-r', { diameter: 0.11 }, scene)
+    rGlove.material = pilotSuitMat
+    rGlove.parent = this.rightHandNode
+
+    // Articulated Legs & Boots (Prominent for Pilot FPV and Foot Drags!)
+    this.leftLegNode = new TransformNode('leg-root-l', scene)
+    this.leftLegNode.position.set(-0.14, 0.08, 0.10)
+    this.leftLegNode.parent = this.pilotBodyPivot
+
+    this.rightLegNode = new TransformNode('leg-root-r', scene)
+    this.rightLegNode.position.set(0.14, 0.08, 0.10)
+    this.rightLegNode.parent = this.pilotBodyPivot
+
+    // Thighs
+    const lThigh = MeshBuilder.CreateCylinder('thigh-l', { height: 0.48, diameter: 0.17, tessellation: 8 }, scene)
+    lThigh.position.set(0, -0.16, 0.20)
+    lThigh.rotation.x = -0.85 // Reclined forward
+    lThigh.material = pilotSuitMat
+    lThigh.parent = this.leftLegNode
+
+    const rThigh = MeshBuilder.CreateCylinder('thigh-r', { height: 0.48, diameter: 0.17, tessellation: 8 }, scene)
+    rThigh.position.set(0, -0.16, 0.20)
+    rThigh.rotation.x = -0.85
+    rThigh.material = pilotSuitMat
+    rThigh.parent = this.rightLegNode
+
+    // Knees & Shins
+    this.leftKneeNode = new TransformNode('knee-l', scene)
+    this.leftKneeNode.position.set(0, -0.32, 0.40)
+    this.leftKneeNode.parent = this.leftLegNode
+
+    this.rightKneeNode = new TransformNode('knee-r', scene)
+    this.rightKneeNode.position.set(0, -0.32, 0.40)
+    this.rightKneeNode.parent = this.rightLegNode
+
+    const lShin = MeshBuilder.CreateCylinder('shin-l', { height: 0.48, diameter: 0.15, tessellation: 8 }, scene)
+    lShin.position.set(0, -0.22, 0.12)
+    lShin.rotation.x = 0.42 // Legs extend naturally forward
+    lShin.material = pilotSuitMat
+    lShin.parent = this.leftKneeNode
+
+    const rShin = MeshBuilder.CreateCylinder('shin-r', { height: 0.48, diameter: 0.15, tessellation: 8 }, scene)
+    rShin.position.set(0, -0.22, 0.12)
+    rShin.rotation.x = 0.42
+    rShin.material = pilotSuitMat
+    rShin.parent = this.rightKneeNode
+
+    // Ankle Sport Socks (Visible in FPV foot skimming)
+    const lSock = MeshBuilder.CreateCylinder('sock-l', { height: 0.12, diameter: 0.165, tessellation: 8 }, scene)
+    lSock.position.set(0, -0.38, 0.12)
+    lSock.material = sockMat
+    lSock.parent = this.leftKneeNode
+
+    const rSock = MeshBuilder.CreateCylinder('sock-r', { height: 0.12, diameter: 0.165, tessellation: 8 }, scene)
+    rSock.position.set(0, -0.38, 0.12)
+    rSock.material = sockMat
+    rSock.parent = this.rightKneeNode
+
+    // Detailed Runner Shoes with Athletic Soles
+    const lBoot = MeshBuilder.CreateBox('boot-l', { width: 0.16, height: 0.14, depth: 0.36 }, scene)
+    lBoot.position.set(0, -0.46, 0.22)
+    lBoot.material = bootMat
+    lBoot.parent = this.leftKneeNode
+
+    const lSole = MeshBuilder.CreateBox('sole-l', { width: 0.17, height: 0.05, depth: 0.38 }, scene)
+    lSole.position.set(0, -0.53, 0.22)
+    lSole.material = soleMat
+    lSole.parent = this.leftKneeNode
+
+    const rBoot = MeshBuilder.CreateBox('boot-r', { width: 0.16, height: 0.14, depth: 0.36 }, scene)
+    rBoot.position.set(0, -0.46, 0.22)
+    rBoot.material = bootMat
+    rBoot.parent = this.rightKneeNode
+
+    const rSole = MeshBuilder.CreateBox('sole-r', { width: 0.17, height: 0.05, depth: 0.38 }, scene)
+    rSole.position.set(0, -0.53, 0.22)
+    rSole.material = soleMat
+    rSole.parent = this.rightKneeNode
+
+    // 4. Line Network
+    const linesData: Vector3[][] = []
+    const leftCarabinerPos = new Vector3(-0.26, -5.0, 0.06)
+    const rightCarabinerPos = new Vector3(0.26, -5.0, 0.06)
+
+    for (const pt of this.cellAttachmentPoints) {
+      const target = pt.x < 0 ? leftCarabinerPos : rightCarabinerPos
+      linesData.push([pt, target])
     }
-
-    // 4. Alloy Carabiners & Webbing Risers (Firmly attached to harness chest)
-    this.leftCarabiner = MeshBuilder.CreateTorus(
-      'carabiner-left',
-      { diameter: 0.11, thickness: 0.03, tessellation: 16 },
-      scene,
-    )
-    this.leftCarabiner.parent = this.pilotRoot
-    this.leftCarabiner.position.set(-0.24, 0.58, 0.16)
-    this.leftCarabiner.rotation.x = Math.PI / 6
-    this.leftCarabiner.material = metalMat
-
-    this.rightCarabiner = MeshBuilder.CreateTorus(
-      'carabiner-right',
-      { diameter: 0.11, thickness: 0.03, tessellation: 16 },
-      scene,
-    )
-    this.rightCarabiner.parent = this.pilotRoot
-    this.rightCarabiner.position.set(0.24, 0.58, 0.16)
-    this.rightCarabiner.rotation.x = Math.PI / 6
-    this.rightCarabiner.material = metalMat
-
-    // Main Riser Webbing Straps (Webbing tubes rising up ~0.47m from carabiners)
-    this.leftRiserStrap = MeshBuilder.CreateCylinder(
-      'riser-strap-left',
-      { height: 0.48, diameter: 0.038, tessellation: 6 },
-      scene,
-    )
-    this.leftRiserStrap.parent = this.pilotRoot
-    this.leftRiserStrap.position.set(-0.26, 0.81, 0.17)
-    this.leftRiserStrap.rotation.z = -0.08
-    this.leftRiserStrap.material = riserWebbingMat
-
-    this.rightRiserStrap = MeshBuilder.CreateCylinder(
-      'riser-strap-right',
-      { height: 0.48, diameter: 0.038, tessellation: 6 },
-      scene,
-    )
-    this.rightRiserStrap.parent = this.pilotRoot
-    this.rightRiserStrap.position.set(0.26, 0.81, 0.17)
-    this.rightRiserStrap.rotation.z = 0.08
-    this.rightRiserStrap.material = riserWebbingMat
-
-    // Brake Guide Pulley Rings (mounted on rear of risers)
-    this.leftPulleyRing = MeshBuilder.CreateTorus(
-      'pulley-left',
-      { diameter: 0.07, thickness: 0.018, tessellation: 12 },
-      scene,
-    )
-    this.leftPulleyRing.parent = this.pilotRoot
-    this.leftPulleyRing.position.set(-0.27, 0.88, 0.14)
-    this.leftPulleyRing.material = metalMat
-
-    this.rightPulleyRing = MeshBuilder.CreateTorus(
-      'pulley-right',
-      { diameter: 0.07, thickness: 0.018, tessellation: 12 },
-      scene,
-    )
-    this.rightPulleyRing.parent = this.pilotRoot
-    this.rightPulleyRing.position.set(0.27, 0.88, 0.14)
-    this.rightPulleyRing.material = metalMat
-
-    // 5. Articulated Pilot Arms (Decoupled from Torso - Fixed Shoulder Sockets)
-    this.leftArmMesh = MeshBuilder.CreateCylinder(
-      'left-upper-arm',
-      { height: 1.0, diameter: 0.13, tessellation: 8 },
-      scene,
-    )
-    this.leftArmMesh.parent = this.pilotRoot
-    this.leftArmMesh.material = pilotJacketMat
-
-    this.leftForearmMesh = MeshBuilder.CreateCylinder(
-      'left-forearm',
-      { height: 1.0, diameter: 0.11, tessellation: 8 },
-      scene,
-    )
-    this.leftForearmMesh.parent = this.pilotRoot
-    this.leftForearmMesh.material = pilotJacketMat
-
-    this.leftHandNode = new TransformNode('left-hand', scene)
-    this.leftHandNode.parent = this.pilotRoot
-    const leftHandGlove = MeshBuilder.CreateSphere(
-      'left-glove',
-      { diameter: 0.15, segments: 8 },
-      scene,
-    )
-    leftHandGlove.parent = this.leftHandNode
-    leftHandGlove.material = helmetMat
-
-    this.rightArmMesh = MeshBuilder.CreateCylinder(
-      'right-upper-arm',
-      { height: 1.0, diameter: 0.13, tessellation: 8 },
-      scene,
-    )
-    this.rightArmMesh.parent = this.pilotRoot
-    this.rightArmMesh.material = pilotJacketMat
-
-    this.rightForearmMesh = MeshBuilder.CreateCylinder(
-      'right-forearm',
-      { height: 1.0, diameter: 0.11, tessellation: 8 },
-      scene,
-    )
-    this.rightForearmMesh.parent = this.pilotRoot
-    this.rightForearmMesh.material = pilotJacketMat
-
-    this.rightHandNode = new TransformNode('right-hand', scene)
-    this.rightHandNode.parent = this.pilotRoot
-    const rightHandGlove = MeshBuilder.CreateSphere(
-      'right-glove',
-      { diameter: 0.15, segments: 8 },
-      scene,
-    )
-    rightHandGlove.parent = this.rightHandNode
-    rightHandGlove.material = helmetMat
-
-    // 6. Build Initial Dynamic Line Cascades (26 Suspension Lines + 10 Brake Cascade Lines)
-    const initialLines = this.buildLineCoordinates()
 
     this.suspensionLinesMesh = MeshBuilder.CreateLineSystem(
-      'suspension-lines',
-      {
-        lines: initialLines.suspension,
-        updatable: true,
-      },
+      'rig-suspension-lines',
+      { lines: linesData, updatable: true },
       scene,
     )
-    this.suspensionLinesMesh.color = new Color3(0.92, 0.95, 1.0) // Silver/white Dyneema lines
+    this.suspensionLinesMesh.color = new Color3(0.88, 0.92, 0.98)
+    this.suspensionLinesMesh.parent = this.canopyRoot
 
+    const brakeLinesData: Vector3[][] = [
+      [this.trailingEdgePoints[2], leftCarabinerPos],
+      [this.trailingEdgePoints[numCells - 2], rightCarabinerPos],
+    ]
     this.brakeLinesMesh = MeshBuilder.CreateLineSystem(
-      'brake-lines',
-      {
-        lines: initialLines.brake,
-        updatable: true,
-      },
+      'rig-brake-lines',
+      { lines: brakeLinesData, updatable: true },
       scene,
     )
-    this.brakeLinesMesh.color = new Color3(1.0, 0.45, 0.1) // Fluorescent orange acro brake line
+    this.brakeLinesMesh.color = new Color3(0.98, 0.42, 0.12)
+    this.brakeLinesMesh.parent = this.canopyRoot
   }
 
-  private alignLimb(mesh: Mesh, start: Vector3, end: Vector3, diameter: number) {
-    const diff = end.subtract(start)
-    const len = diff.length()
-    if (len < 0.001) return
-    mesh.position.copyFrom(start.add(diff.scale(0.5)))
-    mesh.scaling.set(diameter / 0.12, len, diameter / 0.12)
-    if (!mesh.rotationQuaternion) {
-      mesh.rotationQuaternion = new Quaternion()
-    }
-    const dir = diff.scale(1 / len)
-    Quaternion.FromUnitVectorsToRef(Vector3.Up(), dir, mesh.rotationQuaternion)
-  }
+  public update(sim: ParagliderSimulation, vantage: string = 'pilot-fpv'): void {
+    // In pilot FPV, disable head and torso to eliminate camera clipping while keeping legs, boots, arms, and harness visible
+    const isFpv = vantage === 'pilot-fpv'
+    this.helmetMesh.setEnabled(!isFpv)
+    this.visorMesh.setEnabled(!isFpv)
+    this.neckMesh.setEnabled(!isFpv)
+    this.torsoMesh.setEnabled(!isFpv)
 
-  private buildLineCoordinates(sim?: ParagliderSimulation): { suspension: Vector3[][]; brake: Vector3[][] } {
-    const canopyMatrix = this.canopyRoot.getWorldMatrix()
-    const pilotMatrix = this.pilotRoot.getWorldMatrix()
-
-    const isLeftSlack = sim ? (sim.isLinesSlack || sim.leftLineTensionNewtons < 25) : false
-    const isRightSlack = sim ? (sim.isLinesSlack || sim.rightLineTensionNewtons < 25) : false
-
-    // Key attachment points on the harness in world coordinates
-    const leftCarabinerWorld = Vector3.TransformCoordinates(
-      new Vector3(-0.24, 0.58, 0.16),
-      pilotMatrix,
-    )
-    const rightCarabinerWorld = Vector3.TransformCoordinates(
-      new Vector3(0.24, 0.58, 0.16),
-      pilotMatrix,
-    )
-    const leftRiserTopWorld = Vector3.TransformCoordinates(
-      new Vector3(-0.28, 1.05, 0.18),
-      pilotMatrix,
-    )
-    const rightRiserTopWorld = Vector3.TransformCoordinates(
-      new Vector3(0.28, 1.05, 0.18),
-      pilotMatrix,
-    )
-    const leftPulleyWorld = Vector3.TransformCoordinates(
-      new Vector3(-0.27, 0.88, 0.14),
-      pilotMatrix,
-    )
-    const rightPulleyWorld = Vector3.TransformCoordinates(
-      new Vector3(0.27, 0.88, 0.14),
-      pilotMatrix,
-    )
-
-    const leftHandWorld = this.leftHandNode.getAbsolutePosition()
-    const rightHandWorld = this.rightHandNode.getAbsolutePosition()
-
-    const suspension: Vector3[][] = []
-
-    // Helper to generate line with optional sag when slack
-    const makeLine = (pTop: Vector3, pBottom: Vector3, isSlack: boolean) => {
-      if (isSlack) {
-        const mid = Vector3.Lerp(pTop, pBottom, 0.5).add(new Vector3(0, -0.32, 0.08))
-        return [pTop, mid, pBottom]
-      }
-      return [pTop, pBottom]
-    }
-
-    // Riser webbing link from carabiners to line maillons
-    suspension.push([leftCarabinerWorld, leftRiserTopWorld])
-    suspension.push([rightCarabinerWorld, rightRiserTopWorld])
-
-    // A-lines (Leading edge front ribbon)
-    const leftAIndices = [2, 5, 8, 11]
-    for (const idx of leftAIndices) {
-      const pt = Vector3.TransformCoordinates(this.frontRibbonPath[idx], canopyMatrix)
-      suspension.push(makeLine(pt, leftRiserTopWorld, isLeftSlack))
-    }
-    const rightAIndices = [13, 16, 19, 22]
-    for (const idx of rightAIndices) {
-      const pt = Vector3.TransformCoordinates(this.frontRibbonPath[idx], canopyMatrix)
-      suspension.push(makeLine(pt, rightRiserTopWorld, isRightSlack))
-    }
-
-    // B-lines (Mid chord ribbon)
-    const leftBIndices = [2, 5, 8, 11]
-    for (const idx of leftBIndices) {
-      const pt = Vector3.TransformCoordinates(this.midRibbonPath[idx], canopyMatrix)
-      suspension.push(makeLine(pt, leftRiserTopWorld, isLeftSlack))
-    }
-    const rightBIndices = [13, 16, 19, 22]
-    for (const idx of rightBIndices) {
-      const pt = Vector3.TransformCoordinates(this.midRibbonPath[idx], canopyMatrix)
-      suspension.push(makeLine(pt, rightRiserTopWorld, isRightSlack))
-    }
-
-    // C-lines (Rear chord ribbon)
-    const leftCIndices = [3, 6, 9]
-    for (const idx of leftCIndices) {
-      const pt = Vector3.TransformCoordinates(this.backRibbonPath[idx], canopyMatrix)
-      suspension.push(makeLine(pt, leftRiserTopWorld, isLeftSlack))
-    }
-    const rightCIndices = [15, 18, 21]
-    for (const idx of rightCIndices) {
-      const pt = Vector3.TransformCoordinates(this.backRibbonPath[idx], canopyMatrix)
-      suspension.push(makeLine(pt, rightRiserTopWorld, isRightSlack))
-    }
-
-    // Stabilo lines (Wingtips)
-    suspension.push(
-      makeLine(
-        Vector3.TransformCoordinates(this.frontRibbonPath[0], canopyMatrix),
-        leftRiserTopWorld,
-        isLeftSlack,
-      ),
-    )
-    suspension.push(
-      makeLine(
-        Vector3.TransformCoordinates(this.frontRibbonPath[24], canopyMatrix),
-        rightRiserTopWorld,
-        isRightSlack,
-      ),
-    )
-
-    // Brake Cascades (Trailing Edge Fan -> Collector Knot -> Pulley Ring -> Pilot Hands)
-    const brake: Vector3[][] = []
-
-    // Left Brake Fan
-    const leftBrakeIndices = [1, 3, 5]
-    const leftBrakePts = leftBrakeIndices.map((idx) =>
-      Vector3.TransformCoordinates(this.backRibbonPath[idx], canopyMatrix),
-    )
-    const leftBrakeMid = leftBrakePts[1]
-    const leftCollectorWorld = Vector3.Lerp(leftPulleyWorld, leftBrakeMid, 0.42)
-
-    for (const pt of leftBrakePts) {
-      brake.push([pt, leftCollectorWorld])
-    }
-    brake.push([leftCollectorWorld, leftPulleyWorld])
-    brake.push([leftPulleyWorld, leftHandWorld])
-
-    // Right Brake Fan
-    const rightBrakeIndices = [19, 21, 23]
-    const rightBrakePts = rightBrakeIndices.map((idx) =>
-      Vector3.TransformCoordinates(this.backRibbonPath[idx], canopyMatrix),
-    )
-    const rightBrakeMid = rightBrakePts[1]
-    const rightCollectorWorld = Vector3.Lerp(rightPulleyWorld, rightBrakeMid, 0.42)
-
-    for (const pt of rightBrakePts) {
-      brake.push([pt, rightCollectorWorld])
-    }
-    brake.push([rightCollectorWorld, rightPulleyWorld])
-    brake.push([rightPulleyWorld, rightHandWorld])
-
-    return { suspension, brake }
-  }
-
-  public update(sim: ParagliderSimulation) {
-    // 1. Position and Orient Canopy
+    // 1. Position & Orientation
     this.canopyRoot.position.set(
       sim.canopy.position.x,
       sim.canopy.position.y,
       sim.canopy.position.z,
     )
+
     const yawRad = (sim.canopy.yawDeg * Math.PI) / 180
     const pitchRad = (sim.canopy.pitchDeg * Math.PI) / 180
     const rollRad = (sim.canopy.rollDeg * Math.PI) / 180
-    this.canopyRoot.rotation.set(pitchRad, yawRad, -rollRad)
 
-    // 2. Position and Orient Pilot (Rock-Solid Seated Posture in Harness)
+    this.canopyRoot.rotationQuaternion = Quaternion.RotationYawPitchRoll(
+      yawRad,
+      pitchRad,
+      -rollRad,
+    )
+
     this.pilotRoot.position.set(
       sim.pilot.position.x,
       sim.pilot.position.y,
       sim.pilot.position.z,
     )
-    const pilotRollRad = (sim.pilot.pendulumRollDeg * Math.PI) / 180
+
     const pilotPitchRad = (sim.pilot.pendulumPitchDeg * Math.PI) / 180
-
-    // Coupled harness posture: The harness hangs strictly along the suspension lines
-    // In flips and rolls, the pilot and wing rotate as a unified aero-mechanical unit!
-    const harnessPitch = -0.16 + pitchRad + pilotPitchRad
-    const harnessRoll = -rollRad - pilotRollRad
-    this.pilotRoot.rotation.set(harnessPitch, yawRad, harnessRoll)
-
-    // 3. Articulate Pilot Arms Driven by Left & Right Brakes (Fixed Torso Anchors)
-    const leftBrakeT = sim.controls.leftBrake
-    const rightBrakeT = sim.controls.rightBrake
-
-    // Fixed shoulder socket anchors on the torso (never moves when arms articulate!)
-    const leftShoulder = new Vector3(-0.24, 0.65, 0.08)
-    const rightShoulder = new Vector3(0.24, 0.65, 0.08)
-
-    // Dynamic hand & elbow positions in pilot local space
-    // Brake = 0: Hand reaches up to toggle near riser pulley (y = 0.86)
-    // Brake = 1: Hand pulls down to hip level (y = 0.22)
-    const leftHandPos = new Vector3(
-      -0.30 + leftBrakeT * 0.04,
-      0.86 - leftBrakeT * 0.64,
-      0.16 - leftBrakeT * 0.12,
-    )
-    const leftElbowPos = new Vector3(
-      -0.38 + leftBrakeT * 0.06,
-      0.54 - leftBrakeT * 0.14,
-      0.06 - leftBrakeT * 0.10,
+    const pilotRollRad = (sim.pilot.pendulumRollDeg * Math.PI) / 180
+    this.pilotRoot.rotationQuaternion = Quaternion.RotationYawPitchRoll(
+      yawRad,
+      pilotPitchRad,
+      -pilotRollRad,
     )
 
-    const rightHandPos = new Vector3(
-      0.30 - rightBrakeT * 0.04,
-      0.86 - rightBrakeT * 0.64,
-      0.16 - rightBrakeT * 0.12,
-    )
-    const rightElbowPos = new Vector3(
-      0.38 - rightBrakeT * 0.06,
-      0.54 - rightBrakeT * 0.14,
-      0.06 - rightBrakeT * 0.10,
-    )
+    // 180° Reverse Stance Harness Swivel
+    const reverseYawRad = (sim.pilot.reverseStanceYawDeg * Math.PI) / 180
+    this.pilotBodyPivot.rotation.y = reverseYawRad
 
-    // Position glove nodes
-    this.leftHandNode.position.copyFrom(leftHandPos)
-    this.rightHandNode.position.copyFrom(rightHandPos)
+    // 2. Dynamic Arm & Brake Handle Movement
+    const leftBrake = sim.controls.leftBrake
+    const rightBrake = sim.controls.rightBrake
 
-    // Align upper arms: shoulder to elbow
-    this.alignLimb(this.leftArmMesh, leftShoulder, leftElbowPos, 0.13)
-    this.alignLimb(this.rightArmMesh, rightShoulder, rightElbowPos, 0.13)
+    this.leftArmNode.rotation.x = -leftBrake * 0.95
+    this.rightArmNode.rotation.x = -rightBrake * 0.95
 
-    // Align forearms: elbow to hand
-    this.alignLimb(this.leftForearmMesh, leftElbowPos, leftHandPos, 0.11)
-    this.alignLimb(this.rightForearmMesh, rightElbowPos, rightHandPos, 0.11)
+    // 3. Dynamic Leg Articulation (Reacts to G-Force, Dive, and Foot Dragging)
+    const isDiving = sim.canopy.airspeedKmh > 80
+    const isSkimming = sim.isFootDragging
 
-    // 4. Dynamic Trailing Edge Flex, Horseshoe Stall, Asymmetric Collapse & Slack Frontal Tuck
-    const isStall = sim.isStalled
-    const isSlack = sim.isLinesSlack
-    const leftCollapse = sim.canopy.leftWingCollapse || 0
-    const rightCollapse = sim.canopy.rightWingCollapse || 0
+    let targetHipAngle = 0.0
+    let targetKneeAngle = 0.0
 
-    // Front edge: deflates and tucks if lines go slack, or if that wing half collapses
-    for (let i = 0; i < this.frontRibbonPath.length; i++) {
-      const origFront = this.originalFrontRibbonPath[i]
-      const t = i / (this.frontRibbonPath.length - 1)
-
-      let sideCollapse = 0
-      if (t < 0.48) {
-        sideCollapse = leftCollapse * Math.sin((t / 0.48) * Math.PI)
-      } else if (t > 0.52) {
-        sideCollapse = rightCollapse * Math.sin(((1 - t) / 0.48) * Math.PI)
-      }
-
-      if (isSlack) {
-        const tuck = Math.sin(t * Math.PI) * 0.7
-        this.frontRibbonPath[i].y = origFront.y - tuck - sideCollapse * 0.75
-        this.frontRibbonPath[i].z = origFront.z - tuck * 0.45 - sideCollapse * 0.45
-      } else {
-        this.frontRibbonPath[i].y = origFront.y - sideCollapse * 0.75
-        this.frontRibbonPath[i].z = origFront.z - sideCollapse * 0.45
-      }
+    if (isSkimming) {
+      targetHipAngle = 0.45 // Extend legs forward & down into sand
+      targetKneeAngle = -0.2
+    } else if (isDiving) {
+      targetHipAngle = -0.85 // Tucked back streamlined
+      targetKneeAngle = 0.95
     }
 
-    // Back edge: deflects with brakes, horseshoes in full stall, or crumples in asymmetric collapse
-    for (let i = 0; i < this.backRibbonPath.length; i++) {
-      const orig = this.originalBackRibbonPath[i]
-      const t = i / (this.backRibbonPath.length - 1) // 0 (left tip) to 1 (right tip)
+    this.leftLegNode.rotation.x += (targetHipAngle - this.leftLegNode.rotation.x) * 0.18
+    this.rightLegNode.rotation.x += (targetHipAngle - this.rightLegNode.rotation.x) * 0.18
+    this.leftKneeNode.rotation.x += (targetKneeAngle - this.leftKneeNode.rotation.x) * 0.18
+    this.rightKneeNode.rotation.x += (targetKneeAngle - this.rightKneeNode.rotation.x) * 0.18
 
-      let brakeFlex = 0
-      if (t < 0.5) {
-        const leftInfluence = Math.pow((0.5 - t) * 2, 1.4)
-        brakeFlex = sim.canopy.leftTrailingEdgeFlex * leftInfluence * 0.55
-      } else {
-        const rightInfluence = Math.pow((t - 0.5) * 2, 1.4)
-        brakeFlex = sim.canopy.rightTrailingEdgeFlex * rightInfluence * 0.55
-      }
+    // 4. Update Dynamic Suspension Lines
+    const pilotLocalPos = this.canopyRoot
+      .getWorldMatrix()
+      .clone()
+      .invert()
+    const leftCarabinerWorld = this.leftArmNode.getAbsolutePosition()
+    const rightCarabinerWorld = this.rightArmNode.getAbsolutePosition()
 
-      let asymTuck = 0
-      if (t < 0.48) {
-        asymTuck = leftCollapse * Math.sin((t / 0.48) * Math.PI) * 1.35
-      } else if (t > 0.52) {
-        asymTuck = rightCollapse * Math.sin(((1 - t) / 0.48) * Math.PI) * 1.35
-      }
+    const leftCarabinerLocal = Vector3.TransformCoordinates(leftCarabinerWorld, pilotLocalPos)
+    const rightCarabinerLocal = Vector3.TransformCoordinates(rightCarabinerWorld, pilotLocalPos)
 
-      if (isStall) {
-        const horseshoe = Math.sin(t * Math.PI) * 0.95
-        this.backRibbonPath[i].y = orig.y - 0.85 - horseshoe
-        this.backRibbonPath[i].z = orig.z + 0.9 + horseshoe * 0.6
-      } else {
-        this.backRibbonPath[i].y = orig.y - brakeFlex - asymTuck
-        this.backRibbonPath[i].z = orig.z + brakeFlex * 0.25 + asymTuck * 0.65
-      }
+    const updatedLines: Vector3[][] = []
+    for (const pt of this.cellAttachmentPoints) {
+      const target = pt.x < 0 ? leftCarabinerLocal : rightCarabinerLocal
+      updatedLines.push([pt, target])
     }
 
-    // Update Ribbon Geometry
-    MeshBuilder.CreateRibbon(
-      'canopy-ribbon',
-      {
-        pathArray: [this.frontRibbonPath, this.midRibbonPath, this.backRibbonPath],
-        instance: this.canopyMesh,
-      },
+    MeshBuilder.CreateLineSystem(
+      'rig-suspension-lines',
+      { lines: updatedLines, instance: this.suspensionLinesMesh },
       this.scene,
     )
 
-    // 5. Update Dynamic 36-Line Cascades (Anchored to Carabiners and Hands with Slack Sag)
-    const lineCoords = this.buildLineCoordinates(sim)
+    const leftHandWorld = this.leftHandNode.getAbsolutePosition()
+    const rightHandWorld = this.rightHandNode.getAbsolutePosition()
+    const leftHandLocal = Vector3.TransformCoordinates(leftHandWorld, pilotLocalPos)
+    const rightHandLocal = Vector3.TransformCoordinates(rightHandWorld, pilotLocalPos)
 
+    const numCells = 32
+    const updatedBrakes: Vector3[][] = [
+      [this.trailingEdgePoints[2], leftHandLocal],
+      [this.trailingEdgePoints[numCells - 2], rightHandLocal],
+    ]
     MeshBuilder.CreateLineSystem(
-      'suspension-lines',
-      {
-        lines: lineCoords.suspension,
-        instance: this.suspensionLinesMesh,
-      },
-      this.scene,
-    )
-
-    MeshBuilder.CreateLineSystem(
-      'brake-lines',
-      {
-        lines: lineCoords.brake,
-        instance: this.brakeLinesMesh,
-      },
+      'rig-brake-lines',
+      { lines: updatedBrakes, instance: this.brakeLinesMesh },
       this.scene,
     )
   }

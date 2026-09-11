@@ -29,11 +29,13 @@ export class ParagliderSimulation {
   public slackTimer: number = 0
   public stallTime: number = 0
   public surgeTimer: number = 0
+  public groundClearanceMeters: number = 100
+  public isFootDragging: boolean = false
   private wing: WingGeometry
 
   constructor(
-    initialAltitude: number = 2050, // Launch high up on Whistler Peak
-    initialHeadingDeg: number = 5, // Facing straight down the valley toward village
+    initialAltitude: number = 2050, // Launch high up on alpine peak
+    initialHeadingDeg: number = 5, // Facing down toward the valley and coastal dunes
   ) {
     this.wing = { ...STANDARD_WING }
 
@@ -44,15 +46,15 @@ export class ParagliderSimulation {
       position: { x: 0, y: initialAltitude, z: 0 },
       velocity: {
         x: Math.sin(headingRad) * trimSpeedMps,
-        y: -1.5, // acro trim sink rate ~1.5 m/s
+        y: -2.2, // speedwing trim sink ~2.2 m/s
         z: Math.cos(headingRad) * trimSpeedMps,
       },
       quaternion: { x: 0, y: 0, z: 0, w: 1 },
       rollDeg: 0,
-      pitchDeg: -4, // slight nose-down trim pitch
+      pitchDeg: 4.5, // slight nose-down trim dive
       yawDeg: initialHeadingDeg,
       airspeedKmh: this.wing.trimSpeedKmh,
-      verticalSpeedMps: -1.5,
+      verticalSpeedMps: -2.2,
       angleOfAttackDeg: 7.5,
       leftTrailingEdgeFlex: 0,
       rightTrailingEdgeFlex: 0,
@@ -64,13 +66,19 @@ export class ParagliderSimulation {
 
     this.pilot = {
       position: { x: 0, y: initialAltitude - this.wing.tetherLengthMeters, z: 0 },
-      velocity: { ...this.canopy.velocity },
+      velocity: {
+        x: Math.sin(headingRad) * trimSpeedMps,
+        y: -2.2,
+        z: Math.cos(headingRad) * trimSpeedMps,
+      },
       pendulumRollDeg: 0,
       pendulumPitchDeg: 0,
       angularVelocityRoll: 0,
       angularVelocityPitch: 0,
       gForce: 1.0,
       harnessWeightShift: 0,
+      reverseStanceYawDeg: 0,
+      isFootDragging: false,
     }
 
     this.controls = {
@@ -80,24 +88,25 @@ export class ParagliderSimulation {
       rightBrakeRate: 0,
       weightShift: 0,
       speedBar: 0,
+      reverseStance: false,
     }
 
     this.atmosphere = {
-      windVector: { x: -2.0, y: 0, z: 3.5 },
-      windSpeedKmh: 14.0,
-      windHeadingDeg: 300,
-      turbulence: 0.15,
+      windVector: { x: 0, y: 0, z: 0 },
+      windSpeedKmh: 12,
+      windHeadingDeg: 190, // gentle sea/valley breeze
+      turbulence: 0.05,
       thermalUpdraftMps: 0,
       ridgeLiftMps: 0,
     }
 
     this.telemetry = {
       altitudeMeters: initialAltitude,
-      terrainHeightMeters: 0,
-      groundClearanceMeters: initialAltitude,
+      terrainHeightMeters: 650,
+      groundClearanceMeters: initialAltitude - 650,
       airspeedKmh: this.wing.trimSpeedKmh,
       groundSpeedKmh: this.wing.trimSpeedKmh,
-      verticalSpeedMps: -1.5,
+      verticalSpeedMps: -2.2,
       glideRatio: this.wing.glideRatio,
       gForce: 1.0,
       distanceMeters: 0,
@@ -111,415 +120,362 @@ export class ParagliderSimulation {
       asymmetricStallSide: 'none',
       isNegativeSpin: false,
       tumbleStreak: 0,
+      isReverseStance: false,
     }
   }
 
-  public step(dt: number, sampleTerrainHeight: (x: number, z: number) => number) {
-    const clampedDt = clamp(dt, 0.001, 0.05) // prevent physics explosions on frame spikes
-    const totalMass = this.wing.massKg + this.wing.pilotMassKg
-    const g = 9.81
-
-    // 1. Current airspeed relative to wind
-    const relVx = this.canopy.velocity.x - this.atmosphere.windVector.x
-    const relVy = this.canopy.velocity.y - this.atmosphere.windVector.y
-    const relVz = this.canopy.velocity.z - this.atmosphere.windVector.z
-    const airspeedMps = Math.sqrt(relVx * relVx + relVy * relVy + relVz * relVz)
-    this.canopy.airspeedKmh = airspeedMps * 3.6
-
-    // 2. Flight path and Angle of Attack
-    const horizSpeed = Math.sqrt(relVx * relVx + relVz * relVz)
-    const flightPathAngleDeg = (Math.atan2(relVy, Math.max(0.1, horizSpeed)) * 180) / Math.PI
-    this.canopy.angleOfAttackDeg = this.canopy.pitchDeg - flightPathAngleDeg
-
-    // 3. Compute aerodynamic forces on canopy
-    const aero = computeAeroForces(
-      this.canopy.airspeedKmh,
-      this.canopy.angleOfAttackDeg,
-      this.controls,
-      this.wing,
-    )
-
-    // Visual trailing edge deformation follows brake position with slight spring lag
-    this.canopy.leftTrailingEdgeFlex +=
-      (this.controls.leftBrake - this.canopy.leftTrailingEdgeFlex) * 18 * clampedDt
-    this.canopy.rightTrailingEdgeFlex +=
-      (this.controls.rightBrake - this.canopy.rightTrailingEdgeFlex) * 18 * clampedDt
-
-    this.isStalled = aero.isFullStall
-    this.isSpinning = aero.isSpinning
-    this.asymmetricStallSide = aero.asymmetricStallSide
-    this.leftWingCollapse = aero.leftCollapse
-    this.rightWingCollapse = aero.rightCollapse
-    this.canopy.leftWingCollapse = aero.leftCollapse
-    this.canopy.rightWingCollapse = aero.rightCollapse
-    this.canopy.asymmetricStallSide = aero.asymmetricStallSide
-    this.canopy.isNegativeSpin = aero.isSpinning
-
-    const nowStalled = this.isStalled || this.asymmetricStallSide !== 'none'
-    if (nowStalled) {
-      this.stallTime += clampedDt
-    } else {
-      if (this.stallTime > 0.25) {
-        // Just released brakes from stall: Arm forward surge dive!
-        this.surgeTimer = 1.3
-      }
-      this.stallTime = 0
-      if (this.surgeTimer > 0) {
-        this.surgeTimer -= clampedDt
-      }
-    }
-
-    // 4. Two-Body Pendulum Coupling & Cable Tension (T)
-    const pilotTether = this.wing.tetherLengthMeters
-    const pilotPitchRad = (this.pilot.pendulumPitchDeg * Math.PI) / 180
-    const omegaPitch = (this.pilot.angularVelocityPitch * Math.PI) / 180 // rad/s
-
-    // Cable Tension: Centrifugal + Normal Gravity + Aero Lift
-    const aCentrifugal = pilotTether * (omegaPitch * omegaPitch)
-    const aGravityRadial = g * Math.cos(pilotPitchRad)
-    const aAeroLift = ((aero.liftNewtons + aero.flareLift) / totalMass) * Math.max(0, Math.cos(pilotPitchRad))
-
-    const aTensionTotal = aCentrifugal + aGravityRadial + aAeroLift
-    this.lineTensionNewtons = Math.max(0, this.wing.pilotMassKg * aTensionTotal)
-
-    // Slack Line Threshold: Lines go slack if tension falls below ~35N or in full stall
-    if (aTensionTotal < 0.25 || this.lineTensionNewtons < 35 || this.isStalled) {
-      this.isLinesSlack = true
-      this.slackTimer += clampedDt
-      this.tumbleStreak = 0
-    } else {
-      this.isLinesSlack = false
-      this.slackTimer = Math.max(0, this.slackTimer - clampedDt * 2.5)
-    }
-
-    // Differential line tension per side (Asymmetric stall slacks inside lines!)
-    if (this.isLinesSlack || this.isStalled) {
-      this.leftLineTensionNewtons = 0
-      this.rightLineTensionNewtons = 0
-    } else if (this.asymmetricStallSide === 'left') {
-      this.leftLineTensionNewtons = 0 // Left lines go completely slack!
-      this.rightLineTensionNewtons = Math.max(25, this.lineTensionNewtons * 0.85)
-    } else if (this.asymmetricStallSide === 'right') {
-      this.rightLineTensionNewtons = 0 // Right lines go completely slack!
-      this.leftLineTensionNewtons = Math.max(25, this.lineTensionNewtons * 0.85)
-    } else {
-      const wsBias =
-        this.controls.weightShift * 0.16 +
-        (this.controls.rightBrake - this.controls.leftBrake) * 0.12
-      this.leftLineTensionNewtons = this.lineTensionNewtons * clamp(0.5 - wsBias, 0.2, 0.8)
-      this.rightLineTensionNewtons = this.lineTensionNewtons * clamp(0.5 + wsBias, 0.2, 0.8)
-    }
-
-    // 5. ROLL DYNAMICS: "THE WING LEADS, THE BODY FOLLOWS"
-    // The canopy is the aerodynamic lifting surface.
-    // Differential brake creates yaw and dihedral bank into the turn.
-    let targetCanopyRollDeg = 0
-    if (this.asymmetricStallSide === 'left') {
-      targetCanopyRollDeg = -38.0
-    } else if (this.asymmetricStallSide === 'right') {
-      targetCanopyRollDeg = 38.0
-    } else {
-      // Coordinated carving bank: driven by aerodynamic roll & yaw moments
-      const aeroBankTarget = (aero.rollTorque / 18.0) + (aero.yawTorque / 85.0)
-      targetCanopyRollDeg = clamp(aeroBankTarget, -60.0, 60.0)
-    }
-
-    // Aerodynamic roll response of the canopy
-    const canopyRollRate =
-      (targetCanopyRollDeg - this.canopy.rollDeg) * (this.isSpinning ? 10.0 : 7.2)
-    this.canopy.rollDeg += canopyRollRate * clampedDt
-    this.canopy.rollDeg = clamp(this.canopy.rollDeg, -62.0, 62.0)
-
-    // The pilot is rigidly suspended by the cross-span line triangulation!
-    // The pilot banks locked with the canopy, with subtle hip weight-shift (+/- 5.5 deg):
-    this.pilot.pendulumRollDeg = this.controls.weightShift * 5.5
-    this.pilot.angularVelocityRoll = canopyRollRate
-
-    // 6. True Pendulum Pitch Dynamics (Heavy 88kg Pilot Plumb Bob, No Inversions)
-    const symmetricPitchPump = Math.min(this.controls.leftBrake, this.controls.rightBrake)
-    const speedBarInput = this.controls.speedBar
-
-    // Gravity restoring acceleration: pulls 88kg pilot straight down beneath carabiners
-    const gravityRestoring = -Math.sin(pilotPitchRad) * (g / pilotTether) * 1.8
-
-    // Inertial response from canopy acceleration / deceleration
-    // Flare/brakes: canopy decelerates -> pilot pendulum swings forward (+pitch)
-    // Speed bar/dive: canopy accelerates -> pilot lags slightly behind (-pitch)
-    const brakeSurgeSwing = symmetricPitchPump * 14.0
-    const speedBarLagSwing = -speedBarInput * 6.0
-    const targetPendulumDeg = brakeSurgeSwing + speedBarLagSwing
-
-    // Heavy damping: Line tension and pilot body drag damp out pendulum oscillations quickly
-    const damping = -this.pilot.angularVelocityPitch * 3.4
-    const pitchSpring = (targetPendulumDeg - this.pilot.pendulumPitchDeg) * 8.5
-
-    const pitchAlpha = gravityRestoring + pitchSpring + damping
-    this.pilot.angularVelocityPitch += pitchAlpha * clampedDt
-    this.pilot.pendulumPitchDeg += this.pilot.angularVelocityPitch * clampedDt
-
-    // Hard physical constraint: A human seated in a paraglider harness CANNOT invert
-    // Pendulum pitch is strictly bounded to realistic operational envelope [-16°, +18°]
-    this.pilot.pendulumPitchDeg = clamp(this.pilot.pendulumPitchDeg, -16.0, 18.0)
-
-    // 7. Turn Rate & Yaw Integration (Negative Spin on Asymmetric Stall)
-    let turnRateDegPerSec = 0
-    if (this.asymmetricStallSide === 'left') {
-      // Violent negative flat spin to the left (stalled side)
-      turnRateDegPerSec = -260.0
-    } else if (this.asymmetricStallSide === 'right') {
-      // Violent negative flat spin to the right (stalled side)
-      turnRateDegPerSec = 260.0
-    } else {
-      // Coordinated turn kinematics: g * tan(roll) / V + differential drag yaw
-      const rollRad = (this.canopy.rollDeg * Math.PI) / 180
-      turnRateDegPerSec =
-        ((g * Math.tan(clamp(rollRad, -1.35, 1.35))) / Math.max(2.5, airspeedMps)) * 57.2958 +
-        (aero.yawTorque / (totalMass * 1.25))
-    }
-
-    this.canopy.yawDeg = (this.canopy.yawDeg + turnRateDegPerSec * clampedDt + 360) % 360
-    const currentYawRad = (this.canopy.yawDeg * Math.PI) / 180
-
-    // 8. Canopy Pitch Angle
-    // In Babylon coordinate frame (+Z forward, +Y up, +X right):
-    // Positive pitch around X rotates +Z downward (dive towards terrain)
-    // Negative pitch around X rotates +Z upward (flare / stall back)
-    let targetPitchDeg = 5.5 // Trim dive angle (glide ratio ~5.4:1)
-    if (this.isStalled) {
-      targetPitchDeg = -28.0 // Wing pitches back behind pilot in stall
-    } else if (this.isLinesSlack) {
-      targetPitchDeg = 24.0 // Canopy tucks forward and down in slack
-    } else if (this.surgeTimer > 0) {
-      targetPitchDeg = 34.0 // Forward surge dive
-    } else {
-      const trimAoAPitch = 5.5 - symmetricPitchPump * 7.5 + this.controls.speedBar * 4.5
-      targetPitchDeg = this.pilot.pendulumPitchDeg + trimAoAPitch
-    }
-    this.canopy.pitchDeg += (targetPitchDeg - this.canopy.pitchDeg) * 16.0 * clampedDt
-
-    // 9. Accelerations & Velocity Integration (First Principles 2-Body Dynamics)
-    const fwdX = Math.sin(currentYawRad)
-    const fwdZ = Math.cos(currentYawRad)
-    const rollRad = (this.canopy.rollDeg * Math.PI) / 180
-
-    // G-Force
-    const bankG = 1 / Math.max(0.2, Math.cos(rollRad))
-    let verticalAccelG = (aero.liftNewtons / (totalMass * g)) * Math.cos(rollRad)
-    if (this.isStalled || this.isLinesSlack || this.isSpinning) {
-      verticalAccelG = 0.3 // low G in stall / flat spin
-    }
-    this.pilot.gForce = clamp(
-      bankG * 0.45 + verticalAccelG * 0.45 + (aCentrifugal / g) * 0.3,
-      0.1,
-      5.5,
-    )
-
-    // Updrafts
-    const totalUpdraft =
-      this.isStalled || this.isSpinning || this.isLinesSlack
-        ? 0
-        : (this.atmosphere.thermalUpdraftMps + this.atmosphere.ridgeLiftMps) * 0.3
-
-    // Current horizontal airspeed
-    const currentHorizSpeed = Math.sqrt(
-      this.canopy.velocity.x * this.canopy.velocity.x +
-        this.canopy.velocity.z * this.canopy.velocity.z,
-    )
-
-    // Realistic speedwing polar sink rate target (descending with mountain slope):
-    const baseGlideRatio = this.wing.glideRatio // 5.4:1
-    const speedBarDegrade = this.controls.speedBar * 1.1 // steeper dive on speed bar
-    const flareCushion = symmetricPitchPump > 0.35 ? (symmetricPitchPump - 0.35) * 2.4 : 0
-    const bankDegrade = (1 - Math.cos(rollRad)) * 2.8 // banked carving turns lose altitude faster
-
-    let targetGlideRatio = Math.max(1.8, baseGlideRatio - speedBarDegrade - bankDegrade + flareCushion)
-    if (this.isStalled) {
-      targetGlideRatio = 0.5 // 88% lift drop -> freefall plummet
-    } else if (this.asymmetricStallSide !== 'none') {
-      targetGlideRatio = 0.9 // 70% lift drop -> spinning plummet
-    }
-
-    const equilibriumSinkMps = -Math.max(1.5, currentHorizSpeed) / targetGlideRatio
-    const sinkDiff = equilibriumSinkMps - this.canopy.velocity.y
-    const netAy = sinkDiff * 3.8 + totalUpdraft
-    this.canopy.velocity.y += netAy * clampedDt
-    this.canopy.velocity.y = clamp(this.canopy.velocity.y, -32.0, 16.0)
-
-    // Equilibrium target horizontal speed
-    const baseTrimMps = this.wing.trimSpeedKmh / 3.6 // 16.1 m/s (58.0 km/h)
-    const speedBarBoost = this.controls.speedBar * 7.5 // up to 23.6 m/s (85 km/h)
-    const brakeDecel = symmetricPitchPump * 7.2
-    let targetEquilibriumSpeed = baseTrimMps + speedBarBoost - brakeDecel
-    if (this.isStalled) {
-      targetEquilibriumSpeed = 1.2
-    } else if (this.asymmetricStallSide !== 'none') {
-      targetEquilibriumSpeed = 3.5 // pivoting in place in negative flat spin
-    }
-    targetEquilibriumSpeed = Math.max(0.8, targetEquilibriumSpeed)
-
-    // Forward drive from gravity dive
-    const totalSpeed = Math.max(1.0, Math.sqrt(
-      this.canopy.velocity.x * this.canopy.velocity.x +
-      this.canopy.velocity.y * this.canopy.velocity.y +
-      this.canopy.velocity.z * this.canopy.velocity.z
-    ))
-    const diveSin = Math.max(0, Math.min(1, -this.canopy.velocity.y / totalSpeed))
-    const diveGravityAccel = this.isStalled || this.isSpinning ? 0 : g * diveSin * 1.65
-
-    const speedDiff = targetEquilibriumSpeed - currentHorizSpeed
-    const trimThrust = this.isStalled || this.isSpinning ? -12.0 : speedDiff * 2.5
-    const netForwardAccel = trimThrust + diveGravityAccel
-
-    this.canopy.velocity.x += (fwdX * netForwardAccel) * clampedDt
-    this.canopy.velocity.z += (fwdZ * netForwardAccel) * clampedDt
-
-    const minHorizMps = this.isStalled || this.isSpinning ? 0.3 : (this.wing.minSpeedKmh / 3.6) * 0.65
-    const maxHorizMps = (this.wing.maxSpeedKmh / 3.6) + 4.0
-    const clampedHoriz = clamp(currentHorizSpeed, minHorizMps, maxHorizMps)
-    if (currentHorizSpeed > 0.01) {
-      const scale = clampedHoriz / currentHorizSpeed
-      this.canopy.velocity.x *= scale
-      this.canopy.velocity.z *= scale
-    }
-
-    // Update positions
-    this.canopy.position.x += this.canopy.velocity.x * clampedDt
-    this.canopy.position.y += this.canopy.velocity.y * clampedDt
-    this.canopy.position.z += this.canopy.velocity.z * clampedDt
-
-    // 3D Rigid Truss Line Kinematics:
-    // The suspension lines form a rigid cross-span triangle (9.8m span down to 0.44m carabiners).
-    // The pilot hangs in the canopy's local reference frame, transformed to world space via the canopy orientation:
-    const currentTether = pilotTether * (this.isLinesSlack ? Math.max(0.65, 1.0 - this.slackTimer * 0.45) : 1.0)
-    const canopyPitchRad = (this.canopy.pitchDeg * Math.PI) / 180
-    const canopyRollRad = (this.canopy.rollDeg * Math.PI) / 180
-    const pilotRelPitchRad = (this.pilot.pendulumPitchDeg * Math.PI) / 180
-    const weightShiftOffset = this.controls.weightShift * 0.16 // +/- 16cm hip weight-shift
-
-    // Local pilot position in canopy reference frame:
-    // lx: lateral weight shift (+Right, -Left)
-    // ly: tether distance downward along line axis
-    // lz: longitudinal pendulum swing (+Forward, -Aft)
-    const lx = weightShiftOffset
-    const ly = -currentTether * Math.cos(pilotRelPitchRad)
-    const lz = currentTether * Math.sin(pilotRelPitchRad)
-
-    // Euler YXZ rotation matching Babylon.js (yaw, pitch, -roll):
-    const cYaw = Math.cos(currentYawRad)
-    const sYaw = Math.sin(currentYawRad)
-    const cPitch = Math.cos(canopyPitchRad)
-    const sPitch = Math.sin(canopyPitchRad)
-    const cRoll = Math.cos(-canopyRollRad)
-    const sRoll = Math.sin(-canopyRollRad)
-
-    // 1. Roll around Z (-canopyRollRad):
-    const x1 = lx * cRoll - ly * sRoll
-    const y1 = lx * sRoll + ly * cRoll
-    const z1 = lz
-
-    // 2. Pitch around X (canopyPitchRad):
-    const x2 = x1
-    const y2 = y1 * cPitch - z1 * sPitch
-    const z2 = y1 * sPitch + z1 * cPitch
-
-    // 3. Yaw around Y (currentYawRad):
-    const wx = x2 * cYaw + z2 * sYaw
-    const wy = y2
-    const wz = -x2 * sYaw + z2 * cYaw
-
-    this.pilot.position.x = this.canopy.position.x + wx
-    this.pilot.position.y = this.canopy.position.y + wy
-    this.pilot.position.z = this.canopy.position.z + wz
-
-    // Terrain sampling & Ground Clearance
-    const terrainHeight = sampleTerrainHeight(this.pilot.position.x, this.pilot.position.z)
-    const clearance = this.pilot.position.y - terrainHeight
-
-    // Telemetry updates
-    this.telemetry.altitudeMeters = this.pilot.position.y
-    this.telemetry.terrainHeightMeters = terrainHeight
-    this.telemetry.groundClearanceMeters = Math.max(0, clearance)
-    this.telemetry.airspeedKmh = this.canopy.airspeedKmh
-    this.telemetry.groundSpeedKmh =
-      Math.sqrt(
-        this.canopy.velocity.x * this.canopy.velocity.x +
-          this.canopy.velocity.z * this.canopy.velocity.z,
-      ) * 3.6
-    this.telemetry.verticalSpeedMps = this.canopy.velocity.y
-    this.telemetry.glideRatio =
-      this.canopy.velocity.y < -0.05
-        ? this.telemetry.groundSpeedKmh / 3.6 / -this.canopy.velocity.y
-        : 0
-    this.telemetry.gForce = this.pilot.gForce
-    this.telemetry.flightDurationSeconds += clampedDt
-    this.telemetry.distanceMeters +=
-      Math.sqrt(
-        this.canopy.velocity.x * this.canopy.velocity.x +
-          this.canopy.velocity.z * this.canopy.velocity.z,
-      ) * clampedDt
-    this.telemetry.lineTensionNewtons = Math.round(this.lineTensionNewtons)
-    this.telemetry.leftLineTensionNewtons = Math.round(this.leftLineTensionNewtons)
-    this.telemetry.rightLineTensionNewtons = Math.round(this.rightLineTensionNewtons)
-    this.telemetry.isLinesSlack = this.isLinesSlack
-    this.telemetry.asymmetricStallSide = this.asymmetricStallSide
-    this.telemetry.isNegativeSpin = this.isSpinning
-    this.telemetry.tumbleStreak = this.tumbleStreak
-
-    // Crash detection upon hitting terrain
-    if (clearance <= 0.9) {
-      if (this.canopy.velocity.y < -3.6 || this.isStalled || Math.abs(this.canopy.rollDeg) > 65) {
-        this.isCrashed = true
-      }
-    }
-  }
-
-  public reset(initialAltitude: number = 2050, initialHeadingDeg: number = 5) {
-    this.isCrashed = false
-    this.isStalled = false
-    this.isSpinning = false
-    this.asymmetricStallSide = 'none'
-    this.leftWingCollapse = 0
-    this.rightWingCollapse = 0
-    this.leftLineTensionNewtons = 430
-    this.rightLineTensionNewtons = 430
-    this.isLinesSlack = false
-    this.lineTensionNewtons = 860
-    this.tumbleStreak = 0
-    this.cumulativePitchDeg = 0
-    this.lastTumblePitchDeg = 0
-    this.slackTimer = 0
-    this.stallTime = 0
-    this.surgeTimer = 0
-
+  public reset(
+    initialAltitude: number = 2050,
+    initialHeadingDeg: number = 5,
+    startPos?: { x: number; y: number; z: number },
+  ): void {
     const headingRad = (initialHeadingDeg * Math.PI) / 180
     const trimSpeedMps = this.wing.trimSpeedKmh / 3.6
+    const spawn = startPos ?? { x: 0, y: initialAltitude, z: 0 }
 
-    this.canopy.position = { x: 0, y: initialAltitude, z: 0 }
+    this.canopy.position = { ...spawn }
     this.canopy.velocity = {
       x: Math.sin(headingRad) * trimSpeedMps,
-      y: -1.5,
+      y: -2.2,
       z: Math.cos(headingRad) * trimSpeedMps,
     }
     this.canopy.rollDeg = 0
-    this.canopy.pitchDeg = -4
+    this.canopy.pitchDeg = 4.5
     this.canopy.yawDeg = initialHeadingDeg
-    this.canopy.leftTrailingEdgeFlex = 0
-    this.canopy.rightTrailingEdgeFlex = 0
-    this.canopy.leftWingCollapse = 0
-    this.canopy.rightWingCollapse = 0
+    this.canopy.airspeedKmh = this.wing.trimSpeedKmh
+    this.canopy.verticalSpeedMps = -2.2
     this.canopy.asymmetricStallSide = 'none'
     this.canopy.isNegativeSpin = false
+    this.canopy.leftWingCollapse = 0
+    this.canopy.rightWingCollapse = 0
 
-    this.pilot.position = { x: 0, y: initialAltitude - this.wing.tetherLengthMeters, z: 0 }
+    this.pilot.position = {
+      x: spawn.x,
+      y: spawn.y - this.wing.tetherLengthMeters,
+      z: spawn.z,
+    }
     this.pilot.velocity = { ...this.canopy.velocity }
     this.pilot.pendulumRollDeg = 0
     this.pilot.pendulumPitchDeg = 0
     this.pilot.angularVelocityRoll = 0
     this.pilot.angularVelocityPitch = 0
     this.pilot.gForce = 1.0
+    this.pilot.reverseStanceYawDeg = 0
+    this.pilot.isFootDragging = false
 
-    this.controls.leftBrake = 0
-    this.controls.rightBrake = 0
-    this.controls.weightShift = 0
+    this.isCrashed = false
+    this.isStalled = false
+    this.isSpinning = false
+    this.asymmetricStallSide = 'none'
+    this.isLinesSlack = false
+    this.tumbleStreak = 0
+    this.cumulativePitchDeg = 0
+    this.lastTumblePitchDeg = 0
+
+    this.telemetry.altitudeMeters = spawn.y
+    this.telemetry.score = 0
+    this.telemetry.ringsCollected = 0
+    this.telemetry.tumbleStreak = 0
+    this.telemetry.flightDurationSeconds = 0
+  }
+
+  public step(dt: number, sampleTerrainHeight: (x: number, z: number) => number): void {
+    const terrainH = sampleTerrainHeight(this.pilot.position.x, this.pilot.position.z)
+    this.update(dt, terrainH)
+  }
+
+  public update(dt: number, terrainHeightMeters: number = 0): void {
+    if (this.isCrashed) return
+    const clampedDt = Math.min(dt, 0.05)
+    this.telemetry.flightDurationSeconds += clampedDt
+
+    const totalMass = this.wing.massKg + this.wing.pilotMassKg // 96.5 kg
+    const pilotMass = this.wing.pilotMassKg // 88.0 kg
+    const tetherR = this.wing.tetherLengthMeters // 5.3 m
+    const g = 9.80665
+
+    // Terrain clearance
+    this.groundClearanceMeters = Math.max(0, this.pilot.position.y - terrainHeightMeters)
+    this.telemetry.groundClearanceMeters = this.groundClearanceMeters
+    this.telemetry.terrainHeightMeters = terrainHeightMeters
+    this.telemetry.altitudeMeters = this.pilot.position.y
+
+    // Crash condition
+    if (this.pilot.position.y <= terrainHeightMeters + 0.3 && this.canopy.velocity.y < -7.0) {
+      this.isCrashed = true
+      return
+    }
+
+    // Foot drag detection (skimming sand / grass)
+    this.isFootDragging = this.groundClearanceMeters < 1.2 && !this.isCrashed
+    this.pilot.isFootDragging = this.isFootDragging
+
+    // Reverse stance transition (0° forward to 180° reverse kiting)
+    const targetReverseYaw = this.controls.reverseStance ? 180.0 : 0.0
+    this.pilot.reverseStanceYawDeg +=
+      (targetReverseYaw - this.pilot.reverseStanceYawDeg) * 8.0 * clampedDt
+    this.telemetry.isReverseStance = this.controls.reverseStance
+
+    // Effective control mapping (crossed when in reverse stance)
+    const effectiveLeftBrake = this.controls.reverseStance
+      ? this.controls.rightBrake
+      : this.controls.leftBrake
+    const effectiveRightBrake = this.controls.reverseStance
+      ? this.controls.leftBrake
+      : this.controls.rightBrake
+    const effectiveWeightShift = this.controls.reverseStance
+      ? -this.controls.weightShift
+      : this.controls.weightShift
+
+    // 1. Airspeed and Relative Wind
+    const vxRel = this.canopy.velocity.x - this.atmosphere.windVector.x
+    const vyRel = this.canopy.velocity.y - this.atmosphere.windVector.y
+    const vzRel = this.canopy.velocity.z - this.atmosphere.windVector.z
+    const airspeedMps = Math.sqrt(vxRel * vxRel + vyRel * vyRel + vzRel * vzRel)
+    this.canopy.airspeedKmh = Math.max(1.0, airspeedMps * 3.6)
+
+    // 2. Aerodynamic Forces with Ground Effect
+    const aeroControls: FlightControls = {
+      ...this.controls,
+      leftBrake: effectiveLeftBrake,
+      rightBrake: effectiveRightBrake,
+      weightShift: effectiveWeightShift,
+    }
+    const aero = computeAeroForces(
+      this.canopy.airspeedKmh,
+      this.canopy.angleOfAttackDeg,
+      aeroControls,
+      this.groundClearanceMeters,
+      this.wing,
+    )
+
+    this.isStalled = aero.isFullStall
+    this.isSpinning = aero.isSpinning
+    this.asymmetricStallSide = aero.asymmetricStallSide
+    this.canopy.asymmetricStallSide = aero.asymmetricStallSide
+    this.canopy.isNegativeSpin = aero.isSpinning
+    this.canopy.leftWingCollapse = aero.leftCollapse
+    this.canopy.rightWingCollapse = aero.rightCollapse
+
+    // 3. True Centrifugal Line Tension & Pendulum Dynamics
+    // In polar pendulum coordinates:
+    // pitch theta: 0 = hanging straight below, + = pitched back/up, - = swinging forward
+    const pitchRad = (this.pilot.pendulumPitchDeg * Math.PI) / 180
+    const rollRad = (this.canopy.rollDeg * Math.PI) / 180
+
+    // Angular velocity in pitch and roll (rad/s)
+    const omegaPitch = (this.pilot.angularVelocityPitch * Math.PI) / 180
+    const omegaRoll = (this.pilot.angularVelocityRoll * Math.PI) / 180
+
+    // Centrifugal acceleration pulling pilot outward along tether lines:
+    // a_centrifugal = (omega_pitch^2 + omega_roll^2) * R + (v_tangential^2 / R)
+    const vTangential = Math.abs(omegaPitch) * tetherR + (airspeedMps * 0.4)
+    const aCentrifugal =
+      (omegaPitch * omegaPitch + omegaRoll * omegaRoll) * tetherR +
+      (vTangential * vTangential) / (tetherR * 3.5)
+
+    // Normal line tension along tether: T = m * (g * cos(pitch) * cos(roll) + a_centrifugal)
+    const effectiveGComponent = g * Math.cos(pitchRad) * Math.cos(rollRad)
+    const rawTension = pilotMass * (effectiveGComponent + aCentrifugal)
+
+    this.lineTensionNewtons = Math.max(0, rawTension)
+    this.telemetry.lineTensionNewtons = this.lineTensionNewtons
+
+    // Line slack check: If tension drops below 40N (e.g. attempting to invert without sufficient speed)
+    if (this.lineTensionNewtons < 40 && Math.abs(this.pilot.pendulumPitchDeg) > 60) {
+      this.isLinesSlack = true
+      this.slackTimer = 0.65
+    }
+    if (this.slackTimer > 0) {
+      this.slackTimer -= clampedDt
+      if (this.slackTimer <= 0) this.isLinesSlack = false
+    }
+    this.telemetry.isLinesSlack = this.isLinesSlack
+
+    // Differential line tension for asymmetric turns & stalls
+    const differentialLiftRatio = aero.rightLiftNewtons / Math.max(1, aero.leftLiftNewtons + aero.rightLiftNewtons)
+    this.leftLineTensionNewtons = this.lineTensionNewtons * (1 - differentialLiftRatio)
+    this.rightLineTensionNewtons = this.lineTensionNewtons * differentialLiftRatio
+    this.telemetry.leftLineTensionNewtons = this.leftLineTensionNewtons
+    this.telemetry.rightLineTensionNewtons = this.rightLineTensionNewtons
+
+    // 4. Pilot G-Force Calculation
+    const netRadialAccel = (this.lineTensionNewtons / pilotMass)
+    this.pilot.gForce = clamp(netRadialAccel / g, 0.1, 7.5)
+    this.telemetry.gForce = this.pilot.gForce
+
+    // 5. Dynamic Roll Integration (Carve Turns & Wingovers)
+    const targetRollDeg =
+      this.asymmetricStallSide === 'left'
+        ? -82.0
+        : this.asymmetricStallSide === 'right'
+        ? 82.0
+        : (aero.rollTorque / (totalMass * 3.2)) * 57.2958 + (effectiveWeightShift * 42.0)
+
+    const rollSpring = (targetRollDeg - this.canopy.rollDeg) * 7.5
+    const rollDamping = -this.pilot.angularVelocityRoll * 3.8
+    this.pilot.angularVelocityRoll += (rollSpring + rollDamping) * clampedDt
+    this.canopy.rollDeg += this.pilot.angularVelocityRoll * clampedDt
+    this.canopy.rollDeg = clamp(this.canopy.rollDeg, -88.0, 88.0)
+    this.pilot.pendulumRollDeg = this.canopy.rollDeg * 0.85
+
+    // Dynamic Pitch & Infinite Tumble Somersault Dynamics
+    // In real aerobatics, a tumble loop requires high kinetic energy from a steep dive (>78 km/h).
+    // At trim speed (50-65 km/h), symmetrical braking causes a gentle flare (pilot swings 20°-30°) and stalls.
+    const symmetricBrake = Math.min(effectiveLeftBrake, effectiveRightBrake)
+    const hasAcroEntrySpeed = this.canopy.airspeedKmh > 78.0
+    const acroEnergyFactor = hasAcroEntrySpeed ? Math.pow((this.canopy.airspeedKmh - 78) / 30.0, 1.8) : 0
+    const brakeSurgeTorque = symmetricBrake * (acroEnergyFactor * 680.0)
+    const speedBarDiveTorque = -this.controls.speedBar * 210.0 // nose-down dive acceleration
+
+    // Restoring gravity torque on pendulum: tau_g = -g * sin(pitch)
+    // When lines are slack, restoring torque is absent (free tumbling pilot)
+    const gravityRestoringTorque = this.isLinesSlack
+      ? 0
+      : -g * Math.sin(pitchRad) * (57.2958 / tetherR)
+
+    // Rotational damping
+    const pitchDamping = this.isLinesSlack
+      ? -this.pilot.angularVelocityPitch * 0.8
+      : -this.pilot.angularVelocityPitch * 2.2
+
+    // Angular acceleration in pitch:
+    const pitchAlpha = gravityRestoringTorque + brakeSurgeTorque + speedBarDiveTorque + pitchDamping
+    this.pilot.angularVelocityPitch += pitchAlpha * clampedDt
+
+    // Infinite Tumble Condition:
+    // If pilot has high airspeed (>75 km/h) and pulls hard brakes, angular pitch rate spikes.
+    // As long as lines maintain tension (a_c > g), allow full 360° rotation!
+    this.pilot.pendulumPitchDeg += this.pilot.angularVelocityPitch * clampedDt
+    this.cumulativePitchDeg += this.pilot.angularVelocityPitch * clampedDt
+
+    // Detect full 360° tumble loops
+    if (Math.abs(this.cumulativePitchDeg - this.lastTumblePitchDeg) >= 360.0) {
+      if (this.lineTensionNewtons > 50 && !this.isLinesSlack) {
+        this.tumbleStreak++
+        this.telemetry.tumbleStreak = this.tumbleStreak
+      }
+      this.lastTumblePitchDeg = this.cumulativePitchDeg
+    }
+
+    // Wrap continuous visual pendulum pitch to [-180°, +180°]
+    if (this.pilot.pendulumPitchDeg > 180.0) this.pilot.pendulumPitchDeg -= 360.0
+    if (this.pilot.pendulumPitchDeg < -180.0) this.pilot.pendulumPitchDeg += 360.0
+
+    // If lines went slack at low speed while inverted, damp pitch aggressively back toward gravity bottom
+    if (this.isLinesSlack) {
+      this.pilot.angularVelocityPitch *= 0.94
+      this.pilot.pendulumPitchDeg *= 0.96
+    }
+
+    // 7. Turn Rate & Yaw Integration
+    let turnRateDegPerSec = 0
+    if (this.asymmetricStallSide === 'left') {
+      turnRateDegPerSec = -240.0 // violent negative spin left
+    } else if (this.asymmetricStallSide === 'right') {
+      turnRateDegPerSec = 240.0 // violent negative spin right
+    } else {
+      // Coordinated turn kinematics: g * tan(roll) / V + differential drag yaw
+      const rollRadClamped = (clamp(this.canopy.rollDeg, -80, 80) * Math.PI) / 180
+      turnRateDegPerSec =
+        ((g * Math.tan(rollRadClamped)) / Math.max(3.0, airspeedMps)) * 57.2958 +
+        (aero.yawTorque / (totalMass * 1.4))
+    }
+
+    this.canopy.yawDeg = (this.canopy.yawDeg + turnRateDegPerSec * clampedDt + 360) % 360
+    const currentYawRad = (this.canopy.yawDeg * Math.PI) / 180
+
+    // 8. Canopy Visual Pitch Angle
+    let targetCanopyPitchDeg = 5.5
+    if (this.isStalled) {
+      targetCanopyPitchDeg = -26.0
+    } else if (this.isLinesSlack) {
+      targetCanopyPitchDeg = 32.0 // forward collapse tuck
+    } else {
+      targetCanopyPitchDeg = this.pilot.pendulumPitchDeg * 0.75 + (5.5 - symmetricBrake * 8.0 + this.controls.speedBar * 5.0)
+    }
+    this.canopy.pitchDeg += (targetCanopyPitchDeg - this.canopy.pitchDeg) * 14.0 * clampedDt
+
+    // 9. Accelerations & Velocity Integration (First Principles Energy Dynamics)
+    const fwdX = Math.sin(currentYawRad)
+    const fwdZ = Math.cos(currentYawRad)
+
+    // Current horizontal speed
+    const currentHorizSpeed = Math.sqrt(
+      this.canopy.velocity.x * this.canopy.velocity.x +
+      this.canopy.velocity.z * this.canopy.velocity.z,
+    )
+
+    // Speedwing Glide Polar & Altitude Conservation:
+    // Steeper descent converts potential energy (mgh) into kinetic energy (1/2 mv^2)
+    const baseGlideRatio = this.wing.glideRatio // 5.4:1
+    const speedBarDegrade = this.controls.speedBar * 1.4
+    const bankDegrade = (1 - Math.cos((this.canopy.rollDeg * Math.PI) / 180)) * 2.6
+    const groundCushion = this.groundClearanceMeters < 3.0 ? (3.0 - this.groundClearanceMeters) * 1.8 : 0
+    const flareCushion = symmetricBrake > 0.4 ? (symmetricBrake - 0.4) * 3.5 : 0
+
+    let targetGlideRatio = Math.max(1.6, baseGlideRatio - speedBarDegrade - bankDegrade + groundCushion + flareCushion)
+    if (this.isStalled) {
+      targetGlideRatio = 0.55
+    } else if (this.asymmetricStallSide !== 'none') {
+      targetGlideRatio = 0.85
+    }
+
+    const equilibriumSinkMps = -Math.max(1.5, currentHorizSpeed) / targetGlideRatio
+    const sinkDiff = equilibriumSinkMps - this.canopy.velocity.y
+    const netAy = sinkDiff * 3.5 + (this.atmosphere.thermalUpdraftMps + this.atmosphere.ridgeLiftMps) * 0.4
+    this.canopy.velocity.y += netAy * clampedDt
+    this.canopy.velocity.y = clamp(this.canopy.velocity.y, -36.0, 18.0)
+    this.canopy.verticalSpeedMps = this.canopy.velocity.y
+    this.telemetry.verticalSpeedMps = this.canopy.verticalSpeedMps
+
+    // Target horizontal speed with energy conversion
+    const baseTrimMps = this.wing.trimSpeedKmh / 3.6 // 15.0 m/s (54 km/h)
+    const speedBarBoost = this.controls.speedBar * 12.5 // accelerates up to 27.5 m/s (99 km/h)
+    const diveKineticBoost = Math.max(0, -this.canopy.velocity.y * 0.85) // gravity dive conversion up to 125 km/h!
+    const brakeDecel = symmetricBrake * 9.5 // braking decelerates
+    const footDragFriction = this.isFootDragging ? 4.5 : 0 // foot drag friction
+
+    let targetEquilibriumSpeed = baseTrimMps + speedBarBoost + diveKineticBoost - brakeDecel - footDragFriction
+    if (this.isStalled) targetEquilibriumSpeed = 2.0
+    else if (this.asymmetricStallSide !== 'none') targetEquilibriumSpeed = 4.0
+    targetEquilibriumSpeed = Math.max(1.0, Math.min(36.0, targetEquilibriumSpeed))
+
+    const horizSpeedDiff = targetEquilibriumSpeed - currentHorizSpeed
+    const horizAccel = horizSpeedDiff * 2.8
+
+    this.canopy.velocity.x += fwdX * horizAccel * clampedDt
+    this.canopy.velocity.z += fwdZ * horizAccel * clampedDt
+
+    // 10. Position Updates
+    this.canopy.position.x += this.canopy.velocity.x * clampedDt
+    this.canopy.position.y += this.canopy.velocity.y * clampedDt
+    this.canopy.position.z += this.canopy.velocity.z * clampedDt
+
+    // Pilot suspended beneath canopy along pendulum angles:
+    const swingOffsetY = -tetherR * Math.cos(pitchRad)
+    const swingOffsetFwd = tetherR * Math.sin(pitchRad)
+    const swingOffsetLat = tetherR * Math.sin((this.pilot.pendulumRollDeg * Math.PI) / 180)
+
+    this.pilot.position.x = this.canopy.position.x + fwdZ * swingOffsetLat + fwdX * swingOffsetFwd
+    this.pilot.position.y = this.canopy.position.y + swingOffsetY
+    this.pilot.position.z = this.canopy.position.z - fwdX * swingOffsetLat + fwdZ * swingOffsetFwd
+
+    this.pilot.velocity.x = this.canopy.velocity.x
+    this.pilot.velocity.y = this.canopy.velocity.y
+    this.pilot.velocity.z = this.canopy.velocity.z
+
+    // Telemetry updates
+    const groundSpeedMps = Math.sqrt(
+      this.canopy.velocity.x * this.canopy.velocity.x +
+      this.canopy.velocity.z * this.canopy.velocity.z,
+    )
+    this.telemetry.airspeedKmh = this.canopy.airspeedKmh
+    this.telemetry.groundSpeedKmh = groundSpeedMps * 3.6
+    this.telemetry.glideRatio =
+      Math.abs(this.canopy.velocity.y) > 0.1
+        ? groundSpeedMps / Math.abs(this.canopy.velocity.y)
+        : 9.9
+    this.telemetry.distanceMeters += groundSpeedMps * clampedDt
   }
 }

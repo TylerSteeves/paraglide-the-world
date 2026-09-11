@@ -9,6 +9,7 @@ export class FlightHUD {
   private tensionEl!: HTMLElement
   private scoreEl!: HTMLElement
   private trickBannerEl!: HTMLElement
+  private stanceEl!: HTMLElement
   private leftThumbIndicator!: HTMLElement
   private rightThumbIndicator!: HTMLElement
   private startModalEl!: HTMLElement
@@ -18,8 +19,11 @@ export class FlightHUD {
   private onStartCallback: () => void = () => {}
   private onRecenterCallback: () => void = () => {}
   private onRelaunchCallback: () => void = () => {}
+  private onSpawnAlpineCallback: () => void = () => {}
+  private onSpawnDunesCallback: () => void = () => {}
   private onCycleLensCallback: () => void = () => {}
   private onCycleVantageCallback: () => void = () => {}
+  private onToggleReverseCallback: () => void = () => {}
 
   constructor(containerId: string) {
     const el = document.getElementById(containerId)
@@ -31,6 +35,14 @@ export class FlightHUD {
 
   public setOnStart(callback: () => void) {
     this.onStartCallback = callback
+  }
+
+  public setOnSpawnAlpine(callback: () => void) {
+    this.onSpawnAlpineCallback = callback
+  }
+
+  public setOnSpawnDunes(callback: () => void) {
+    this.onSpawnDunesCallback = callback
   }
 
   public setOnRecenter(callback: () => void) {
@@ -49,26 +61,32 @@ export class FlightHUD {
     this.onCycleVantageCallback = callback
   }
 
+  public setOnToggleReverse(callback: () => void) {
+    this.onToggleReverseCallback = callback
+  }
+
   public updateLensLabel(mode: string) {
     if (this.lensBtnLabel) {
       if (mode === 'action-cam') {
-        this.lensBtnLabel.innerText = 'LENS: ACTION CAM'
+        this.lensBtnLabel.innerText = 'LENS: [L] ACTION CAM'
       } else if (mode === 'subtle') {
-        this.lensBtnLabel.innerText = 'LENS: SUBTLE'
+        this.lensBtnLabel.innerText = 'LENS: [L] SUBTLE WIDE'
       } else {
-        this.lensBtnLabel.innerText = 'LENS: LINEAR'
+        this.lensBtnLabel.innerText = 'LENS: [L] LINEAR'
       }
     }
   }
 
   public updateVantageLabel(vantage: string) {
     if (this.vantageBtnLabel) {
-      if (vantage === 'helmet-fpv') {
-        this.vantageBtnLabel.innerText = 'VIEW: HELMET FPV'
-      } else if (vantage === 'wide-chase') {
-        this.vantageBtnLabel.innerText = 'VIEW: CHASE CAM'
+      if (vantage === 'pilot-fpv') {
+        this.vantageBtnLabel.innerText = 'VIEW: [C] PILOT FPV'
+      } else if (vantage === 'shoulder-chase') {
+        this.vantageBtnLabel.innerText = 'VIEW: [C] SHOULDER CHASE'
+      } else if (vantage === 'front-selfie') {
+        this.vantageBtnLabel.innerText = 'VIEW: [C] SELFIE 360'
       } else {
-        this.vantageBtnLabel.innerText = 'VIEW: SELFIE POLE'
+        this.vantageBtnLabel.innerText = 'VIEW: [C] WIDE CHASE'
       }
     }
   }
@@ -76,8 +94,8 @@ export class FlightHUD {
   private render() {
     this.container.innerHTML = `
       <!-- Build Version Badge -->
-      <div style="position: absolute; top: 12px; right: 14px; background: rgba(16, 185, 129, 0.25); border: 1px solid #10b981; color: #a7f3d0; font-size: 11px; font-weight: 800; padding: 4px 10px; border-radius: 8px; letter-spacing: 0.5px; z-index: 25; backdrop-filter: blur(8px); box-shadow: 0 2px 10px rgba(0,0,0,0.3);">
-        BUILD v2.6 • REAL SPEEDWING AERO & SINK
+      <div style="position: absolute; top: 12px; right: 14px; background: rgba(14, 165, 233, 0.25); border: 1px solid #0ea5e9; color: #7dd3fc; font-size: 11px; font-weight: 800; padding: 4px 10px; border-radius: 8px; letter-spacing: 0.5px; z-index: 25; backdrop-filter: blur(8px); box-shadow: 0 2px 10px rgba(0,0,0,0.3);">
+        BUILD v3.0 • FIRST-PRINCIPLES ACRO & SPEEDWING ENGINE
       </div>
 
       <!-- Top Telemetry Bar -->
@@ -88,117 +106,120 @@ export class FlightHUD {
         </div>
 
         <div class="telemetry-pill">
-          <span class="telemetry-label">VARIO</span>
-          <span class="telemetry-value vario-climb" id="hud-vario">+0.0 m/s</span>
+          <span class="telemetry-label">AIRSPEED</span>
+          <span class="telemetry-value" id="hud-speed">54 km/h</span>
         </div>
 
         <div class="telemetry-pill">
-          <span class="telemetry-label">AIRSPEED</span>
-          <span class="telemetry-value" id="hud-speed">46 km/h</span>
+          <span class="telemetry-label">VERTICAL</span>
+          <span class="telemetry-value" id="hud-vario">-2.2 m/s</span>
         </div>
 
         <div class="telemetry-pill">
           <span class="telemetry-label">G-FORCE</span>
-          <span class="telemetry-value" id="hud-gforce">1.0 G</span>
+          <span class="telemetry-value" id="hud-gforce">1.0G</span>
         </div>
 
-        <div class="telemetry-pill" id="hud-tension-pill">
+        <div class="telemetry-pill">
           <span class="telemetry-label">LINE TENSION</span>
           <span class="telemetry-value" id="hud-tension">860 N</span>
         </div>
-      </div>
 
-      <!-- Center Trick Banner & Score -->
-      <div class="center-banner-area">
-        <div class="trick-banner" id="hud-trick-banner">WINGOVER! +500</div>
-        <div class="score-counter" id="hud-score">SCORE: 0  •  RINGS: 0/14</div>
-      </div>
-
-      <!-- Action Bar (Recenter / Controls) -->
-      <div class="action-bar">
-        <button class="glass-btn" id="btn-recenter">
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
-            <circle cx="12" cy="12" r="10"></circle>
-            <circle cx="12" cy="12" r="3"></circle>
-          </svg>
-          RECENTER TILT
-        </button>
-        <button class="glass-btn" id="btn-vantage">
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
-            <path d="M23 7l-7 5 7 5V7z"></path>
-            <rect x="1" y="5" width="15" height="14" rx="2" ry="2"></rect>
-          </svg>
-          <span id="label-vantage">VIEW: SELFIE POLE</span>
-        </button>
-        <button class="glass-btn" id="btn-lens">
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
-            <circle cx="12" cy="12" r="9"></circle>
-            <circle cx="12" cy="12" r="3"></circle>
-          </svg>
-          <span id="label-lens">LENS: ACTION CAM</span>
-        </button>
-        <button class="glass-btn primary-btn" id="btn-relaunch" style="display: none; background: #dc2626;">
-          CRASHED! RELAUNCH PEAK
-        </button>
-      </div>
-
-      <!-- Touch Control Guides -->
-      <div class="touch-controls-guide">
-        <div class="thumb-handle" id="left-thumb-zone">
-          <div class="thumb-indicator" id="left-thumb-indicator"></div>
-          <span class="thumb-label">L BRAKE</span>
-        </div>
-
-        <div class="thumb-handle" id="right-thumb-zone">
-          <div class="thumb-indicator" id="right-thumb-indicator"></div>
-          <span class="thumb-label">R BRAKE</span>
+        <div class="telemetry-pill highlight">
+          <span class="telemetry-label">SCORE</span>
+          <span class="telemetry-value" id="hud-score">0</span>
         </div>
       </div>
 
-      <!-- Start / Launch Modal -->
-      <div class="start-modal" id="start-modal">
-        <h1 class="start-title">Paraglide the world 3D</h1>
-        <p class="start-subtitle">Whistler Mountain Summer Flight • Action-Cam Fish-Eye View</p>
-
-        <div class="controls-preview" style="display: flex; gap: 14px; max-width: 540px; flex-wrap: wrap; justify-content: center;">
-          <div class="control-card" style="width: 140px;">
-            <span class="control-card-icon">⌨️</span>
-            <span class="control-card-title">BRAKES</span>
-            <span class="control-card-desc"><b>F</b> (Left) • <b>J</b> (Right)<br>Hold both to stall</span>
-          </div>
-
-          <div class="control-card" style="width: 140px;">
-            <span class="control-card-icon">🕹️</span>
-            <span class="control-card-title">STEERING</span>
-            <span class="control-card-desc"><b>A / D</b> or <b>← / →</b><br>Tap to carve<br>Hold deep to stall & spin</span>
-          </div>
-
-          <div class="control-card" style="width: 140px;">
-            <span class="control-card-icon">⌨️</span>
-            <span class="control-card-title">BRAKES</span>
-            <span class="control-card-desc"><b>F</b> (Left) • <b>J</b> (Right)<br>Burying one stalls half wing</span>
-          </div>
-
-          <div class="control-card" style="width: 140px;">
-            <span class="control-card-icon">⚡</span>
-            <span class="control-card-title">STALL / SPEED</span>
-            <span class="control-card-desc"><b>S</b> = Full Stall Horseshoe<br><b>Space</b> = Speed Bar Surge</span>
-          </div>
-        </div>
-
-        <button class="glass-btn primary-btn" id="btn-launch" style="padding: 14px 38px; font-size: 16px;">
-          LAUNCH FLIGHT
+      <!-- Mode & Stance Indicator -->
+      <div style="position: absolute; top: 72px; left: 24px; z-index: 20; display: flex; gap: 8px;">
+        <button id="hud-stance-btn" style="background: rgba(0,0,0,0.55); border: 1px solid rgba(255,255,255,0.2); color: #fff; padding: 6px 14px; border-radius: 8px; font-weight: 700; font-size: 12px; cursor: pointer; backdrop-filter: blur(6px);">
+          STANCE: FORWARD FLIGHT [R]
         </button>
       </div>
 
-      <!-- Desktop Controls Hints Bar -->
-      <div class="desktop-hints-bar" style="position: absolute; bottom: 14px; left: 50%; transform: translateX(-50%); background: rgba(10, 20, 32, 0.85); backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px); padding: 7px 16px; border-radius: 12px; font-size: 11px; font-weight: 700; color: #cbd5e1; border: 1px solid rgba(255,255,255,0.15); pointer-events: none; white-space: nowrap; display: flex; gap: 14px; box-shadow: 0 4px 16px rgba(0,0,0,0.4); z-index: 10;">
-        <span><kbd style="background:rgba(255,255,255,0.22); padding:2px 6px; border-radius:4px; color:#fff; font-family:monospace; font-size:12px;">A</kbd>/<kbd style="background:rgba(255,255,255,0.22); padding:2px 6px; border-radius:4px; color:#fff; font-family:monospace; font-size:12px;">D</kbd> Carve Steer</span>
-        <span><kbd style="background:rgba(255,255,255,0.22); padding:2px 6px; border-radius:4px; color:#f59e0b; font-family:monospace; font-size:12px;">F</kbd>/<kbd style="background:rgba(255,255,255,0.22); padding:2px 6px; border-radius:4px; color:#f59e0b; font-family:monospace; font-size:12px;">J</kbd> Deep Asym Stall</span>
-        <span><kbd style="background:rgba(255,255,255,0.22); padding:2px 6px; border-radius:4px; color:#ef4444; font-family:monospace; font-size:12px;">S</kbd> Full Stall</span>
-        <span><kbd style="background:rgba(255,255,255,0.22); padding:2px 6px; border-radius:4px; color:#38bdf8; font-family:monospace; font-size:12px;">Space</kbd> Speed Bar</span>
-        <span><kbd style="background:rgba(255,255,255,0.22); padding:2px 6px; border-radius:4px; color:#10b981; font-family:monospace; font-size:12px;">V</kbd> View</span>
-        <span><kbd style="background:rgba(255,255,255,0.22); padding:2px 6px; border-radius:4px; color:#a855f7; font-family:monospace; font-size:12px;">C</kbd> Lens</span>
+      <!-- Center Trick Announcement Banner -->
+      <div class="trick-banner" id="hud-trick-banner" style="display: none;">
+        <div class="trick-title" id="hud-trick-text">INFINITE TUMBLE x1!</div>
+        <div class="trick-subtitle" id="hud-trick-sub">+3000 PTS</div>
+      </div>
+
+      <!-- Touch Brake Sliders for Mobile / Visual Indicators -->
+      <div class="touch-controls">
+        <div class="touch-zone left-zone">
+          <div class="brake-track">
+            <div class="brake-fill" id="left-brake-fill"></div>
+            <div class="brake-thumb" id="left-brake-thumb"></div>
+          </div>
+          <span class="zone-label">LEFT BRAKE [A]</span>
+        </div>
+
+        <div class="touch-zone right-zone">
+          <div class="brake-track">
+            <div class="brake-fill" id="right-brake-fill"></div>
+            <div class="brake-thumb" id="right-brake-thumb"></div>
+          </div>
+          <span class="zone-label">RIGHT BRAKE [D]</span>
+        </div>
+      </div>
+
+      <!-- Bottom Quick Actions Toolbar -->
+      <div class="quick-toolbar">
+        <button class="tool-btn" id="btn-cycle-vantage">
+          <span id="vantage-btn-label">VIEW: [C] PILOT FPV</span>
+        </button>
+        <button class="tool-btn" id="btn-cycle-lens">
+          <span id="lens-btn-label">LENS: [L] ACTION CAM</span>
+        </button>
+        <button class="tool-btn" id="btn-spawn-alpine" style="border-color: #38bdf8;">
+          <span>🏔️ ALPINE [1]</span>
+        </button>
+        <button class="tool-btn" id="btn-spawn-dunes" style="border-color: #f59e0b;">
+          <span>🏖️ DUNES [2]</span>
+        </button>
+        <button class="tool-btn" id="btn-recenter">
+          <span>RECENTER</span>
+        </button>
+      </div>
+
+      <!-- Launch Modal -->
+      <div class="start-modal" id="hud-start-modal">
+        <div class="modal-card">
+          <h1>PARAGLIDE THE WORLD</h1>
+          <p class="subtitle">Realistic First-Principles Speedwing & Acro Physics</p>
+
+          <div class="controls-guide">
+            <div class="guide-item">
+              <span class="key-badge">A</span> / <span class="key-badge">D</span>
+              <span class="guide-desc">Carve Bank Turns & Deep Wingovers</span>
+            </div>
+            <div class="guide-item">
+              <span class="key-badge">W</span> / <span class="key-badge">SHIFT</span>
+              <span class="guide-desc">Speedbar / Steep Alpine Dive (Accelerate to 115-130 km/h)</span>
+            </div>
+            <div class="guide-item">
+              <span class="key-badge">S</span> (at high speed)
+              <span class="guide-desc">Infinite Tumble / Somersault Loop over the canopy!</span>
+            </div>
+            <div class="guide-item">
+              <span class="key-badge">R</span>
+              <span class="guide-desc">180° Reverse Stance (Dune Kiting & Ground Handling)</span>
+            </div>
+            <div class="guide-item">
+              <span class="key-badge">C</span> / <span class="key-badge">L</span>
+              <span class="guide-desc">Cycle 4 Camera Angles / GoPro Fisheye Optics</span>
+            </div>
+          </div>
+
+          <div style="display: flex; gap: 12px; margin-top: 14px; flex-wrap: wrap;">
+            <button class="launch-btn" id="hud-launch-alpine-btn" style="flex: 1; min-width: 220px;">
+              🏔️ ALPINE PEAK (2,050m) [1]
+            </button>
+            <button class="launch-btn" id="hud-launch-dunes-btn" style="flex: 1; min-width: 220px; background: linear-gradient(135deg, #f59e0b 0%, #d97706 100%);">
+              🏖️ DUNE DU PILAT (208m) [2]
+            </button>
+          </div>
+        </div>
       </div>
     `
 
@@ -209,112 +230,130 @@ export class FlightHUD {
     this.tensionEl = document.getElementById('hud-tension')!
     this.scoreEl = document.getElementById('hud-score')!
     this.trickBannerEl = document.getElementById('hud-trick-banner')!
-    this.leftThumbIndicator = document.getElementById('left-thumb-indicator')!
-    this.rightThumbIndicator = document.getElementById('right-thumb-indicator')!
-    this.startModalEl = document.getElementById('start-modal')!
-    this.lensBtnLabel = document.getElementById('label-lens')!
-    this.vantageBtnLabel = document.getElementById('label-vantage')!
+    this.stanceEl = document.getElementById('hud-stance-btn')!
+    this.leftThumbIndicator = document.getElementById('left-brake-fill')!
+    this.rightThumbIndicator = document.getElementById('right-brake-fill')!
+    this.startModalEl = document.getElementById('hud-start-modal')!
+    this.lensBtnLabel = document.getElementById('lens-btn-label')!
+    this.vantageBtnLabel = document.getElementById('vantage-btn-label')!
 
-    const launchBtn = document.getElementById('btn-launch')!
-    launchBtn.addEventListener('click', () => {
-      this.startModalEl.style.display = 'none'
-      this.onStartCallback()
-    })
-
-    const recenterBtn = document.getElementById('btn-recenter')!
-    recenterBtn.addEventListener('click', () => {
-      this.onRecenterCallback()
-    })
-
-    const vantageBtn = document.getElementById('btn-vantage')!
-    vantageBtn.addEventListener('click', () => {
-      this.onCycleVantageCallback()
-    })
-
-    const lensBtn = document.getElementById('btn-lens')!
-    lensBtn.addEventListener('click', () => {
-      this.onCycleLensCallback()
-    })
-
-    const relaunchBtn = document.getElementById('btn-relaunch')!
-    relaunchBtn.addEventListener('click', () => {
-      relaunchBtn.style.display = 'none'
-      this.onRelaunchCallback()
-    })
-  }
-
-  public update(
-    telemetry: FlightTelemetry,
-    controls: FlightControls,
-    trick: TrickState,
-    isCrashed: boolean = false,
-  ) {
-    // Altitude
-    this.altEl.innerText = `${Math.round(telemetry.altitudeMeters)}m`
-
-    // Vario
-    const vs = telemetry.verticalSpeedMps
-    const vsSign = vs >= 0 ? '+' : ''
-    this.varioEl.innerText = `${vsSign}${vs.toFixed(1)} m/s`
-    if (vs > 0.3) {
-      this.varioEl.className = 'telemetry-value vario-climb'
-    } else if (vs < -4.0) {
-      this.varioEl.className = 'telemetry-value vario-sink'
-      this.varioEl.style.color = '#ef4444' // bright emergency red for steep stall sink
-    } else if (vs < -1.8) {
-      this.varioEl.className = 'telemetry-value vario-sink'
-      this.varioEl.style.color = ''
-    } else {
-      this.varioEl.className = 'telemetry-value'
-      this.varioEl.style.color = ''
+    const launchAlpineBtn = document.getElementById('hud-launch-alpine-btn')
+    if (launchAlpineBtn) {
+      launchAlpineBtn.addEventListener('click', () => {
+        this.hideStartModal()
+        this.onStartCallback()
+        this.onSpawnAlpineCallback()
+      })
     }
 
-    // Speed & G-Force
-    this.speedEl.innerText = `${Math.round(telemetry.airspeedKmh)} km/h`
-    this.gForceEl.innerText = `${telemetry.gForce.toFixed(1)} G`
-
-    // Line Tension & Asymmetric Stall / Slack state
-    if (telemetry.isLinesSlack) {
-      this.tensionEl.innerText = 'LINES SLACK!'
-      this.tensionEl.style.color = '#ef4444'
-    } else if (telemetry.asymmetricStallSide === 'left') {
-      this.tensionEl.innerText = 'L: SLACK (SPIN)'
-      this.tensionEl.style.color = '#ef4444'
-    } else if (telemetry.asymmetricStallSide === 'right') {
-      this.tensionEl.innerText = 'R: SLACK (SPIN)'
-      this.tensionEl.style.color = '#ef4444'
-    } else {
-      this.tensionEl.innerText = `${Math.round(telemetry.lineTensionNewtons)} N`
-      this.tensionEl.style.color = telemetry.lineTensionNewtons > 1800 ? '#f59e0b' : ''
+    const launchDunesBtn = document.getElementById('hud-launch-dunes-btn')
+    if (launchDunesBtn) {
+      launchDunesBtn.addEventListener('click', () => {
+        this.hideStartModal()
+        this.onStartCallback()
+        this.onSpawnDunesCallback()
+      })
     }
 
-    // Score, Rings & Tumble Streak
-    const tumbleText = telemetry.tumbleStreak > 0 ? `  •  TUMBLE: x${telemetry.tumbleStreak} 🔥` : ''
-    this.scoreEl.innerText = `SCORE: ${telemetry.score}  •  RINGS: ${telemetry.ringsCollected}/14${tumbleText}`
-
-    // Stall Banner or Trick Banner
-    if (telemetry.asymmetricStallSide !== 'none') {
-      this.trickBannerEl.innerText = '⚠️ ASYMMETRIC STALL! NEGATIVE SPIN — RELEASE BRAKE'
-      this.trickBannerEl.style.background = 'linear-gradient(135deg, #ef4444, #b91c1c)'
-      this.trickBannerEl.classList.add('active')
-    } else if (trick.announcementText && trick.announcementTimer > 0) {
-      this.trickBannerEl.innerText = trick.announcementText
-      this.trickBannerEl.style.background = ''
-      this.trickBannerEl.classList.add('active')
-    } else {
-      this.trickBannerEl.style.background = ''
-      this.trickBannerEl.classList.remove('active')
+    const spawnAlpineBtn = document.getElementById('btn-spawn-alpine')
+    if (spawnAlpineBtn) {
+      spawnAlpineBtn.addEventListener('click', () => this.onSpawnAlpineCallback())
     }
 
-    // Touch Indicator Positions (track thumb displacement)
-    const maxTravelPx = 70
-    this.leftThumbIndicator.style.transform = `translateY(${controls.leftBrake * maxTravelPx}px)`
-    this.rightThumbIndicator.style.transform = `translateY(${controls.rightBrake * maxTravelPx}px)`
+    const spawnDunesBtn = document.getElementById('btn-spawn-dunes')
+    if (spawnDunesBtn) {
+      spawnDunesBtn.addEventListener('click', () => this.onSpawnDunesCallback())
+    }
 
-    // Crash button
+    const recenterBtn = document.getElementById('btn-recenter')
+    if (recenterBtn) {
+      recenterBtn.addEventListener('click', () => this.onRecenterCallback())
+    }
+
     const relaunchBtn = document.getElementById('btn-relaunch')
     if (relaunchBtn) {
-      relaunchBtn.style.display = isCrashed ? 'flex' : 'none'
+      relaunchBtn.addEventListener('click', () => this.onRelaunchCallback())
+    }
+
+    const cycleLensBtn = document.getElementById('btn-cycle-lens')
+    if (cycleLensBtn) {
+      cycleLensBtn.addEventListener('click', () => this.onCycleLensCallback())
+    }
+
+    const cycleVantageBtn = document.getElementById('btn-cycle-vantage')
+    if (cycleVantageBtn) {
+      cycleVantageBtn.addEventListener('click', () => this.onCycleVantageCallback())
+    }
+
+    if (this.stanceEl) {
+      this.stanceEl.addEventListener('click', () => this.onToggleReverseCallback())
+    }
+  }
+
+  public hideStartModal() {
+    if (this.startModalEl) {
+      this.startModalEl.style.display = 'none'
+    }
+  }
+
+  public showStartModal() {
+    if (this.startModalEl) {
+      this.startModalEl.style.display = 'flex'
+    }
+  }
+
+  public update(telemetry: FlightTelemetry, controls: FlightControls, trick: TrickState) {
+    if (this.altEl) this.altEl.innerText = `${Math.round(telemetry.altitudeMeters)}m`
+    if (this.speedEl) this.speedEl.innerText = `${Math.round(telemetry.airspeedKmh)} km/h`
+    if (this.varioEl) {
+      const v = telemetry.verticalSpeedMps
+      this.varioEl.innerText = `${v >= 0 ? '+' : ''}${v.toFixed(1)} m/s`
+      this.varioEl.style.color = v > 0.5 ? '#34d399' : v < -4.5 ? '#f87171' : '#fef08a'
+    }
+    if (this.gForceEl) {
+      this.gForceEl.innerText = `${telemetry.gForce.toFixed(1)}G`
+      this.gForceEl.style.color = telemetry.gForce > 3.0 ? '#f43f5e' : '#fff'
+    }
+    if (this.tensionEl) {
+      if (telemetry.isLinesSlack) {
+        this.tensionEl.innerText = 'SLACK!'
+        this.tensionEl.style.color = '#ef4444'
+      } else {
+        this.tensionEl.innerText = `${Math.round(telemetry.lineTensionNewtons)} N`
+        this.tensionEl.style.color = '#fff'
+      }
+    }
+    if (this.scoreEl) this.scoreEl.innerText = telemetry.score.toLocaleString()
+
+    if (this.stanceEl) {
+      this.stanceEl.innerText = telemetry.isReverseStance
+        ? 'STANCE: 🪁 REVERSE KITING [R]'
+        : 'STANCE: FORWARD FLIGHT [R]'
+      this.stanceEl.style.borderColor = telemetry.isReverseStance ? '#38bdf8' : 'rgba(255,255,255,0.2)'
+      this.stanceEl.style.color = telemetry.isReverseStance ? '#38bdf8' : '#fff'
+    }
+
+    if (this.leftThumbIndicator) {
+      this.leftThumbIndicator.style.height = `${controls.leftBrake * 100}%`
+    }
+    if (this.rightThumbIndicator) {
+      this.rightThumbIndicator.style.height = `${controls.rightBrake * 100}%`
+    }
+
+    // Trick Announcements
+    if (trick.announcementText && trick.announcementTimer > 0) {
+      this.trickBannerEl.style.display = 'block'
+      const trickText = document.getElementById('hud-trick-text')
+      const trickSub = document.getElementById('hud-trick-sub')
+      if (trickText) trickText.innerText = trick.announcementText
+      if (trickSub) {
+        trickSub.innerText =
+          trick.proximityMultiplier > 1.2
+            ? `${trick.proximityMultiplier.toFixed(1)}x PROXIMITY MULTIPLIER!`
+            : `COMBO x${trick.trickCombo}`
+      }
+    } else {
+      this.trickBannerEl.style.display = 'none'
     }
   }
 }

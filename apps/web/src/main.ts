@@ -78,8 +78,10 @@ function initApp() {
   ;(window as any).sim = sim
   ;(window as any).scene = scene
   const rig = new ParagliderRig(scene)
+  ;(window as any).rig = rig
   const actionCam = new ActionCamera(scene)
   ;(window as any).actionCam = actionCam
+  ;(window as any).mountain = mountain
   const trickDetector = new TrickDetector()
 
   // 4. Input, Audio, HUD
@@ -115,9 +117,25 @@ function initApp() {
   hud.setOnCycleVantage(cycleVantage)
   inputManager.onCycleVantage = cycleVantage
 
-  hud.setOnRelaunch(() => {
-    sim.reset(2050, 5)
+  hud.setOnToggleReverse(() => {
+    inputManager.toggleReverseStance()
   })
+
+  const spawnAlpine = () => {
+    sim.reset(2050, 5, { x: 0, y: 2050, z: 0 })
+    actionCam.snap()
+  }
+
+  const spawnDunes = () => {
+    sim.reset(208, 10, { x: 0, y: 208, z: 2550 })
+    actionCam.snap()
+  }
+
+  hud.setOnSpawnAlpine(spawnAlpine)
+  hud.setOnSpawnDunes(spawnDunes)
+  inputManager.onSpawnAlpine = spawnAlpine
+  inputManager.onSpawnDunes = spawnDunes
+  hud.setOnRelaunch(spawnAlpine)
 
   // 5. Main Simulation & Render Loop
   engine.runRenderLoop(() => {
@@ -162,14 +180,14 @@ function initApp() {
       )
 
       // Step G: Update Visual Rig & Action Camera
-      rig.update(sim)
+      rig.update(sim, actionCam.vantage)
       actionCam.update(sim, dt)
 
       // Step H: Update HUD
-      hud.update(sim.telemetry, sim.controls, trickState, sim.isCrashed)
+      hud.update(sim.telemetry, sim.controls, trickState)
     } else {
       // Pre-launch preview state: Keep rig and action camera positioned
-      rig.update(sim)
+      rig.update(sim, actionCam.vantage)
       actionCam.update(sim, dt)
     }
 

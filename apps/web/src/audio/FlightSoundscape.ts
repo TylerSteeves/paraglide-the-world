@@ -66,11 +66,11 @@ export class FlightSoundscape {
     }
 
     // 1. Modulate Wind Noise Volume and Cutoff with Speed & Gs
-    const speedRatio = Math.max(0.1, Math.min(2.0, airspeedKmh / 38.0))
-    const targetGain = 0.04 * speedRatio + (gForce - 1) * 0.05
-    this.windGain.gain.setTargetAtTime(Math.min(0.35, targetGain), this.ctx.currentTime, 0.08)
+    const speedRatio = Math.max(0.1, Math.min(3.0, airspeedKmh / 54.0))
+    const targetGain = 0.05 * speedRatio + (gForce - 1) * 0.06
+    this.windGain.gain.setTargetAtTime(Math.min(0.45, targetGain), this.ctx.currentTime, 0.08)
 
-    const targetFreq = 260 + speedRatio * 380 + (gForce - 1) * 220
+    const targetFreq = 280 + speedRatio * 520 + (gForce - 1) * 260
     this.windFilter.frequency.setTargetAtTime(targetFreq, this.ctx.currentTime, 0.08)
 
     // 2. Variometer Logic: Climb = Beeping Tones; Sink = Low Growl

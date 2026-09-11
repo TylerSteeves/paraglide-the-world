@@ -5,12 +5,12 @@ export type WingGeometry = {
   areaSquareMeters: number
   aspectRatio: number
   chordMeters: number
-  tetherLengthMeters: number // line length to pilot (~6.6m)
+  tetherLengthMeters: number // line length to pilot (~5.3m)
   trimSpeedKmh: number
   minSpeedKmh: number
   maxSpeedKmh: number
-  glideRatio: number // ~8.4:1
-  massKg: number // ~9.8kg (canopy fabric + internal air mass)
+  glideRatio: number // ~5.4:1
+  massKg: number // ~8.5kg (canopy fabric + internal air mass)
   pilotMassKg: number // ~88kg pilot + harness + reserve
 }
 
@@ -20,10 +20,10 @@ export const STANDARD_WING: WingGeometry = {
   aspectRatio: 4.42,
   chordMeters: 2.35,
   tetherLengthMeters: 5.3, // 5.3m authentic suspension lines
-  trimSpeedKmh: 58.0, // 58 km/h (16.1 m/s) fast alpine trim
-  minSpeedKmh: 32.0, // Clean stall threshold
-  maxSpeedKmh: 105.0, // High-speed dive authority with speed bar
-  glideRatio: 5.4, // Realistic speedwing glide ratio (steep descent matching mountain slope)
+  trimSpeedKmh: 54.0, // 54 km/h (15.0 m/s) fast alpine trim
+  minSpeedKmh: 28.0, // Clean stall threshold
+  maxSpeedKmh: 130.0, // Real high-speed dive authority in steep alpine swoops
+  glideRatio: 5.4, // Realistic speedwing glide ratio
   massKg: 8.5, // 4.2kg wing + 4.3kg internal cell air
   pilotMassKg: 88.0, // Heavy pilot with harness and reserve
 }
@@ -47,7 +47,7 @@ export function getLiftCoefficient(alphaDeg: number): number {
 
 export function getDragCoefficient(alphaDeg: number, brakeDeflection: number): number {
   // Base parasitic airfoil drag with quadratic brake drag penalty
-  const baseCd = 0.052 + Math.pow(Math.max(0, alphaDeg - 4) * 0.062, 2)
+  const baseCd = 0.048 + Math.pow(Math.max(0, alphaDeg - 4) * 0.055, 2)
   const brakeCd = brakeDeflection * 0.14 + Math.pow(brakeDeflection, 2) * 0.36
   return baseCd + brakeCd
 }
@@ -70,176 +70,132 @@ export type AeroForces = {
   leftCollapse: number // 0 (inflated) to 1 (collapsed / tucked)
   rightCollapse: number
   flareLift: number
+  groundEffectMultiplier: number
 }
 
 /**
  * First-Principles Aerodynamic Force Integration
- * Computes aerodynamics on left and right wing halves independently.
- * The canopy is the lifting body (21.0 m² area vs 0.45 m² pilot, 47:1 area ratio).
+ * Computes aerodynamics on left and right wing halves independently,
+ * with ground-effect cushion, dynamic flare surge, and centrifugal line tension.
  */
 export function computeAeroForces(
   airspeedKmh: number,
   alphaDeg: number,
   controls: FlightControls,
+  heightAboveGroundMeters: number = 20,
   wing: WingGeometry = STANDARD_WING,
 ): AeroForces {
   const airDensity = 1.225 // kg/m^3
   const vMps = Math.max(0.5, airspeedKmh / 3.6)
   const dynamicPressure = 0.5 * airDensity * vMps * vMps
 
-  const halfArea = wing.areaSquareMeters * 0.5 // 10.5 m² per wing half
-  const halfSpanArm = wing.spanMeters * 0.26 // ~2.55m moment arm to half-wing center of pressure
+  const halfArea = wing.areaSquareMeters * 0.5 // 8.75 m² per wing half
+  const halfSpan = wing.spanMeters * 0.5 // 4.4m half span
+  const momentArm = halfSpan * 0.52 // Lateral center of pressure for each half
 
-  // 1. Stall thresholds
-  // At trim speed, critical stall brake travel is ~0.60.
-  // At low airspeed (< 8.0 m/s), stall travel drops to ~0.46.
-  const criticalBrake = vMps < 8.0 ? 0.46 : 0.60
+  // Ground Effect: When close to ground (h / b < 0.5), induced drag drops and effective lift increases
+  const spanRatio = Math.max(0.05, heightAboveGroundMeters / wing.spanMeters)
+  const groundEffectMultiplier = spanRatio < 0.6
+    ? 1.0 + (0.6 - spanRatio) * 0.38 // Up to +23% lift boost right above ground
+    : 1.0
+  const inducedDragReduction = spanRatio < 0.6
+    ? (16 * spanRatio * spanRatio) / (1 + 16 * spanRatio * spanRatio)
+    : 1.0
 
-  const leftBrakeRaw = controls.leftBrake
-  const rightBrakeRaw = controls.rightBrake
+  // 1. Effective Angle of Attack per wing half
+  // Brakes pull down trailing edge, increasing camber and effective AoA
+  const leftAoA = alphaDeg + controls.leftBrake * 10.5 - controls.speedBar * 4.2
+  const rightAoA = alphaDeg + controls.rightBrake * 10.5 - controls.speedBar * 4.2
 
-  const leftStalled = leftBrakeRaw > criticalBrake
-  const rightStalled = rightBrakeRaw > criticalBrake
+  // 2. Stall Detection per wing half
+  const stallThresholdAoA = 17.5
+  const leftStall = leftAoA > stallThresholdAoA && controls.leftBrake > 0.68
+  const rightStall = rightAoA > stallThresholdAoA && controls.rightBrake > 0.68
 
-  // Full Stall: When both brakes are buried simultaneously
-  const isFullStall = leftBrakeRaw > 0.65 && rightBrakeRaw > 0.65
-
-  // Asymmetric Stall: When one brake is pulled deeply while the other is significantly less pulled
+  const isFullStall = leftStall && rightStall
   let asymmetricStallSide: 'none' | 'left' | 'right' = 'none'
   if (!isFullStall) {
-    if (leftStalled && leftBrakeRaw - rightBrakeRaw > 0.22) {
-      asymmetricStallSide = 'left'
-    } else if (rightStalled && rightBrakeRaw - leftBrakeRaw > 0.22) {
-      asymmetricStallSide = 'right'
-    }
+    if (leftStall && !rightStall) asymmetricStallSide = 'left'
+    else if (rightStall && !leftStall) asymmetricStallSide = 'right'
   }
-
   const isSpinning = asymmetricStallSide !== 'none'
 
-  // Collapse factors: 0 = smooth inflated canopy, 1 = tucked/folded deflated cells
+  // 3. Lift Coefficients
+  let leftCl = getLiftCoefficient(leftAoA) * groundEffectMultiplier
+  let rightCl = getLiftCoefficient(rightAoA) * groundEffectMultiplier
+
+  // Collapse / Deflation factors
   let leftCollapse = 0
   let rightCollapse = 0
 
-  if (isFullStall) {
+  if (asymmetricStallSide === 'left') {
+    leftCl *= 0.12 // 88% lift loss on stalled half
+    leftCollapse = 0.95 // Left wing tucks back and curls
+  } else if (asymmetricStallSide === 'right') {
+    rightCl *= 0.12
+    rightCollapse = 0.95
+  } else if (isFullStall) {
+    leftCl *= 0.15
+    rightCl *= 0.15
     leftCollapse = 0.85
     rightCollapse = 0.85
-  } else if (asymmetricStallSide === 'left') {
-    leftCollapse = clamp((leftBrakeRaw - criticalBrake) / 0.25 + 0.35, 0.4, 1.0)
-    rightCollapse = 0.0
-  } else if (asymmetricStallSide === 'right') {
-    leftCollapse = 0.0
-    rightCollapse = clamp((rightBrakeRaw - criticalBrake) / 0.25 + 0.35, 0.4, 1.0)
   }
 
-  // 2. Compute Left Wing Half Aerodynamics
-  const leftEffectiveAlpha = alphaDeg + leftBrakeRaw * 8.0 - controls.speedBar * 6.5
-  let cL_Left = getLiftCoefficient(leftEffectiveAlpha)
-  let cD_Left = getDragCoefficient(leftEffectiveAlpha, leftBrakeRaw)
-
-  // 3. Compute Right Wing Half Aerodynamics
-  const rightEffectiveAlpha = alphaDeg + rightBrakeRaw * 8.0 - controls.speedBar * 6.5
-  let cL_Right = getLiftCoefficient(rightEffectiveAlpha)
-  let cD_Right = getDragCoefficient(rightEffectiveAlpha, rightBrakeRaw)
-
-  // Speed bar profile drag reduction
-  if (controls.speedBar > 0) {
-    const sbFactor = 1.0 - controls.speedBar * 0.26
-    cD_Left *= sbFactor
-    cD_Right *= sbFactor
-  }
-
-  // Induced drag per half: C_di = C_L^2 / (pi * AR * e)
-  const oswaldE = 0.72
-  const inducedLeft = (cL_Left * cL_Left) / (Math.PI * wing.aspectRatio * oswaldE)
-  const inducedRight = (cL_Right * cL_Right) / (Math.PI * wing.aspectRatio * oswaldE)
-  cD_Left += inducedLeft
-  cD_Right += inducedRight
-
-  // Apply stall degradations
-  if (isFullStall) {
-    // Airflow detaches over entire wing: 88% lift drop, pure bluff body drag
-    cL_Left *= 0.12
-    cL_Right *= 0.12
-    cD_Left = 0.82
-    cD_Right = 0.82
-  } else {
-    if (asymmetricStallSide === 'left') {
-      // Left wing airflow separates & collapses: 85% lift drop, high separated wake drag
-      cL_Left *= 0.15
-      cD_Left = 0.76
-    } else if (asymmetricStallSide === 'right') {
-      cL_Right *= 0.15
-      cD_Right = 0.76
-    }
-  }
-
-  // Aerodynamic Forces per half
-  const leftLiftNewtons = dynamicPressure * halfArea * cL_Left
-  const rightLiftNewtons = dynamicPressure * halfArea * cL_Right
-  const leftDragNewtons = dynamicPressure * halfArea * cD_Left
-  const rightDragNewtons = dynamicPressure * halfArea * cD_Right
-
-  const totalLift = leftLiftNewtons + rightLiftNewtons
-  const totalDrag = leftDragNewtons + rightDragNewtons
-
-  // 4. Moments & Torques (The Wing Leads!)
-  // Differential drag produces yaw torque on the wing:
-  // Left brake pulled (Left drag > Right drag) -> Yaws left (negative yaw).
-  // Right brake pulled (Right drag > Left drag) -> Yaws right (positive yaw).
-  const yawFromDifferentialDrag = (rightDragNewtons - leftDragNewtons) * halfSpanArm
-
-  // Yaw-Roll Coupling (Paraglider Dihedral & Sweep Aerodynamics):
-  // When the wing yaws left, the advancing right wing moves faster through the air,
-  // generating higher dynamic pressure and dihedral lift that banks the canopy INTO the turn!
-  // Negative yaw -> Left bank (negative roll). Positive yaw -> Right bank (positive roll).
-  const rollFromYawCoupling = (yawFromDifferentialDrag / halfSpanArm) * 0.45 * dynamicPressure * 0.12
-  const weightShiftTorque = controls.weightShift * 38.0
-
-  let rollTorque = rollFromYawCoupling + weightShiftTorque
-  let yawTorque = yawFromDifferentialDrag
+  // 4. Drag Coefficients
+  let leftCd = getDragCoefficient(leftAoA, controls.leftBrake) * (0.6 + 0.4 * inducedDragReduction)
+  let rightCd = getDragCoefficient(rightAoA, controls.rightBrake) * (0.6 + 0.4 * inducedDragReduction)
 
   if (asymmetricStallSide === 'left') {
-    // Left side stalled: Outside right wing is charging forward while left is halted in massive drag!
-    // Creates a violent negative flat spin towards the stalled side (left = negative yaw)
-    yawTorque = -4800.0
-    rollTorque = -950.0 // canopy banks toward the collapsed side
+    leftCd *= 2.8 // Massive separation drag on stalled side pulls yaw into spin
   } else if (asymmetricStallSide === 'right') {
-    yawTorque = 4800.0
-    rollTorque = 950.0
+    rightCd *= 2.8
+  } else if (isFullStall) {
+    leftCd *= 2.4
+    rightCd *= 2.4
   }
 
-  // 5. Pitch torque
-  const symmetricPitchBrake = Math.min(leftBrakeRaw, rightBrakeRaw)
-  let pitchTorque = (symmetricPitchBrake * 1.4 - controls.speedBar * 1.6) * 980.0
-  if (isFullStall) {
-    pitchTorque = 1550.0 // Wing falls backward behind pilot in full stall
-  }
+  // 5. Force Integration
+  const leftLift = dynamicPressure * halfArea * leftCl
+  const rightLift = dynamicPressure * halfArea * rightCl
+  const totalLift = leftLift + rightLift
 
-  // 6. Flare effect: Dynamic brake flare converts kinetic airspeed into upward cushion
-  const flarePullRate = Math.max(0, (controls.leftBrakeRate + controls.rightBrakeRate) * 0.5)
-  const symmetricBrake = (leftBrakeRaw + rightBrakeRaw) * 0.5
-  const flareLift =
-    !isFullStall && !isSpinning && symmetricBrake > 0.35
-      ? symmetricBrake * flarePullRate * dynamicPressure * 18.0
-      : 0
+  const leftDrag = dynamicPressure * halfArea * leftCd
+  const rightDrag = dynamicPressure * halfArea * rightCd
+  const totalDrag = leftDrag + rightDrag
+
+  // 6. Torques about Wing Center of Pressure
+  // Roll torque from differential lift
+  const rollTorque = (rightLift - leftLift) * momentArm
+
+  // Yaw torque from differential drag
+  const yawTorque = (rightDrag - leftDrag) * momentArm
+
+  // Pitch torque: Symmetric brake pulls create trailing edge drag torque
+  const symmetricBrake = Math.min(controls.leftBrake, controls.rightBrake)
+  const pitchTorque =
+    (symmetricBrake * 360 - controls.speedBar * 280) * (dynamicPressure / 120)
+
+  // Flare lift surge: Rapid symmetrical flare at high speed generates powerful upward surge
+  const flareLift = symmetricBrake * totalLift * 0.42
 
   return {
-    liftNewtons: totalLift,
+    liftNewtons: totalLift + flareLift,
     dragNewtons: totalDrag,
     rollTorque,
     pitchTorque,
     yawTorque,
-    leftLiftNewtons,
-    rightLiftNewtons,
-    leftDragNewtons,
-    rightDragNewtons,
-    leftStall: leftStalled,
-    rightStall: rightStalled,
+    leftLiftNewtons: leftLift,
+    rightLiftNewtons: rightLift,
+    leftDragNewtons: leftDrag,
+    rightDragNewtons: rightDrag,
+    leftStall,
+    rightStall,
     isFullStall,
     asymmetricStallSide,
     isSpinning,
     leftCollapse,
     rightCollapse,
     flareLift,
+    groundEffectMultiplier,
   }
 }

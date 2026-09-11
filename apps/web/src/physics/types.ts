@@ -11,6 +11,7 @@ export type FlightControls = {
   rightBrakeRate: number
   weightShift: number // -1 (lean left) to +1 (lean right)
   speedBar: number // 0 to 1
+  reverseStance: boolean // Pilot flipped 180° in harness facing wing for ground-handling / kiting
 }
 
 export type CanopyState = {
@@ -35,11 +36,13 @@ export type PilotState = {
   position: Vector3D
   velocity: Vector3D
   pendulumRollDeg: number // angle relative to canopy vertical
-  pendulumPitchDeg: number
+  pendulumPitchDeg: number // angle in pitch (can do full 360° loops during Infinite Tumbling!)
   angularVelocityRoll: number
   angularVelocityPitch: number
   gForce: number
   harnessWeightShift: number
+  reverseStanceYawDeg: number // 0° (forward) or 180° (reverse kiting)
+  isFootDragging: boolean
 }
 
 export type AtmosphereState = {
@@ -58,12 +61,12 @@ export type TrickName =
   | 'Dynamic Stall'
   | 'Asymmetric SAT'
   | 'Speed Swoop'
-  | 'Wire Thread'
   | 'Proximity Skim'
-  | 'Tumble / Loop'
-  | 'Infinity Tumble'
-  | 'Front Flip'
-  | 'Front Tumble'
+  | 'Foot Drag'
+  | 'Infinite Tumble'
+  | 'Misty Flip'
+  | 'Reverse Dune Kite'
+  | 'Swoop Flare Landing'
   | 'Slack Line Tuck'
 
 export type TrickState = {
@@ -96,4 +99,5 @@ export type FlightTelemetry = {
   asymmetricStallSide: 'none' | 'left' | 'right'
   isNegativeSpin: boolean
   tumbleStreak: number
+  isReverseStance: boolean
 }

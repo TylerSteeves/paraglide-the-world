@@ -6,6 +6,9 @@ export class TrickDetector {
   private lastRollSign: number = 0
   private wingoverCount: number = 0
   private spiralDuration: number = 0
+  private footDragDistance: number = 0
+  private reverseKiteDuration: number = 0
+  private lastTumbleStreak: number = 0
 
   constructor() {
     this.state = {
@@ -29,81 +32,91 @@ export class TrickDetector {
     let detected: TrickName = 'None'
     let pointsToAdd = 0
 
-    // 1. Wingover Detection: High bank angle alternating sides
+    // 1. Wingover Detection: High bank angle alternating sides (>75°)
     const currentRollSign = Math.sign(sim.canopy.rollDeg)
     if (bankDeg > 75) {
       if (this.lastRollSign !== 0 && currentRollSign !== this.lastRollSign) {
         this.wingoverCount++
         detected = 'Wingover'
-        pointsToAdd = 400 * this.wingoverCount
-        this.announce(`WINGOVER x${this.wingoverCount}! +${pointsToAdd}`)
+        pointsToAdd = 500 * this.wingoverCount
+        this.announce(`DEEP WINGOVER x${this.wingoverCount}! +${pointsToAdd}`)
       }
       this.lastRollSign = currentRollSign
-    } else if (bankDeg < 30) {
-      // reset wingover combo if wings level for more than 4s
     }
 
-    // 2. Deep Spiral: Sustained steep bank, high sink rate, high Gs
-    if (bankDeg > 65 && sinkRate > 8.0 && gForce > 2.0) {
+    // 2. Deep Spiral: Sustained steep bank (>65°), high sink (>8m/s), high Gs
+    if (bankDeg > 65 && sinkRate > 8.0 && gForce > 2.2) {
       this.spiralDuration += dt
       if (this.spiralDuration > 1.2) {
         detected = 'Deep Spiral'
-        pointsToAdd = Math.round(500 * dt * gForce)
+        pointsToAdd = Math.round(600 * dt * gForce)
         if (Math.floor(this.spiralDuration * 2) % 2 === 0) {
-          this.announce(`DEEP SPIRAL! ${gForce.toFixed(1)}G`)
+          this.announce(`🌀 DEEP SPIRAL! ${gForce.toFixed(1)}G`)
         }
       }
     } else {
       this.spiralDuration = 0
     }
 
-    // 3. Acro Tumbling & Looping (Front Flips & Infinity Tumbles)
+    // 3. Infinite Tumbling & Looping (Backflips over the wing)
     if (sim.isLinesSlack) {
       detected = 'Slack Line Tuck'
-      this.announce('⚠️ SLACK LINES! CANOPY TUCK')
+      this.announce('⚠️ SLACK LINES! CANOPY DEFLATED')
     } else if (sim.tumbleStreak > 0) {
-      const isFrontLoop = sim.pilot.angularVelocityPitch < 0
-      if (isFrontLoop) {
-        if (sim.tumbleStreak === 1) {
-          detected = 'Front Flip'
-          pointsToAdd = 2000
-          this.announce('⚡ FRONT FLIP / FRONT TUMBLE! +2000')
-        } else {
-          detected = 'Front Tumble'
-          pointsToAdd = 3000 * sim.tumbleStreak
-          this.announce(`⚡ RHYTHMIC FRONT TUMBLE x${sim.tumbleStreak}! +${pointsToAdd}`)
-        }
-      } else {
-        if (sim.tumbleStreak === 1) {
-          detected = 'Tumble / Loop'
-          pointsToAdd = 1500
-          this.announce('FULL TUMBLE / LOOP! +1500')
-        } else {
-          detected = 'Infinity Tumble'
-          pointsToAdd = 2500 * sim.tumbleStreak
-          this.announce(`🔥 INFINITY TUMBLE x${sim.tumbleStreak}! +${pointsToAdd}`)
-        }
+      detected = 'Infinite Tumble'
+      if (sim.tumbleStreak !== this.lastTumbleStreak) {
+        pointsToAdd = 3000 * sim.tumbleStreak
+        this.announce(`🔥 INFINITE TUMBLE x${sim.tumbleStreak}! +${pointsToAdd} PTS (${gForce.toFixed(1)}G)`)
+        this.lastTumbleStreak = sim.tumbleStreak
       }
-    } else if (sim.isStalled) {
-      detected = 'Dynamic Stall'
-      this.announce(`FULL STALL! PLUMMETING ${sinkRate.toFixed(1)} M/S!`)
-    } else if (sim.surgeTimer > 0.8 && speed > 65) {
-      detected = 'Speed Swoop'
-      this.announce(`SURGE DIVE RECOVERY! ${Math.round(speed)} KM/H!`)
+    } else {
+      this.lastTumbleStreak = 0
     }
 
-    // 4. Speed Swoop / Ground Flare: High speed skimming < 4m off the deck
-    if (clearance < 4.0 && clearance > 0.4 && speed > 42 && sinkRate < 1.0) {
-      detected = 'Speed Swoop'
-      pointsToAdd = Math.round(350 * dt)
-      this.announce('HIGH-SPEED SWOOP!')
+    // 4. Asymmetric SAT / Negative Spin Corkscrew
+    if (sim.asymmetricStallSide !== 'none' && Math.abs(sim.canopy.yawDeg) > 0) {
+      detected = 'Asymmetric SAT'
+      pointsToAdd = Math.round(450 * dt)
+      this.announce('🌪️ ASYMMETRIC SAT / NEGATIVE SPIN!')
     }
 
-    // 4. Proximity Multiplier: Closer to terrain/trees = higher multiplier
-    if (clearance < 8.0 && clearance > 0.5) {
+    // 5. Dune Foot Drag & Ground Skimming
+    if (sim.isFootDragging && speed > 18) {
+      detected = 'Foot Drag'
+      const stepDist = (speed / 3.6) * dt
+      this.footDragDistance += stepDist
+      pointsToAdd = Math.round(stepDist * 80)
+      if (Math.floor(this.footDragDistance) % 15 === 0) {
+        this.announce(`🦶 DUNE FOOT DRAG! ${Math.round(this.footDragDistance)}m`)
+      }
+    } else {
+      this.footDragDistance = 0
+    }
+
+    // 6. Reverse Dune Kiting (Flying / Hovering facing the wing)
+    if (sim.telemetry.isReverseStance && clearance < 12.0 && speed > 10) {
+      detected = 'Reverse Dune Kite'
+      this.reverseKiteDuration += dt
+      pointsToAdd = Math.round(250 * dt)
+      if (this.reverseKiteDuration > 1.5 && Math.floor(this.reverseKiteDuration) % 3 === 0) {
+        this.announce('🪁 REVERSE DUNE KITING!')
+      }
+    } else {
+      this.reverseKiteDuration = 0
+    }
+
+    // 7. High-Speed Speed Swoop (< 3.5m clearance, >60 km/h)
+    if (clearance < 3.5 && clearance > 0.6 && speed > 60 && sinkRate < 2.5 && !sim.isFootDragging) {
+      detected = 'Speed Swoop'
+      pointsToAdd = Math.round(500 * dt)
+      this.announce(`⚡ HIGH-SPEED SWOOP! ${Math.round(speed)} KM/H`)
+    }
+
+    // Proximity Multiplier: Closer to terrain = higher score multiplier
+    if (clearance < 8.0 && clearance > 0.4) {
       this.state.proximityMultiplier = Math.min(
-        4.0,
-        1.0 + (8.0 - clearance) * 0.45,
+        5.0,
+        1.0 + (8.0 - clearance) * 0.55,
       )
     } else {
       this.state.proximityMultiplier = 1.0
@@ -115,7 +128,7 @@ export class TrickDetector {
       this.state.trickPoints += finalPoints
       sim.telemetry.score += finalPoints
       this.state.trickCombo++
-      this.state.comboTimer = 3.5
+      this.state.comboTimer = 4.0
     }
 
     // Timers
@@ -138,8 +151,8 @@ export class TrickDetector {
     return this.state
   }
 
-  private announce(text: string) {
+  public announce(text: string): void {
     this.state.announcementText = text
-    this.state.announcementTimer = 2.0
+    this.state.announcementTimer = 2.4
   }
 }
