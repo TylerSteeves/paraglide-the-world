@@ -9,6 +9,9 @@ export type FlightPhase =
 export type LandingRating = 'none' | 'smooth' | 'firm' | 'hard' | 'crash'
 
 export type FlightDebugTelemetry = {
+  airDensityKgPerCubicMeter: number
+  windGradientFactor: number
+  groundEffectLiftMetersPerSecond: number
   baseSinkMetersPerSecond: number
   inducedTurnSinkMetersPerSecond: number
   brakeSinkMetersPerSecond: number
@@ -29,6 +32,9 @@ export type FlightSimState = {
   airspeedKmh: number
   groundSpeedKmh: number
   verticalSpeedMetersPerSecond: number
+  angleOfAttackDeg: number
+  loadFactor: number
+  glideRatio: number
   ridgeLiftMetersPerSecond: number
   thermalLiftMetersPerSecond: number
   airMassSinkMetersPerSecond: number

@@ -50,6 +50,23 @@ VITE_GOOGLE_MAPS_API_KEY=your_google_maps_platform_key
 
 Without that key, the simulator shell still loads, but the Google-backed world layer stays in setup mode.
 
+### Living-world data
+
+The web simulator resolves one immutable real-world snapshot before a flight session
+uses it. Current model conditions come from the keyless Open-Meteo API, while the
+existing authored site and Cesium terrain remain the fallback and terrain authority.
+Provider failures fall back to a cached snapshot and then to authored conditions; no
+network request occurs inside the fixed-step physics loop.
+
+The Living World panel shows data nature, freshness, valid time, source attribution,
+and a local replay link. Replay links use the snapshot captured in that browser's
+local storage, so the same conditions can be reproduced without re-fetching them.
+These inputs are for simulation and storytelling only, never real flight planning or
+safety decisions.
+
+Set `VITE_WORLD_DATA_API_URL` only when testing a compatible shared-engine HTTP
+transport. Without it, the browser uses the direct shared-engine provider path.
+
 ## Product direction
 
 The long-term product is bigger than the current prototype:
@@ -61,3 +78,35 @@ The long-term product is bigger than the current prototype:
 - shared flights and social discovery later, once the core solo experience is worth deepening
 
 The main technical caution is that the current prototype path is not the same thing as the final production commitment. Google/Cesium-based rendering is still useful for early validation, but the project direction now leaves room for a more fully rendered Gaussian-splat-style world stack and a deeper physics model as the target sharpens.
+
+## Godogen instant-flight slice
+
+The web simulator now opens directly into a playable, keyless Babylon.js world built with the Godogen workflow. It reuses the existing deterministic flight and atmosphere simulation rather than creating a separate arcade model.
+
+Built now:
+
+- procedural 3D terrain for Lauterbrunnen, Rome, and Istanbul
+- a visible paraglider canopy, pilot, suspension lines, chase camera, settlements, trees, water, clouds, thermals, and landing marker
+- full-screen Flight View on launch; press `Tab` for the tuning lab and world-tier selector
+- home-row controls: `A` weight shift left, `F` left brake, `J` right brake, `;` weight shift right, and `Space` speed bar
+- optional Google satellite and photorealistic world tiers remain available when `VITE_GOOGLE_MAPS_API_KEY` is configured
+- a reproducible Chrome-to-FFmpeg proof recorder at `tools/capture-babylon-proof.mjs`
+
+Still to deepen:
+
+- destination-specific architecture and vegetation silhouettes
+- higher-detail canopy deformation and pilot animation
+- authored audio, wind, and vario soundscape
+- route gates, launch/landing celebration, and a polished run-complete screen
+
+Latest verified proof: `artifacts/paraglide-godogen-proof-2026-08-28T19-31-10-068Z.mp4` (18 seconds, 1280×720).
+
+### Asset manifest
+
+No paid generated assets were used in this slice.
+
+| Name | Description | In-game size | Path | Cost |
+| --- | --- | --- | --- | --- |
+| Procedural destination world | Terrain, settlements, trees, water, thermals, and landing marker created at runtime | 6.4–7.2 km world | `apps/web/src/components/sim/BabylonFlightWorld.tsx` | $0 |
+| Procedural paraglider | Canopy, pilot, lines, and materials created at runtime | 21.6 m span | `apps/web/src/components/sim/BabylonFlightWorld.tsx` | $0 |
+| App icon | Hand-authored vector paraglider mark | 64×64 px scalable | `apps/web/public/favicon.svg` | $0 |

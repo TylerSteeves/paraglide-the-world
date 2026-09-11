@@ -54,6 +54,10 @@ describe('stepFlightState', () => {
   })
 
   it('builds a held brake into a progressive turn instead of snapping to full bank', () => {
+    const neutral = stepFlightState(
+      createInitialFlightState(TEST_SITE),
+      makeStepInput(),
+    )
     const first = stepFlightState(
       createInitialFlightState(TEST_SITE),
       makeStepInput({
@@ -78,6 +82,9 @@ describe('stepFlightState', () => {
     expect(Math.abs(second.bankDeg)).toBeLessThanOrEqual(Math.abs(third.bankDeg))
     expect(third.bankDeg).toBeLessThan(-14)
     expect(third.bankDeg).toBeGreaterThan(-30)
+    expect(first.angleOfAttackDeg).toBeGreaterThan(neutral.angleOfAttackDeg)
+    expect(third.loadFactor).toBeGreaterThan(1)
+    expect(third.glideRatio).toBeLessThan(neutral.glideRatio)
     expect(headingDeltaDegrees(0, first.headingDeg)).toBeLessThan(0)
     expect(headingDeltaDegrees(first.headingDeg, second.headingDeg)).toBeLessThan(0)
     expect(headingDeltaDegrees(second.headingDeg, third.headingDeg)).toBeLessThan(0)
@@ -91,6 +98,8 @@ describe('stepFlightState', () => {
 
     expect(symmetricBrake.bankDeg).toBeCloseTo(0, 4)
     expect(symmetricBrake.airspeedKmh).toBeLessThan(neutral.airspeedKmh)
+    expect(symmetricBrake.angleOfAttackDeg).toBeGreaterThan(neutral.angleOfAttackDeg)
+    expect(symmetricBrake.glideRatio).toBeLessThan(neutral.glideRatio)
     expect(symmetricBrake.verticalSpeedMetersPerSecond).toBeLessThan(
       neutral.verticalSpeedMetersPerSecond,
     )
@@ -141,6 +150,65 @@ describe('stepFlightState', () => {
     expect(next.altitudeMeters).toBe(500)
     expect(next.groundClearanceMeters).toBe(0)
     expect(next.flightPhase === 'landed' || next.flightPhase === 'crashed').toBe(true)
+  })
+
+  it('gains ground effect while the wind gradient weakens closer to the terrain', () => {
+    const atmosphere = {
+      windHeadingDeg: 0,
+      windSpeedKmh: 20,
+      turbulence: 0,
+    }
+
+    const higherState = makeState({
+      altitudeMeters: 1040,
+      terrainHeightMeters: 1000,
+      groundClearanceMeters: 40,
+      airspeedKmh: 40,
+      groundSpeedKmh: 40,
+      verticalSpeedMetersPerSecond: -1,
+      headingDeg: 0,
+      pitchDeg: -6,
+      elapsedSeconds: 20,
+      flightPhase: 'soaring',
+    })
+    const lowerState = makeState({
+      altitudeMeters: 1002.6,
+      terrainHeightMeters: 1000,
+      groundClearanceMeters: 2.6,
+      airspeedKmh: 40,
+      groundSpeedKmh: 40,
+      verticalSpeedMetersPerSecond: -1,
+      headingDeg: 0,
+      pitchDeg: -6,
+      elapsedSeconds: 20,
+      flightPhase: 'soaring',
+    })
+
+    const higher = stepFlightState(
+      higherState,
+      makeStepInput({
+        site: TEST_SITE,
+        atmosphere,
+      }),
+    )
+    const lower = stepFlightState(
+      lowerState,
+      makeStepInput({
+        site: TEST_SITE,
+        atmosphere,
+      }),
+    )
+
+    expect(lower.debug.windGradientFactor).toBeLessThan(
+      higher.debug.windGradientFactor,
+    )
+    expect(lower.debug.groundEffectLiftMetersPerSecond).toBeGreaterThan(
+      higher.debug.groundEffectLiftMetersPerSecond,
+    )
+    expect(lower.verticalSpeedMetersPerSecond).toBeGreaterThan(
+      higher.verticalSpeedMetersPerSecond,
+    )
+    expect(lower.groundSpeedKmh).toBeLessThan(higher.groundSpeedKmh)
   })
 
   it('adds thermal lift when the thermal-climb scenario centers the wing in a seeded core', () => {

@@ -22,6 +22,11 @@ export type ThermalAirMass = {
   sinkMetersPerSecond: number
 }
 
+export type LocalAmbientAirState = AmbientAirState & {
+  windGradientFactor: number
+  airDensityKgPerCubicMeter: number
+}
+
 const { liftSources } = FLIGHT_TUNING
 
 function getWindwardNormalHeadingDeg(ridge: RidgeBand, windHeadingDeg: number) {
@@ -252,4 +257,38 @@ export function getTurbulenceVerticalGust(
     turbulence *
     liftSources.turbulenceVerticalGustScale
   )
+}
+
+export function getAirDensityKgPerCubicMeter(altitudeMeters: number) {
+  return 1.225 * Math.exp(-Math.max(0, altitudeMeters) / 8_500)
+}
+
+export function getLocalAmbientAirState(
+  atmosphere: AmbientAirState,
+  altitudeMeters: number,
+  groundClearanceMeters: number,
+): LocalAmbientAirState {
+  const normalizedHeight = clamp(
+    groundClearanceMeters / liftSources.windGradientReferenceHeightMeters,
+    0,
+    1,
+  )
+  const windGradientFactor =
+    liftSources.windGradientSurfaceFactor +
+    (1 - liftSources.windGradientSurfaceFactor) *
+      Math.pow(normalizedHeight, liftSources.windGradientExponent)
+  const airDensityKgPerCubicMeter = getAirDensityKgPerCubicMeter(altitudeMeters)
+
+  return {
+    windHeadingDeg: atmosphere.windHeadingDeg,
+    windSpeedKmh: atmosphere.windSpeedKmh * windGradientFactor,
+    turbulence: clamp(
+      atmosphere.turbulence +
+        (1 - normalizedHeight) * liftSources.surfaceTurbulenceBoost,
+      0,
+      1,
+    ),
+    windGradientFactor,
+    airDensityKgPerCubicMeter,
+  }
 }

@@ -4,6 +4,7 @@ import {
   applyHomeRowControlKey,
   derivesFromHomeRowControls,
   normalizeHomeRowControlKey,
+  resolveHomeRowControlKey,
   stepHomeRowControls,
 } from '../home-row-controls'
 
@@ -51,9 +52,33 @@ describe('applyHomeRowControlKey', () => {
     expect(afterSpeed.speedBarTravel).toBe(0)
   })
 
+  it('can resolve the speed bar from the physical Space key code', () => {
+    const pressed = applyHomeRowControlKey(
+      DEFAULT_HOME_ROW_CONTROLS,
+      'Unidentified',
+      true,
+      'Space',
+    )
+
+    expect(pressed.speedBar).toBe(true)
+  })
+
   it('returns the same object for unmapped keys', () => {
     const next = applyHomeRowControlKey(DEFAULT_HOME_ROW_CONTROLS, 'Enter', true)
     expect(next).toBe(DEFAULT_HOME_ROW_CONTROLS)
+  })
+})
+
+describe('resolveHomeRowControlKey', () => {
+  it('falls back to the physical key code when the key value is unreliable', () => {
+    expect(resolveHomeRowControlKey('Unidentified', 'Space')).toBe('space')
+    expect(resolveHomeRowControlKey('Dead', 'Semicolon')).toBe(';')
+  })
+
+  it('uses the normalized key value when no control key code is present', () => {
+    expect(resolveHomeRowControlKey('A')).toBe('a')
+    expect(resolveHomeRowControlKey('Spacebar')).toBe('space')
+    expect(resolveHomeRowControlKey('Enter')).toBeNull()
   })
 })
 

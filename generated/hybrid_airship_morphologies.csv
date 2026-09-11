@@ -1,0 +1,5 @@
+variant,label,wing_area_m2,aspect_ratio,wing_gas_volume_m3,wing_gas_lift_kg,wing_hydrogen_mass_kg,wing_hydrogen_energy_kwh
+baseline,baseline gas wing,350.0,15.02,455.1,516.6,40.9,1363.4
+humpback,humpback shoulder blend,497.1,10.57,1329.3,1508.9,119.5,3982.5
+bowhead,bowhead blended centerbody,654.9,8.03,2902.9,3295.1,260.9,8697.0
+manta,manta-whale blended body,809.0,6.5,5012.4,5689.7,450.5,15017.2

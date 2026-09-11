@@ -8,6 +8,8 @@ import {
   createRidgePassScenarioSample,
   createThermalClimbEdgeScenarioSample,
   createThermalClimbScenarioSample,
+  makeState,
+  makeStepInput,
   TEST_SITE,
 } from './flight-test-fixtures'
 import {
@@ -120,9 +122,19 @@ describe('flight scenario acceptance checks', () => {
   it('makes approach alignment matter before touchdown', () => {
     const aligned = createApproachScenarioSample()
     const crosswind = createCrosswindApproachScenarioSample()
+    const alignedStart = {
+      ...aligned.state,
+      altitudeMeters: 1001,
+      groundClearanceMeters: 1,
+    }
+    const crosswindStart = {
+      ...crosswind.state,
+      altitudeMeters: 1001,
+      groundClearanceMeters: 1,
+    }
 
-    const alignedRun = runConstantFlightScenario(aligned.state, 20, aligned.input)
-    const crosswindRun = runConstantFlightScenario(crosswind.state, 20, crosswind.input)
+    const alignedRun = runConstantFlightScenario(alignedStart, 16, aligned.input)
+    const crosswindRun = runConstantFlightScenario(crosswindStart, 16, crosswind.input)
 
     expect(alignedRun.summary.finalLandingRating).not.toBe('none')
     expect(crosswindRun.summary.finalLandingRating).not.toBe('none')
@@ -153,6 +165,60 @@ describe('flight scenario acceptance checks', () => {
     ).toBeLessThanOrEqual(landingRatingRank(lateRun.summary.finalLandingRating))
     expect(timedRun.summary.finalLandingZoneDistanceMeters).toBeLessThanOrEqual(
       lateRun.summary.finalLandingZoneDistanceMeters ?? Number.POSITIVE_INFINITY,
+    )
+  })
+
+  it('carries near-ground lift and wind-gradient telemetry through scenario runs', () => {
+    const atmosphere = {
+      windHeadingDeg: 0,
+      windSpeedKmh: 20,
+      turbulence: 0,
+    }
+    const frameInput = makeStepInput({
+      site: TEST_SITE,
+      atmosphere,
+    })
+    const higherRun = runConstantFlightScenario(
+      makeState({
+        altitudeMeters: 1040,
+        terrainHeightMeters: 1000,
+        groundClearanceMeters: 40,
+        airspeedKmh: 40,
+        groundSpeedKmh: 40,
+        verticalSpeedMetersPerSecond: -1,
+        headingDeg: 0,
+        pitchDeg: -6,
+        elapsedSeconds: 20,
+        flightPhase: 'soaring',
+      }),
+      1,
+      frameInput,
+    )
+    const lowerRun = runConstantFlightScenario(
+      makeState({
+        altitudeMeters: 1002.6,
+        terrainHeightMeters: 1000,
+        groundClearanceMeters: 2.6,
+        airspeedKmh: 40,
+        groundSpeedKmh: 40,
+        verticalSpeedMetersPerSecond: -1,
+        headingDeg: 0,
+        pitchDeg: -6,
+        elapsedSeconds: 20,
+        flightPhase: 'soaring',
+      }),
+      1,
+      frameInput,
+    )
+
+    expect(lowerRun.states[1].debug.windGradientFactor).toBeLessThan(
+      higherRun.states[1].debug.windGradientFactor,
+    )
+    expect(lowerRun.states[1].debug.groundEffectLiftMetersPerSecond).toBeGreaterThan(
+      higherRun.states[1].debug.groundEffectLiftMetersPerSecond,
+    )
+    expect(lowerRun.summary.minGroundClearanceMeters).toBeLessThan(
+      higherRun.summary.minGroundClearanceMeters,
     )
   })
 })

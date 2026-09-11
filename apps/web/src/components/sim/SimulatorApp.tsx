@@ -1,17 +1,35 @@
-import { useCallback, useEffect, useState } from 'react'
-import { GooglePhotorealisticWorld } from './GooglePhotorealisticWorld'
+import { lazy, Suspense, useCallback, useEffect, useState } from 'react'
 import { FLIGHT_SCENARIOS } from '../../flight/scenarios'
 import { HOME_ROW_CONTROL_GUIDE } from '../../sim/home-row-controls'
 import { FLIGHT_SITES } from '../../sim/site-data'
 import { useSimulationSession } from '../../sim/useSimulationSession'
 import {
-  DEFAULT_GOOGLE_WORLD_MODE,
-  GOOGLE_WORLD_MODE_OPTIONS,
-  type GoogleWorldMode,
+  DEFAULT_WORLD_MODE,
+  WORLD_MODE_OPTIONS,
+  isGoogleWorldMode,
+  type WorldMode,
 } from '../../sim/world-mode'
+import { useFlightWorldData } from '../../world-data/useFlightWorldData'
+import { WorldDataCard } from './WorldDataCard'
 import '../../simulator.css'
 
-function getWorldSetupCopy(worldMode: GoogleWorldMode) {
+const GooglePhotorealisticWorld = lazy(() =>
+  import('./GooglePhotorealisticWorld').then((module) => ({
+    default: module.GooglePhotorealisticWorld,
+  })),
+)
+
+const BabylonFlightWorld = lazy(() =>
+  import('./BabylonFlightWorld').then((module) => ({
+    default: module.BabylonFlightWorld,
+  })),
+)
+
+function getWorldSetupCopy(worldMode: WorldMode) {
+  if (worldMode === 'godogen-3d') {
+    return 'Shaping a keyless procedural world with Babylon.js.'
+  }
+
   return worldMode === 'premium-3d'
     ? 'Set VITE_GOOGLE_MAPS_API_KEY to stream Google photorealistic 3D terrain.'
     : 'Set VITE_GOOGLE_MAPS_API_KEY to stream Google satellite tiles.'
@@ -46,16 +64,12 @@ function isTextEntryTarget(target: EventTarget | null) {
 }
 
 export function SimulatorApp() {
-  const [hudMode, setHudMode] = useState<'panels' | 'flight'>('panels')
-  const [worldMode, setWorldMode] = useState<GoogleWorldMode>(
-    DEFAULT_GOOGLE_WORLD_MODE,
-  )
+  const [hudMode, setHudMode] = useState<'panels' | 'flight'>('flight')
+  const [worldMode, setWorldMode] = useState<WorldMode>(DEFAULT_WORLD_MODE)
   const [worldStatus, setWorldStatus] = useState<
     'config-needed' | 'loading' | 'ready' | 'error'
-  >('config-needed')
-  const [worldDetail, setWorldDetail] = useState(
-    getWorldSetupCopy(DEFAULT_GOOGLE_WORLD_MODE),
-  )
+  >('loading')
+  const [worldDetail, setWorldDetail] = useState(getWorldSetupCopy(DEFAULT_WORLD_MODE))
   const {
     activityMode,
     controls,
@@ -72,13 +86,22 @@ export function SimulatorApp() {
     typingMetrics,
     typingSession,
     worldMetrics,
+    worldDataSnapshot,
     lastTypingResult,
     handleTerrainSample,
+    handleWorldDataSnapshot,
   } = useSimulationSession(FLIGHT_SITES[0].id)
+  const worldData = useFlightWorldData(selectedSite)
   const selectedWorldMode =
-    GOOGLE_WORLD_MODE_OPTIONS.find((option) => option.id === worldMode) ??
-    GOOGLE_WORLD_MODE_OPTIONS[0]
+    WORLD_MODE_OPTIONS.find((option) => option.id === worldMode) ??
+    WORLD_MODE_OPTIONS[0]
   const googleMapsApiKey = import.meta.env.VITE_GOOGLE_MAPS_API_KEY?.trim() || null
+
+  useEffect(() => {
+    if (worldData.snapshot) {
+      handleWorldDataSnapshot(worldData.snapshot)
+    }
+  }, [handleWorldDataSnapshot, worldData.snapshot])
 
   const activeFactIndex =
     selectedCountry.facts.length === 0
@@ -135,12 +158,12 @@ export function SimulatorApp() {
       value: `${formatInteger(flightState.airspeedKmh)} / ${formatInteger(
         flightState.groundSpeedKmh,
       )} km/h`,
-      detail: `${flightState.verticalSpeedMetersPerSecond.toFixed(1)} m/s vario`,
+      detail: `${flightState.verticalSpeedMetersPerSecond.toFixed(1)} m/s vario · ${flightState.glideRatio.toFixed(1)}:1 glide`,
     },
     {
       label: 'Lift stack',
       value: `${flightState.ridgeLiftMetersPerSecond.toFixed(1)} + ${flightState.thermalLiftMetersPerSecond.toFixed(1)} m/s`,
-      detail: `${flightState.debug.turbulenceLiftMetersPerSecond.toFixed(1)} m/s gust · ${flightState.debug.flareLiftMetersPerSecond.toFixed(1)} m/s flare`,
+      detail: `${flightState.debug.turbulenceLiftMetersPerSecond.toFixed(1)} m/s gust · ${flightState.debug.flareLiftMetersPerSecond.toFixed(1)} m/s flare · ${flightState.debug.groundEffectLiftMetersPerSecond.toFixed(1)} m/s ground`,
     },
     {
       label: 'Sink budget',
@@ -148,13 +171,20 @@ export function SimulatorApp() {
       detail: `base ${flightState.debug.baseSinkMetersPerSecond.toFixed(1)} · turn ${flightState.debug.inducedTurnSinkMetersPerSecond.toFixed(1)} · brake ${flightState.debug.brakeSinkMetersPerSecond.toFixed(1)} · stall ${flightState.debug.stallSinkMetersPerSecond.toFixed(1)} · air ${flightState.airMassSinkMetersPerSecond.toFixed(1)}`,
     },
     {
+      label: 'Wing state',
+      value: `${flightState.angleOfAttackDeg.toFixed(1)}° AoA · ${flightState.loadFactor.toFixed(2)} g`,
+      detail: `${Math.round(flightState.stallWarning * 100)}% stall · ${Math.round(
+        flightState.flareEffectiveness * 100,
+      )}% flare`,
+    },
+    {
       label: 'Control',
       value: `${Math.round(flightState.bankDeg)}° bank · ${Math.round(
         flightState.turnRateDegPerSecond,
       )}°/s`,
-      detail: `${Math.round(flightState.stallWarning * 100)}% stall · ${Math.round(
-        flightState.flareEffectiveness * 100,
-      )}% flare`,
+      detail: `${Math.round(flightState.debug.windGradientFactor * 100)}% wind profile · ${flightState.debug.airDensityKgPerCubicMeter.toFixed(
+        2,
+      )} kg/m^3`,
     },
     {
       label: 'Landing read',
@@ -182,6 +212,27 @@ export function SimulatorApp() {
   const toggleHudMode = () => {
     setHudMode((currentMode) => (currentMode === 'panels' ? 'flight' : 'panels'))
   }
+  const handleWorldModeChange = (nextMode: WorldMode) => {
+    setWorldMode(nextMode)
+
+    if (nextMode === 'godogen-3d') {
+      setWorldStatus('loading')
+      setWorldDetail(getWorldSetupCopy(nextMode))
+      return
+    }
+
+    if (!googleMapsApiKey) {
+      setWorldStatus('config-needed')
+      setWorldDetail(getWorldSetupCopy(nextMode))
+      return
+    }
+
+    const nextWorldMode =
+      WORLD_MODE_OPTIONS.find((option) => option.id === nextMode) ??
+      WORLD_MODE_OPTIONS[0]
+    setWorldStatus('loading')
+    setWorldDetail(`Streaming ${selectedSite.name} through ${nextWorldMode.label}...`)
+  }
 
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
@@ -202,15 +253,25 @@ export function SimulatorApp() {
 
   return (
     <div className={`sim-shell sim-shell--${hudMode}`}>
-      <GooglePhotorealisticWorld
-        key={`${selectedSite.id}-${worldMode}`}
-        apiKey={googleMapsApiKey}
-        mode={worldMode}
-        site={selectedSite}
-        flightState={flightState}
-        onTerrainSample={handleTerrainSample}
-        onWorldStatusChange={handleWorldStatusChange}
-      />
+      <Suspense fallback={<div aria-busy="true" className="sim-world" />}>
+        {isGoogleWorldMode(worldMode) ? (
+          <GooglePhotorealisticWorld
+            apiKey={googleMapsApiKey}
+            mode={worldMode}
+            site={selectedSite}
+            flightState={flightState}
+            onTerrainSample={handleTerrainSample}
+            onWorldStatusChange={handleWorldStatusChange}
+          />
+        ) : (
+          <BabylonFlightWorld
+            site={selectedSite}
+            flightState={flightState}
+            onTerrainSample={handleTerrainSample}
+            onWorldStatusChange={handleWorldStatusChange}
+          />
+        )}
+      </Suspense>
 
       <div className="sim-shell__scrim" />
 
@@ -315,6 +376,13 @@ export function SimulatorApp() {
           </section>
 
           <main className="sim-grid">
+            <WorldDataCard
+              loaded={worldData}
+              appliedSnapshot={worldDataSnapshot}
+              scenario={selectedScenario}
+              onRefresh={worldData.refresh}
+            />
+
             <section className="sim-panel sim-panel--wide">
               <div className="sim-panel__header">
                 <p className="sim-panel__eyebrow">Active Route</p>
@@ -351,14 +419,14 @@ export function SimulatorApp() {
               <div className="sim-choice-group">
                 <p className="sim-choice-group__label">World Tier</p>
                 <div className="sim-choice-grid sim-choice-grid--tiers">
-                  {GOOGLE_WORLD_MODE_OPTIONS.map((option) => {
+                  {WORLD_MODE_OPTIONS.map((option) => {
                     const isSelected = option.id === worldMode
 
                     return (
                       <button
                         key={option.id}
                         className={`sim-choice${isSelected ? ' is-selected' : ''}`}
-                        onClick={() => setWorldMode(option.id)}
+                        onClick={() => handleWorldModeChange(option.id)}
                         type="button"
                       >
                         <strong>{option.label}</strong>
@@ -575,7 +643,9 @@ export function SimulatorApp() {
                   <span>
                     {worldMode === 'premium-3d'
                       ? 'sampled terrain floor'
-                      : 'shared launch-floor baseline'}
+                      : worldMode === 'godogen-3d'
+                        ? 'procedural terrain floor'
+                        : 'shared launch-floor baseline'}
                   </span>
                 </div>
               </div>
@@ -644,16 +714,6 @@ export function SimulatorApp() {
               </strong>
               <span>{worldDetail}</span>
             </div>
-          </div>
-
-          <div className="sim-flight-hud__analysis">
-            {tuningTelemetry.map((metric) => (
-              <article key={metric.label} className="sim-flight-insight">
-                <strong>{metric.value}</strong>
-                <span>{metric.label}</span>
-                <p>{metric.detail}</p>
-              </article>
-            ))}
           </div>
 
           <div className="sim-flight-hud__strip">

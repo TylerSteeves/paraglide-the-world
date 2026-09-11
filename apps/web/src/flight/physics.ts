@@ -3,6 +3,7 @@ import { derivesFromHomeRowControls } from '../sim/home-row-controls'
 import type { FlightAssistProfile } from '../sim/flight-assist'
 import type { FlightSite } from '../sim/site-data'
 import {
+  getLocalAmbientAirState,
   getRidgeAirMass,
   getThermalAirMass,
   getTurbulenceVerticalGust,
@@ -66,6 +67,70 @@ function getTurnRateDegPerSecond(bankDeg: number, airspeedKmh: number) {
   return toDegrees((9.81 * Math.tan(bankRadians)) / airspeedMetersPerSecond)
 }
 
+function getAngleOfAttackDeg(
+  pitchDeg: number,
+  verticalSpeedMetersPerSecond: number,
+  airspeedKmh: number,
+  symmetricBrake: number,
+  speedBarTravel: number,
+  flareEffectiveness: number,
+  turbulence: number,
+) {
+  const airspeedMetersPerSecond = Math.max(airspeedKmh / 3.6, 0.1)
+  const flightPathAngleDeg = toDegrees(
+    Math.atan2(verticalSpeedMetersPerSecond, airspeedMetersPerSecond),
+  )
+
+  return clamp(
+    attitude.trimAngleOfAttackDeg +
+      pitchDeg -
+      flightPathAngleDeg +
+      symmetricBrake * attitude.brakeAngleOfAttackGainDeg -
+      speedBarTravel * attitude.speedBarAngleOfAttackLossDeg +
+      flareEffectiveness * attitude.flareAngleOfAttackGainDeg +
+      turbulence * attitude.turbulenceAngleOfAttackGainDeg,
+    attitude.minAngleOfAttackDeg,
+    attitude.maxAngleOfAttackDeg,
+  )
+}
+
+function getAngleOfAttackStallWarning(angleOfAttackDeg: number) {
+  return clamp(
+    (angleOfAttackDeg - stability.stallAngleOfAttackStartDeg) /
+      stability.stallAngleOfAttackRangeDeg,
+    0,
+    1,
+  )
+}
+
+function getGroundEffectFactor(groundClearanceMeters: number, airspeedKmh: number) {
+  const heightFactor = clamp(
+    (landing.groundEffectHeightMeters - groundClearanceMeters) /
+      landing.groundEffectHeightMeters,
+    0,
+    1,
+  )
+  const speedFactor = clamp(
+    (airspeedKmh - baselineWing.flareMinAirspeedKmh) /
+      (baselineWing.bestGlideReferenceKmh - baselineWing.flareMinAirspeedKmh),
+    0,
+    1,
+  )
+
+  return heightFactor * speedFactor
+}
+
+function getGlideRatio(
+  groundSpeedKmh: number,
+  verticalSpeedMetersPerSecond: number,
+) {
+  if (verticalSpeedMetersPerSecond >= -0.05) {
+    return 0
+  }
+
+  return (groundSpeedKmh / 3.6) / Math.max(-verticalSpeedMetersPerSecond, 0.05)
+}
+
 function getFlightPhase(
   elapsedSeconds: number,
   groundClearanceMeters: number,
@@ -103,6 +168,9 @@ export function createInitialFlightState(
     airspeedKmh: baselineWing.trimAirspeedKmh,
     groundSpeedKmh: baselineWing.trimAirspeedKmh,
     verticalSpeedMetersPerSecond: 0.1,
+    angleOfAttackDeg: attitude.trimAngleOfAttackDeg,
+    loadFactor: 1,
+    glideRatio: baselineWing.bestGlideReferenceKmh / 3.6 / baselineWing.baselineSinkMetersPerSecond,
     ridgeLiftMetersPerSecond: site.baseRidgeLiftMetersPerSecond,
     thermalLiftMetersPerSecond: 0,
     airMassSinkMetersPerSecond: 0,
@@ -117,6 +185,9 @@ export function createInitialFlightState(
     landingRating: 'none',
     flightPhase: 'launch',
     debug: {
+      airDensityKgPerCubicMeter: 1.225,
+      windGradientFactor: 1,
+      groundEffectLiftMetersPerSecond: 0,
       baseSinkMetersPerSecond: 0,
       inducedTurnSinkMetersPerSecond: 0,
       brakeSinkMetersPerSecond: 0,
@@ -165,6 +236,9 @@ export function stepFlightState(
       airspeedKmh: 0,
       groundSpeedKmh: 0,
       verticalSpeedMetersPerSecond: 0,
+      angleOfAttackDeg: 0,
+      loadFactor: 1,
+      glideRatio: 0,
       groundClearanceMeters: 0,
       bankDeg: approach(currentState.bankDeg, 0, input.deltaSeconds * 18),
       pitchDeg: approach(currentState.pitchDeg, 0, input.deltaSeconds * 12),
@@ -172,14 +246,21 @@ export function stepFlightState(
       elapsedSeconds: currentState.elapsedSeconds + input.deltaSeconds,
       debug: {
         ...currentState.debug,
+        windGradientFactor: 0,
+        groundEffectLiftMetersPerSecond: 0,
         turbulenceLiftMetersPerSecond: 0,
         flareLiftMetersPerSecond: 0,
       },
     }
   }
 
+  const localAtmosphere = getLocalAmbientAirState(
+    atmosphere,
+    currentState.altitudeMeters,
+    currentState.groundClearanceMeters,
+  )
   const effectiveTurbulence = clamp(
-    atmosphere.turbulence * (1 - assist.turbulenceDamping),
+    localAtmosphere.turbulence * (1 - assist.turbulenceDamping),
     0,
     1,
   )
@@ -194,7 +275,7 @@ export function stepFlightState(
       controlTuning.airspeedResponseRate *
       assist.inputResponsiveness,
   )
-  const stallWarning = clamp(
+  const controlStallWarning = clamp(
     (controls.symmetricBrake - stability.stallBrakeStart) /
       stability.stallBrakeRange +
       (stability.stallAirspeedReferenceKmh - airspeedKmh) /
@@ -203,6 +284,19 @@ export function stepFlightState(
       assist.recoveryAssist * stability.recoveryAssistStallRelief,
     0,
     1,
+  )
+  const estimatedAngleOfAttackDeg = getAngleOfAttackDeg(
+    currentState.pitchDeg,
+    currentState.verticalSpeedMetersPerSecond,
+    airspeedKmh,
+    controls.symmetricBrake,
+    controls.speedBarTravel,
+    0,
+    effectiveTurbulence,
+  )
+  const stallWarning = Math.max(
+    controlStallWarning,
+    getAngleOfAttackStallWarning(estimatedAngleOfAttackDeg),
   )
   const controlAuthority = clamp(
     assist.inputResponsiveness +
@@ -239,15 +333,15 @@ export function stepFlightState(
   const ridgeAirMass = getRidgeAirMass(
     currentState.latitude,
     currentState.longitude,
-    atmosphere.windHeadingDeg,
-    atmosphere.windSpeedKmh,
+    localAtmosphere.windHeadingDeg,
+    localAtmosphere.windSpeedKmh,
     input.site,
   )
   const thermalAirMass = getThermalAirMass(
     currentState.latitude,
     currentState.longitude,
     currentState.elapsedSeconds,
-    atmosphere,
+    localAtmosphere,
     input.site,
   )
   const turbulenceLiftMetersPerSecond = getTurbulenceVerticalGust(
@@ -308,6 +402,14 @@ export function stepFlightState(
     baselineWing.flareMinAirspeedKmh,
     baselineWing.maxAirspeedKmh,
   )
+  const groundEffectFactor = getGroundEffectFactor(
+    currentState.groundClearanceMeters,
+    airspeedKmh,
+  )
+  const groundEffectLiftMetersPerSecond =
+    groundEffectFactor * landing.groundEffectLiftMultiplier
+  const groundEffectSinkReliefMetersPerSecond =
+    groundEffectFactor * landing.groundEffectSinkRelief
 
   const airMassSinkMetersPerSecond =
     ridgeAirMass.leeSinkMetersPerSecond + thermalAirMass.sinkMetersPerSecond
@@ -316,13 +418,15 @@ export function stepFlightState(
     inducedTurnSinkMetersPerSecond +
     brakeSinkMetersPerSecond +
     stallSinkMetersPerSecond +
-    airMassSinkMetersPerSecond
+    airMassSinkMetersPerSecond -
+    groundEffectSinkReliefMetersPerSecond
   const verticalSpeedMetersPerSecond =
     thermalAirMass.liftMetersPerSecond +
     ridgeAirMass.ridgeLiftMetersPerSecond +
     turbulenceLiftMetersPerSecond +
     flareLiftMetersPerSecond -
-    totalSinkMetersPerSecond
+    totalSinkMetersPerSecond +
+    groundEffectLiftMetersPerSecond
   const targetPitchDeg = clamp(
     attitude.trimPitchDeg +
       controls.speedBarTravel * attitude.speedBarPitchGainDeg -
@@ -338,10 +442,19 @@ export function stepFlightState(
     targetPitchDeg,
     input.deltaSeconds * attitude.pitchResponseRate,
   )
+  const angleOfAttackDeg = getAngleOfAttackDeg(
+    pitchDeg,
+    verticalSpeedMetersPerSecond,
+    airspeedKmh,
+    controls.symmetricBrake,
+    controls.speedBarTravel,
+    flareEffectiveness,
+    effectiveTurbulence,
+  )
   const headingRad = toRadians(headingDeg)
-  const windHeadingRad = toRadians(atmosphere.windHeadingDeg)
+  const windHeadingRad = toRadians(localAtmosphere.windHeadingDeg)
   const airspeedMetersPerSecond = airspeedKmh / 3.6
-  const windMetersPerSecond = atmosphere.windSpeedKmh / 3.6
+  const windMetersPerSecond = localAtmosphere.windSpeedKmh / 3.6
   const eastMetersPerSecond =
     Math.sin(headingRad) * airspeedMetersPerSecond +
     Math.sin(windHeadingRad) * windMetersPerSecond
@@ -349,6 +462,10 @@ export function stepFlightState(
     Math.cos(headingRad) * airspeedMetersPerSecond +
     Math.cos(windHeadingRad) * windMetersPerSecond
   const groundSpeedKmh = Math.hypot(eastMetersPerSecond, northMetersPerSecond) * 3.6
+  const glideRatio = getGlideRatio(
+    groundSpeedKmh,
+    verticalSpeedMetersPerSecond,
+  )
   const nextLatitude =
     currentState.latitude +
     (northMetersPerSecond * input.deltaSeconds) / 111_320
@@ -403,6 +520,9 @@ export function stepFlightState(
       airspeedKmh: 0,
       groundSpeedKmh: 0,
       verticalSpeedMetersPerSecond: 0,
+      angleOfAttackDeg,
+      loadFactor,
+      glideRatio: 0,
       ridgeLiftMetersPerSecond: ridgeAirMass.ridgeLiftMetersPerSecond,
       thermalLiftMetersPerSecond: thermalAirMass.liftMetersPerSecond,
       airMassSinkMetersPerSecond,
@@ -419,6 +539,9 @@ export function stepFlightState(
       landingRating,
       flightPhase: landingRating === 'crash' ? 'crashed' : 'landed',
       debug: {
+        airDensityKgPerCubicMeter: localAtmosphere.airDensityKgPerCubicMeter,
+        windGradientFactor: localAtmosphere.windGradientFactor,
+        groundEffectLiftMetersPerSecond,
         baseSinkMetersPerSecond,
         inducedTurnSinkMetersPerSecond,
         brakeSinkMetersPerSecond,
@@ -444,6 +567,9 @@ export function stepFlightState(
     airspeedKmh,
     groundSpeedKmh,
     verticalSpeedMetersPerSecond,
+    angleOfAttackDeg,
+    loadFactor,
+    glideRatio,
     ridgeLiftMetersPerSecond: ridgeAirMass.ridgeLiftMetersPerSecond,
     thermalLiftMetersPerSecond: thermalAirMass.liftMetersPerSecond,
     airMassSinkMetersPerSecond,
@@ -464,6 +590,9 @@ export function stepFlightState(
       flareEffectiveness,
     ),
     debug: {
+      airDensityKgPerCubicMeter: localAtmosphere.airDensityKgPerCubicMeter,
+      windGradientFactor: localAtmosphere.windGradientFactor,
+      groundEffectLiftMetersPerSecond,
       baseSinkMetersPerSecond,
       inducedTurnSinkMetersPerSecond,
       brakeSinkMetersPerSecond,

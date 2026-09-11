@@ -131,6 +131,27 @@ function transformLocalPoints(modelMatrix: Matrix4, localPoints: Cartesian3[]) {
   return localPoints.map((localPoint) => transformLocalPoint(modelMatrix, localPoint))
 }
 
+function clearWorldContent(
+  viewer: Viewer,
+  tilesetRef: { current: Cesium3DTileset | null },
+) {
+  const tileset = tilesetRef.current
+
+  if (tileset) {
+    tilesetRef.current = null
+
+    if (viewer.scene.primitives.contains(tileset)) {
+      viewer.scene.primitives.remove(tileset)
+    }
+
+    if (!tileset.isDestroyed()) {
+      tileset.destroy()
+    }
+  }
+
+  viewer.imageryLayers.removeAll(true)
+}
+
 function getConfigNeededDetail(mode: GoogleWorldMode) {
   return mode === 'premium-3d'
     ? 'Set VITE_GOOGLE_MAPS_API_KEY to stream Google photorealistic 3D terrain.'
@@ -143,10 +164,10 @@ function getWorldLoadingDetail(mode: GoogleWorldMode) {
     : 'Streaming Google satellite tiles...'
 }
 
-function getWorldReadyDetail(mode: GoogleWorldMode, site: FlightSite) {
+function getWorldReadyDetail(mode: GoogleWorldMode, siteName: string) {
   return mode === 'premium-3d'
-    ? `${site.name} photorealistic terrain loaded.`
-    : `${site.name} satellite tiles loaded.`
+    ? `${siteName} photorealistic terrain loaded.`
+    : `${siteName} satellite tiles loaded.`
 }
 
 export function GooglePhotorealisticWorld({
@@ -163,6 +184,29 @@ export function GooglePhotorealisticWorld({
   const gliderRigRef = useRef<GliderRig | null>(null)
   const chaseCameraRef = useRef<ChaseCameraState>(DEFAULT_CAMERA_STATE)
   const isWorldReadyRef = useRef(false)
+  const worldLoadTokenRef = useRef(0)
+  const initialModeRef = useRef(mode)
+  const initialSiteRef = useRef(site)
+  const callbackRefs = useRef({
+    onTerrainSample,
+    onWorldStatusChange,
+  })
+  const {
+    id: siteId,
+    latitude: siteLatitude,
+    launchAltitudeMeters: siteLaunchAltitudeMeters,
+    longitude: siteLongitude,
+    name: siteName,
+    prevailingWindHeadingDeg: sitePrevailingWindHeadingDeg,
+    spawnAglMeters: siteSpawnAglMeters,
+  } = site
+
+  useEffect(() => {
+    callbackRefs.current = {
+      onTerrainSample,
+      onWorldStatusChange,
+    }
+  }, [onTerrainSample, onWorldStatusChange])
 
   useEffect(() => {
     if (!containerRef.current || viewerRef.current) {
@@ -187,7 +231,7 @@ export function GooglePhotorealisticWorld({
         skyBox: false,
         shouldAnimate: true,
         scene3DOnly: true,
-        shadows: mode === 'premium-3d',
+        shadows: initialModeRef.current === 'premium-3d',
       })
     } catch (error) {
       const detail =
@@ -196,12 +240,12 @@ export function GooglePhotorealisticWorld({
           : 'Cesium could not initialize WebGL for this device or browser.'
 
       isWorldReadyRef.current = false
-      onWorldStatusChange('error', detail)
+      callbackRefs.current.onWorldStatusChange('error', detail)
       return
     }
 
-    viewer.scene.globe.show = mode === 'standard-2d'
-    viewer.scene.globe.enableLighting = mode === 'premium-3d'
+    viewer.scene.globe.show = true
+    viewer.scene.globe.enableLighting = initialModeRef.current === 'premium-3d'
     viewer.scene.fog.enabled = true
     if (viewer.scene.skyAtmosphere) {
       viewer.scene.skyAtmosphere.show = true
@@ -215,9 +259,9 @@ export function GooglePhotorealisticWorld({
     viewer.creditDisplay.addStaticCredit(new Credit('Google Maps Platform data'))
 
     const initialGliderPosition = Cartesian3.fromDegrees(
-      site.longitude,
-      site.latitude,
-      site.launchAltitudeMeters + site.spawnAglMeters,
+      initialSiteRef.current.longitude,
+      initialSiteRef.current.latitude,
+      initialSiteRef.current.launchAltitudeMeters + initialSiteRef.current.spawnAglMeters,
     )
     const pilotHeadColor = Color.fromCssColorString('#f8fafc')
     const harnessColor = Color.fromCssColorString('#111827')
@@ -289,25 +333,24 @@ export function GooglePhotorealisticWorld({
     viewerRef.current = viewer
     chaseCameraRef.current = {
       ...DEFAULT_CAMERA_STATE,
-      headingDeg: site.prevailingWindHeadingDeg,
+      headingDeg: initialSiteRef.current.prevailingWindHeadingDeg,
     }
 
     return () => {
-      viewer.destroy()
+      worldLoadTokenRef.current += 1
+      const activeViewer = viewerRef.current
       viewerRef.current = null
+
+      if (activeViewer) {
+        clearWorldContent(activeViewer, tilesetRef)
+        activeViewer.destroy()
+      }
       tilesetRef.current = null
       gliderRigRef.current = null
       chaseCameraRef.current = DEFAULT_CAMERA_STATE
+      isWorldReadyRef.current = false
     }
-  }, [
-    mode,
-    onWorldStatusChange,
-    site.latitude,
-    site.launchAltitudeMeters,
-    site.longitude,
-    site.prevailingWindHeadingDeg,
-    site.spawnAglMeters,
-  ])
+  }, [])
 
   useEffect(() => {
     const viewer = viewerRef.current
@@ -316,45 +359,80 @@ export function GooglePhotorealisticWorld({
       return
     }
 
+    viewer.shadows = mode === 'premium-3d'
+    viewer.scene.globe.enableLighting = mode === 'premium-3d'
+    viewer.scene.requestRender()
+  }, [mode])
+
+  useEffect(() => {
+    chaseCameraRef.current = {
+      ...DEFAULT_CAMERA_STATE,
+      headingDeg: normalizeDegrees(sitePrevailingWindHeadingDeg),
+    }
+  }, [siteId, sitePrevailingWindHeadingDeg])
+
+  useEffect(() => {
+    const viewer = viewerRef.current
+
+    if (!viewer) {
+      return
+    }
+
+    const requestId = ++worldLoadTokenRef.current
+
     if (!apiKey) {
       isWorldReadyRef.current = false
-      onWorldStatusChange('config-needed', getConfigNeededDetail(mode))
+      callbackRefs.current.onTerrainSample(null)
+      clearWorldContent(viewer, tilesetRef)
+      viewer.scene.globe.show = true
+      viewer.scene.globe.enableLighting = mode === 'premium-3d'
+      callbackRefs.current.onWorldStatusChange('config-needed', getConfigNeededDetail(mode))
       return
     }
 
     let cancelled = false
 
     async function loadWorld() {
-      onWorldStatusChange('loading', getWorldLoadingDetail(mode))
+      const activeViewer = viewerRef.current
+
+      if (!activeViewer) {
+        return
+      }
+
+      const worldViewer: Viewer = activeViewer
+
+      clearWorldContent(worldViewer, tilesetRef)
+      isWorldReadyRef.current = false
+      worldViewer.scene.globe.show = true
+      worldViewer.scene.globe.enableLighting = mode === 'premium-3d'
+      callbackRefs.current.onTerrainSample(null)
+      callbackRefs.current.onWorldStatusChange('loading', getWorldLoadingDetail(mode))
 
       async function loadSatelliteImagery(detail: string) {
         const imageryProvider = await Google2DImageryProvider.fromUrl({
           key: apiKey ?? undefined,
           mapType: 'satellite',
         })
-        const activeViewer = viewerRef.current
-
-        if (cancelled || !activeViewer) {
+        if (cancelled || requestId !== worldLoadTokenRef.current) {
           return false
         }
 
-        activeViewer.scene.globe.show = true
-        activeViewer.scene.globe.enableLighting = false
-        activeViewer.imageryLayers.removeAll(true)
-        activeViewer.imageryLayers.add(
+        worldViewer.scene.globe.show = true
+        worldViewer.scene.globe.enableLighting = false
+        worldViewer.imageryLayers.add(
           new ImageryLayer(
             imageryProvider as unknown as ConstructorParameters<typeof ImageryLayer>[0],
           ),
         )
         isWorldReadyRef.current = true
-        onTerrainSample(site.launchAltitudeMeters)
-        onWorldStatusChange('ready', detail)
+        callbackRefs.current.onTerrainSample(siteLaunchAltitudeMeters)
+        callbackRefs.current.onWorldStatusChange('ready', detail)
         return true
       }
 
       try {
         if (mode === 'standard-2d') {
-          await loadSatelliteImagery(getWorldReadyDetail(mode, site))
+          await loadSatelliteImagery(getWorldReadyDetail(mode, siteName))
           return
         }
 
@@ -370,20 +448,22 @@ export function GooglePhotorealisticWorld({
           maximumScreenSpaceError: 18,
           skipLevelOfDetail: true,
         })
-        const activeViewer = viewerRef.current
 
-        if (cancelled || !activeViewer) {
+        if (cancelled || requestId !== worldLoadTokenRef.current) {
+          if (!tileset.isDestroyed()) {
+            tileset.destroy()
+          }
           return
         }
 
-        activeViewer.scene.globe.show = false
-        activeViewer.scene.globe.enableLighting = true
-        activeViewer.scene.primitives.add(tileset)
+        worldViewer.scene.globe.show = false
+        worldViewer.scene.globe.enableLighting = true
+        worldViewer.scene.primitives.add(tileset)
         tilesetRef.current = tileset
         isWorldReadyRef.current = true
-        onWorldStatusChange('ready', getWorldReadyDetail(mode, site))
+        callbackRefs.current.onWorldStatusChange('ready', getWorldReadyDetail(mode, siteName))
       } catch (error) {
-        if (cancelled) {
+        if (cancelled || requestId !== worldLoadTokenRef.current) {
           return
         }
 
@@ -409,7 +489,8 @@ export function GooglePhotorealisticWorld({
         }
 
         isWorldReadyRef.current = false
-        onWorldStatusChange('error', detail)
+        callbackRefs.current.onTerrainSample(null)
+        callbackRefs.current.onWorldStatusChange('error', detail)
       }
     }
 
@@ -417,8 +498,23 @@ export function GooglePhotorealisticWorld({
 
     return () => {
       cancelled = true
+      const activeViewer = viewerRef.current
+
+      if (requestId === worldLoadTokenRef.current && activeViewer) {
+        clearWorldContent(activeViewer, tilesetRef)
+      }
     }
-  }, [apiKey, mode, onTerrainSample, onWorldStatusChange, site])
+  }, [
+    apiKey,
+    mode,
+    siteId,
+    siteLatitude,
+    siteLaunchAltitudeMeters,
+    siteLongitude,
+    siteName,
+    sitePrevailingWindHeadingDeg,
+    siteSpawnAglMeters,
+  ])
 
   useEffect(() => {
     const viewer = viewerRef.current

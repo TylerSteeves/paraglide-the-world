@@ -41,6 +41,16 @@ export const HOME_ROW_CONTROL_GUIDE = [
   { keyLabel: 'Space', description: 'speed bar' },
 ] as const
 
+export type HomeRowControlKey = 'a' | 'f' | 'j' | ';' | 'space'
+
+const HOME_ROW_CONTROL_CODES: Record<string, HomeRowControlKey> = {
+  KeyA: 'a',
+  KeyF: 'f',
+  KeyJ: 'j',
+  Semicolon: ';',
+  Space: 'space',
+}
+
 function clamp(value: number, min: number, max: number) {
   return Math.min(max, Math.max(min, value))
 }
@@ -61,12 +71,39 @@ export function normalizeHomeRowControlKey(key: string) {
   return key.toLowerCase()
 }
 
+export function resolveHomeRowControlKey(
+  key: string,
+  code?: string,
+): HomeRowControlKey | null {
+  if (typeof code === 'string') {
+    const controlKey = HOME_ROW_CONTROL_CODES[code]
+
+    if (controlKey) {
+      return controlKey
+    }
+  }
+
+  const normalizedKey = normalizeHomeRowControlKey(key)
+
+  switch (normalizedKey) {
+    case 'a':
+    case 'f':
+    case 'j':
+    case ';':
+    case 'space':
+      return normalizedKey
+    default:
+      return null
+  }
+}
+
 export function applyHomeRowControlKey(
   controls: HomeRowControlState,
   key: string,
   isPressed: boolean,
+  code?: string,
 ): HomeRowControlState {
-  const normalizedKey = normalizeHomeRowControlKey(key)
+  const normalizedKey = resolveHomeRowControlKey(key, code)
 
   switch (normalizedKey) {
     case 'a':

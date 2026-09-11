@@ -1,0 +1,73 @@
+vehicle_name: Hybrid Hydrogen Airship
+reference_date: 2026-04-17
+
+geometry:
+  hull_volume_m3: 45000.0
+  hull_fineness_ratio: 4.7
+  hull_length_m: 123.8235361553
+  hull_max_diameter_m: 26.3454332245
+  hull_max_radius_m: 13.1727166123
+  hull_reference_area_m2: 545.1408809984
+  hull_wetted_area_m2: 8012.0
+  wing_span_m: 72.5
+  wing_area_m2: 350.0
+  wing_aspect_ratio: 15.0178571429
+  wing_taper_ratio: 0.32
+  wing_root_chord_m: 7.3145245559
+  wing_tip_chord_m: 2.3406478579
+  wing_quarter_chord_sweep_deg: 12.0
+  wing_dihedral_deg: 3.5
+  wing_washout_tip_deg: -2.6
+  wing_root_thickness_ratio: 0.40
+  wing_mid_thickness_ratio: 0.30
+  wing_tip_thickness_ratio: 0.22
+  wing_root_camber_ratio: 0.08
+  wing_mid_camber_ratio: 0.06
+  wing_tip_camber_ratio: 0.04
+  wing_membrane_profile_exponent: 0.82
+  keel_length_m: 30.0
+  keel_diameter_m: 6.0
+  keel_vertical_offset_m: -17.0
+
+design_targets:
+  gross_mass_kg: 60000.0
+  payload_mass_kg: 27216.0
+  buoyancy_fraction_of_weight: 0.85
+  wing_lift_fraction_of_weight: 0.15
+  cruise_speed_mps: 25.0
+  loiter_speed_mps: 15.0
+  max_analysis_speed_mps: 35.0
+  design_altitude_m: 0.0
+
+atmosphere:
+  sea_level_temperature_k: 288.15
+  sea_level_pressure_pa: 101325.0
+  lapse_rate_k_per_m: 0.0065
+  gas_constant_air_j_per_kgk: 287.05
+  gravity_m_per_s2: 9.80665
+  sea_level_air_density_kg_per_m3: 1.225
+  hydrogen_density_kg_per_m3: 0.08988
+
+mass_cases:
+  reference:
+    gross_mass_kg: 60000.0
+    payload_mass_kg: 27216.0
+    structure_and_systems_mass_kg: 32784.0
+  near_empty_payload:
+    gross_mass_kg: 35000.0
+    payload_mass_kg: 2000.0
+    structure_and_systems_mass_kg: 33000.0
+
+analysis_cases:
+  cruise:
+    speed_mps: 25.0
+    altitude_m: 0.0
+    wind_mps: 8.0
+  loiter:
+    speed_mps: 15.0
+    altitude_m: 0.0
+    wind_mps: 5.0
+  gust_crosswind:
+    speed_mps: 20.0
+    altitude_m: 0.0
+    wind_mps: 15.0
