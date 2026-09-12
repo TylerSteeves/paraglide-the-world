@@ -121,6 +121,14 @@ function initApp() {
     inputManager.toggleReverseStance()
   })
 
+  hud.setOnToggleInvertTrackpad(() => {
+    const inverted = inputManager.toggleInvertTrackpad()
+    hud.updateTrackpadInvertLabel(inverted)
+  })
+  inputManager.onToggleInvertTrackpad = (inverted) => {
+    hud.updateTrackpadInvertLabel(inverted)
+  }
+
   const spawnAlpine = () => {
     sim.reset(2050, 5, { x: 0, y: 2050, z: 0 })
     actionCam.snap()
@@ -184,7 +192,11 @@ function initApp() {
       actionCam.update(sim, dt)
 
       // Step H: Update HUD
-      hud.update(sim.telemetry, sim.controls, trickState)
+      hud.update(sim.telemetry, sim.controls, trickState, {
+        active: inputManager.trackpadActive,
+        pitch: inputManager.trackpadPitch,
+        roll: inputManager.trackpadRoll,
+      })
     } else {
       // Pre-launch preview state: Keep rig and action camera positioned
       rig.update(sim, actionCam.vantage)

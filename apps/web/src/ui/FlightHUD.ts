@@ -12,6 +12,12 @@ export class FlightHUD {
   private stanceEl!: HTMLElement
   private leftThumbIndicator!: HTMLElement
   private rightThumbIndicator!: HTMLElement
+  private leftBrakeThumb!: HTMLElement
+  private rightBrakeThumb!: HTMLElement
+  private leftBrakePct!: HTMLElement
+  private rightBrakePct!: HTMLElement
+  private trackpadBadge!: HTMLElement
+  private trackpadInvertBtn!: HTMLElement
   private startModalEl!: HTMLElement
   private lensBtnLabel!: HTMLElement
   private vantageBtnLabel!: HTMLElement
@@ -24,6 +30,7 @@ export class FlightHUD {
   private onCycleLensCallback: () => void = () => {}
   private onCycleVantageCallback: () => void = () => {}
   private onToggleReverseCallback: () => void = () => {}
+  private onToggleInvertTrackpadCallback: () => void = () => {}
 
   constructor(containerId: string) {
     const el = document.getElementById(containerId)
@@ -65,6 +72,19 @@ export class FlightHUD {
     this.onToggleReverseCallback = callback
   }
 
+  public setOnToggleInvertTrackpad(callback: () => void) {
+    this.onToggleInvertTrackpadCallback = callback
+  }
+
+  public updateTrackpadInvertLabel(inverted: boolean) {
+    if (this.trackpadInvertBtn) {
+      this.trackpadInvertBtn.innerText = inverted
+        ? '↕ TRACKPAD: PUSH=BRAKE [I]'
+        : '↕ TRACKPAD: PULL=BRAKE [I]'
+      this.trackpadInvertBtn.style.borderColor = inverted ? '#f59e0b' : '#38bdf8'
+    }
+  }
+
   public updateLensLabel(mode: string) {
     if (this.lensBtnLabel) {
       if (mode === 'action-cam') {
@@ -95,7 +115,7 @@ export class FlightHUD {
     this.container.innerHTML = `
       <!-- Build Version Badge -->
       <div style="position: absolute; top: 12px; right: 14px; background: rgba(14, 165, 233, 0.25); border: 1px solid #0ea5e9; color: #7dd3fc; font-size: 11px; font-weight: 800; padding: 4px 10px; border-radius: 8px; letter-spacing: 0.5px; z-index: 25; backdrop-filter: blur(8px); box-shadow: 0 2px 10px rgba(0,0,0,0.3);">
-        BUILD v3.0 • FIRST-PRINCIPLES ACRO & SPEEDWING ENGINE
+        BUILD v3.0 • MOBILE & TRACKPAD ENGINE
       </div>
 
       <!-- Top Telemetry Bar -->
@@ -132,10 +152,19 @@ export class FlightHUD {
       </div>
 
       <!-- Mode & Stance Indicator -->
-      <div style="position: absolute; top: 72px; left: 24px; z-index: 20; display: flex; gap: 8px;">
+      <div style="position: absolute; top: 72px; left: 24px; z-index: 20; display: flex; gap: 8px; flex-wrap: wrap;">
         <button id="hud-stance-btn" style="background: rgba(0,0,0,0.55); border: 1px solid rgba(255,255,255,0.2); color: #fff; padding: 6px 14px; border-radius: 8px; font-weight: 700; font-size: 12px; cursor: pointer; backdrop-filter: blur(6px);">
           STANCE: FORWARD FLIGHT [R]
         </button>
+        <button id="hud-trackpad-invert-btn" style="background: rgba(14, 165, 233, 0.2); border: 1px solid #38bdf8; color: #7dd3fc; padding: 6px 14px; border-radius: 8px; font-weight: 700; font-size: 12px; cursor: pointer; backdrop-filter: blur(6px);">
+          ↕ TRACKPAD: PULL=BRAKE [I]
+        </button>
+      </div>
+
+      <!-- Active Trackpad Gesture Banner -->
+      <div id="hud-trackpad-badge" style="position: absolute; top: 114px; left: 24px; z-index: 20; background: rgba(0,0,0,0.65); border: 1px solid rgba(56, 189, 248, 0.4); color: #e0f2fe; padding: 5px 12px; border-radius: 6px; font-size: 11px; font-weight: 600; letter-spacing: 0.3px; backdrop-filter: blur(6px); display: flex; align-items: center; gap: 6px;">
+        <span style="display: inline-block; width: 8px; height: 8px; border-radius: 4px; background: #38bdf8; box-shadow: 0 0 6px #38bdf8;"></span>
+        <span>GESTURES: ↕ Swipe Up/Down (Brakes/Bar) • ↔ Swipe Left/Right (Steer/Lean)</span>
       </div>
 
       <!-- Center Trick Announcement Banner -->
@@ -144,22 +173,26 @@ export class FlightHUD {
         <div class="trick-subtitle" id="hud-trick-sub">+3000 PTS</div>
       </div>
 
-      <!-- Touch Brake Sliders for Mobile / Visual Indicators -->
+      <!-- Visual Ergonomic Brake Riser Handles for Mobile Dual-Thumb & Trackpad -->
       <div class="touch-controls">
-        <div class="touch-zone left-zone">
+        <div class="touch-zone left-zone" id="left-touch-zone">
           <div class="brake-track">
             <div class="brake-fill" id="left-brake-fill"></div>
-            <div class="brake-thumb" id="left-brake-thumb"></div>
+            <div class="brake-thumb" id="left-brake-thumb">
+              <span class="brake-pct" id="left-brake-pct">0%</span>
+            </div>
           </div>
-          <span class="zone-label">LEFT BRAKE [A]</span>
+          <span class="zone-label">LEFT BRAKE (L-Thumb / Trackpad Left)</span>
         </div>
 
-        <div class="touch-zone right-zone">
+        <div class="touch-zone right-zone" id="right-touch-zone">
           <div class="brake-track">
             <div class="brake-fill" id="right-brake-fill"></div>
-            <div class="brake-thumb" id="right-brake-thumb"></div>
+            <div class="brake-thumb" id="right-brake-thumb">
+              <span class="brake-pct" id="right-brake-pct">0%</span>
+            </div>
           </div>
-          <span class="zone-label">RIGHT BRAKE [D]</span>
+          <span class="zone-label">RIGHT BRAKE (R-Thumb / Trackpad Right)</span>
         </div>
       </div>
 
@@ -189,25 +222,29 @@ export class FlightHUD {
           <p class="subtitle">Realistic First-Principles Speedwing & Acro Physics</p>
 
           <div class="controls-guide">
+            <div class="guide-item" style="background: rgba(14, 165, 233, 0.15); border: 1px solid rgba(14, 165, 233, 0.35);">
+              <span class="key-badge" style="background: #0284c7;">📱 MOBILE</span>
+              <span class="guide-desc"><b>Dual-Thumb Controls</b>: Drag left thumb down for left brake, right thumb down for right brake. Both down = Flare / Stall. Drag up for Speed Bar. Tilt phone to lean.</span>
+            </div>
+            <div class="guide-item" style="background: rgba(16, 185, 129, 0.15); border: 1px solid rgba(16, 185, 129, 0.35);">
+              <span class="key-badge" style="background: #059669;">💻 TRACKPAD</span>
+              <span class="guide-desc"><b>2 Gestures</b>: ↕ Swipe Up/Down (Pull down = Brakes & Snap Flare, Push up = Speed Bar). ↔ Swipe Left/Right to Steer & Lean. Press <span class="key-badge">I</span> to invert.</span>
+            </div>
             <div class="guide-item">
               <span class="key-badge">A</span> / <span class="key-badge">D</span>
               <span class="guide-desc">Carve Bank Turns & Deep Wingovers</span>
             </div>
             <div class="guide-item">
-              <span class="key-badge">W</span> / <span class="key-badge">SHIFT</span>
+              <span class="key-badge">W</span> / <span class="key-badge">SPACE</span>
               <span class="guide-desc">Speedbar / Steep Alpine Dive (Accelerate to 115-130 km/h)</span>
             </div>
             <div class="guide-item">
-              <span class="key-badge">S</span> (at high speed)
-              <span class="guide-desc">Infinite Tumble / Somersault Loop over the canopy!</span>
+              <span class="key-badge">SHIFT</span> / <span class="key-badge">S</span>
+              <span class="guide-desc">Snap Landing Flare (<span class="key-badge">SHIFT</span>) / Full Stall or Somersault Tumble (<span class="key-badge">S</span>)</span>
             </div>
             <div class="guide-item">
               <span class="key-badge">R</span>
               <span class="guide-desc">180° Reverse Stance (Dune Kiting & Ground Handling)</span>
-            </div>
-            <div class="guide-item">
-              <span class="key-badge">C</span> / <span class="key-badge">L</span>
-              <span class="guide-desc">Cycle 4 Camera Angles / GoPro Fisheye Optics</span>
             </div>
           </div>
 
@@ -231,8 +268,14 @@ export class FlightHUD {
     this.scoreEl = document.getElementById('hud-score')!
     this.trickBannerEl = document.getElementById('hud-trick-banner')!
     this.stanceEl = document.getElementById('hud-stance-btn')!
+    this.trackpadInvertBtn = document.getElementById('hud-trackpad-invert-btn')!
+    this.trackpadBadge = document.getElementById('hud-trackpad-badge')!
     this.leftThumbIndicator = document.getElementById('left-brake-fill')!
     this.rightThumbIndicator = document.getElementById('right-brake-fill')!
+    this.leftBrakeThumb = document.getElementById('left-brake-thumb')!
+    this.rightBrakeThumb = document.getElementById('right-brake-thumb')!
+    this.leftBrakePct = document.getElementById('left-brake-pct')!
+    this.rightBrakePct = document.getElementById('right-brake-pct')!
     this.startModalEl = document.getElementById('hud-start-modal')!
     this.lensBtnLabel = document.getElementById('lens-btn-label')!
     this.vantageBtnLabel = document.getElementById('vantage-btn-label')!
@@ -288,6 +331,10 @@ export class FlightHUD {
     if (this.stanceEl) {
       this.stanceEl.addEventListener('click', () => this.onToggleReverseCallback())
     }
+
+    if (this.trackpadInvertBtn) {
+      this.trackpadInvertBtn.addEventListener('click', () => this.onToggleInvertTrackpadCallback())
+    }
   }
 
   public hideStartModal() {
@@ -302,7 +349,12 @@ export class FlightHUD {
     }
   }
 
-  public update(telemetry: FlightTelemetry, controls: FlightControls, trick: TrickState) {
+  public update(
+    telemetry: FlightTelemetry,
+    controls: FlightControls,
+    trick: TrickState,
+    trackpadInfo?: { active: boolean; pitch: number; roll: number },
+  ) {
     if (this.altEl) this.altEl.innerText = `${Math.round(telemetry.altitudeMeters)}m`
     if (this.speedEl) this.speedEl.innerText = `${Math.round(telemetry.airspeedKmh)} km/h`
     if (this.varioEl) {
@@ -333,11 +385,53 @@ export class FlightHUD {
       this.stanceEl.style.color = telemetry.isReverseStance ? '#38bdf8' : '#fff'
     }
 
+    // Live Brake percentage & Riser toggle animations
+    const leftPctVal = Math.round(controls.leftBrake * 100)
+    const rightPctVal = Math.round(controls.rightBrake * 100)
+
     if (this.leftThumbIndicator) {
       this.leftThumbIndicator.style.height = `${controls.leftBrake * 100}%`
     }
     if (this.rightThumbIndicator) {
       this.rightThumbIndicator.style.height = `${controls.rightBrake * 100}%`
+    }
+
+    if (this.leftBrakeThumb) {
+      this.leftBrakeThumb.style.transform = `translateY(${controls.leftBrake * 85}px)`
+      if (this.leftBrakePct) this.leftBrakePct.innerText = `${leftPctVal}%`
+    }
+    if (this.rightBrakeThumb) {
+      this.rightBrakeThumb.style.transform = `translateY(${controls.rightBrake * 85}px)`
+      if (this.rightBrakePct) this.rightBrakePct.innerText = `${rightPctVal}%`
+    }
+
+    // Dynamic trackpad gesture indicator
+    if (this.trackpadBadge && trackpadInfo) {
+      if (trackpadInfo.active) {
+        this.trackpadBadge.style.opacity = '1.0'
+        const pitchText =
+          trackpadInfo.pitch > 0.05
+            ? `BRAKE ${(trackpadInfo.pitch * 100).toFixed(0)}%`
+            : trackpadInfo.pitch < -0.05
+              ? `BAR ${(-trackpadInfo.pitch * 100).toFixed(0)}%`
+              : 'TRIM'
+        const rollText =
+          trackpadInfo.roll < -0.05
+            ? `LEFT ${(Math.abs(trackpadInfo.roll) * 100).toFixed(0)}%`
+            : trackpadInfo.roll > 0.05
+              ? `RIGHT ${(trackpadInfo.roll * 100).toFixed(0)}%`
+              : 'CTR'
+        this.trackpadBadge.innerHTML = `
+          <span style="display: inline-block; width: 8px; height: 8px; border-radius: 4px; background: #22c55e; box-shadow: 0 0 8px #22c55e;"></span>
+          <span>TRACKPAD ACTIVE: ↕ ${pitchText} • ↔ ${rollText}</span>
+        `
+      } else {
+        this.trackpadBadge.style.opacity = '0.7'
+        this.trackpadBadge.innerHTML = `
+          <span style="display: inline-block; width: 8px; height: 8px; border-radius: 4px; background: #38bdf8; box-shadow: 0 0 6px #38bdf8;"></span>
+          <span>GESTURES: ↕ Swipe Up/Down (Brakes/Bar) • ↔ Swipe Left/Right (Steer/Lean)</span>
+        `
+      }
     }
 
     // Trick Announcements
