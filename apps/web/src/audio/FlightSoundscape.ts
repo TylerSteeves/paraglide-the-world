@@ -88,9 +88,9 @@ export class FlightSoundscape {
       }
 
       // Beep on/off pulse
-      const isBeeping = this.varioTimer < beepInterval
-      this.varioGain.gain.setTargetAtTime(isBeeping ? 0.08 : 0, this.ctx.currentTime, 0.015)
-    } else if (verticalSpeedMps < -2.4) {
+      const isBeeping = this.varioTimer < beepInterval && !this.varioMuted
+      this.varioGain.gain.setTargetAtTime(isBeeping ? 0.09 : 0, this.ctx.currentTime, 0.015)
+    } else if (verticalSpeedMps < -2.4 && !this.varioMuted) {
       // Strong sink (> 2.4 m/s sink) -> low sink tone
       const sinkPitch = Math.max(220, 420 + verticalSpeedMps * 35)
       this.varioOsc.frequency.setTargetAtTime(sinkPitch, this.ctx.currentTime, 0.05)
@@ -99,6 +99,16 @@ export class FlightSoundscape {
       // Near neutral glide -> quiet
       this.varioGain.gain.setTargetAtTime(0, this.ctx.currentTime, 0.05)
     }
+  }
+
+  public varioMuted: boolean = false
+
+  public toggleVario(): boolean {
+    this.varioMuted = !this.varioMuted
+    if (this.varioGain && this.ctx && this.varioMuted) {
+      this.varioGain.gain.setValueAtTime(0, this.ctx.currentTime)
+    }
+    return this.varioMuted
   }
 
   public playCoinSound() {

@@ -15,7 +15,12 @@ export class ParagliderRig {
   private pilotBodyPivot: TransformNode
 
   // Glider 3D Mesh
-  private canopyMesh: Mesh
+  private canopyMesh!: Mesh
+  private underMesh!: Mesh
+  public currentWingType: 'speedwing' | 'paraglider' = 'speedwing'
+  private canopyTopSpeedMat!: StandardMaterial
+  private canopyTopXcMat!: StandardMaterial
+  private canopyUnderMat!: StandardMaterial
 
   // Stylized Articulated Pilot
   private helmetMesh: Mesh
@@ -33,8 +38,8 @@ export class ParagliderRig {
   private rightKneeNode: TransformNode
 
   // Line Networks
-  private suspensionLinesMesh: LinesMesh
-  private brakeLinesMesh: LinesMesh
+  private suspensionLinesMesh!: LinesMesh
+  private brakeLinesMesh!: LinesMesh
 
   // Aerofoil Rib Paths
   private cellAttachmentPoints: Vector3[] = []
@@ -49,18 +54,24 @@ export class ParagliderRig {
     this.pilotBodyPivot.parent = this.pilotRoot
 
     // 1. High-End Stylized Materials
-    const canopyTopMat = new StandardMaterial('canopy-top-mat', scene)
-    canopyTopMat.diffuseColor = new Color3(0.96, 0.18, 0.12) // Neon speedwing crimson
-    canopyTopMat.specularColor = new Color3(0.25, 0.25, 0.25)
-    canopyTopMat.backFaceCulling = false
+    this.canopyTopSpeedMat = new StandardMaterial('canopy-top-speed-mat', scene)
+    this.canopyTopSpeedMat.diffuseColor = new Color3(0.96, 0.18, 0.12) // Neon speedwing crimson
+    this.canopyTopSpeedMat.specularColor = new Color3(0.25, 0.25, 0.25)
+    this.canopyTopSpeedMat.backFaceCulling = false
 
+    this.canopyTopXcMat = new StandardMaterial('canopy-top-xc-mat', scene)
+    this.canopyTopXcMat.diffuseColor = new Color3(0.98, 0.74, 0.14) // Sunburst Himalayan gold
+    this.canopyTopXcMat.specularColor = new Color3(0.35, 0.35, 0.35)
+    this.canopyTopXcMat.backFaceCulling = false
+
+    this.canopyUnderMat = new StandardMaterial('canopy-under-mat', scene)
+    this.canopyUnderMat.diffuseColor = new Color3(0.12, 0.72, 0.88) // Electric cyan under-surface
+    this.canopyUnderMat.specularColor = new Color3(0.1, 0.1, 0.1)
+
+    // Pilot Suit & Gear Materials
     const pilotSuitMat = new StandardMaterial('pilot-suit-mat', scene)
     pilotSuitMat.diffuseColor = new Color3(0.15, 0.20, 0.28) // Deep charcoal navy flight suit
     pilotSuitMat.specularColor = new Color3(0.06, 0.06, 0.06)
-
-    const pilotAccentMat = new StandardMaterial('pilot-accent-mat', scene)
-    pilotAccentMat.diffuseColor = new Color3(0.12, 0.72, 0.88) // Electric cyan straps & accents
-    pilotAccentMat.specularColor = new Color3(0.1, 0.1, 0.1)
 
     const helmetMat = new StandardMaterial('helmet-mat', scene)
     helmetMat.diffuseColor = new Color3(0.98, 0.98, 1.0) // Gloss white action helmet
@@ -82,70 +93,14 @@ export class ParagliderRig {
     bootMat.specularColor = new Color3(0.1, 0.1, 0.1)
 
     const sockMat = new StandardMaterial('sock-mat', scene)
-    sockMat.diffuseColor = new Color3(0.08, 0.72, 0.45) // Sporty electric green/teal socks (like media_1789151841324.jpg!)
+    sockMat.diffuseColor = new Color3(0.08, 0.72, 0.45) // Sporty electric green/teal socks
 
     const soleMat = new StandardMaterial('sole-mat', scene)
     soleMat.diffuseColor = new Color3(0.96, 0.96, 0.98) // White trail shoe EVA outsole
     soleMat.specularColor = new Color3(0.3, 0.3, 0.3)
 
-    // 2. Build 3D Elliptical Aerofoil Speedwing Canopy (32 Cells)
-    const numCells = 32
-    const halfSpan = 4.4 // 8.8m span
-    const chord = 2.35 // 2.35m chord
-
-    const upperRibbon: Vector3[] = []
-    const lowerRibbon: Vector3[] = []
-
-    for (let c = 0; c <= numCells; c++) {
-      const u = c / numCells
-      const x = -halfSpan + u * halfSpan * 2
-      const normX = Math.abs(x) / halfSpan
-
-      // Elliptical arch and aerodynamic wingtip sweep
-      const archY = (1 - Math.pow(normX, 1.9)) * 1.58
-      const sweepZ = Math.pow(normX, 1.7) * 0.75
-      const taperChord = chord * (1 - normX * 0.42)
-      const maxThick = taperChord * 0.16 // 16% cambered aerofoil
-
-      // Leading edge (+Z) and Trailing edge (-Z)
-      const leZ = sweepZ + taperChord * 0.48
-      const teZ = sweepZ - taperChord * 0.52
-
-      upperRibbon.push(new Vector3(x, archY + maxThick * 0.65, leZ))
-      upperRibbon.push(new Vector3(x, archY, teZ))
-
-      lowerRibbon.push(new Vector3(x, archY - maxThick * 0.35, leZ))
-      lowerRibbon.push(new Vector3(x, archY - 0.02, teZ))
-
-      if (c % 2 === 0) {
-        this.cellAttachmentPoints.push(new Vector3(x, archY - maxThick * 0.32, (leZ + teZ) * 0.5))
-      }
-      this.trailingEdgePoints.push(new Vector3(x, archY, teZ))
-    }
-
-    // Build unified dual-surface canopy
-    const upperPaths: Vector3[][] = []
-    const lowerPaths: Vector3[][] = []
-    for (let i = 0; i <= numCells; i++) {
-      upperPaths.push([upperRibbon[i * 2], upperRibbon[i * 2 + 1]])
-      lowerPaths.push([lowerRibbon[i * 2], lowerRibbon[i * 2 + 1]])
-    }
-
-    this.canopyMesh = MeshBuilder.CreateRibbon(
-      'speedwing-canopy',
-      { pathArray: [upperRibbon.filter((_, idx) => idx % 2 === 0), upperRibbon.filter((_, idx) => idx % 2 === 1)], updatable: true },
-      scene,
-    )
-    this.canopyMesh.material = canopyTopMat
-    this.canopyMesh.parent = this.canopyRoot
-
-    const underMesh = MeshBuilder.CreateRibbon(
-      'speedwing-under',
-      { pathArray: [lowerRibbon.filter((_, idx) => idx % 2 === 0), lowerRibbon.filter((_, idx) => idx % 2 === 1)], updatable: true },
-      scene,
-    )
-    underMesh.material = pilotAccentMat
-    underMesh.parent = this.canopyRoot
+    // Build initial Speedwing canopy & lines
+    this.buildCanopyAndLines('speedwing')
 
     // 3. Build Organic Stylized Character Model (Sphere-Packed / Clean Proportions)
     // Head & Helmet
@@ -307,10 +262,73 @@ export class ParagliderRig {
     rSole.material = soleMat
     rSole.parent = this.rightKneeNode
 
-    // 4. Line Network
+  }
+
+  public buildCanopyAndLines(wingType: 'speedwing' | 'paraglider') {
+    this.currentWingType = wingType
+    if (this.canopyMesh) this.canopyMesh.dispose()
+    if (this.underMesh) this.underMesh.dispose()
+    if (this.suspensionLinesMesh) this.suspensionLinesMesh.dispose()
+    if (this.brakeLinesMesh) this.brakeLinesMesh.dispose()
+
+    this.cellAttachmentPoints = []
+    this.trailingEdgePoints = []
+
+    const isXc = wingType === 'paraglider'
+    const numCells = isXc ? 44 : 32
+    const halfSpan = isXc ? 5.9 : 4.4 // 11.8m XC vs 8.8m Speedwing
+    const chord = isXc ? 2.45 : 2.35
+    const lineDrop = isXc ? -6.8 : -5.0
+
+    const upperRibbon: Vector3[] = []
+    const lowerRibbon: Vector3[] = []
+
+    for (let c = 0; c <= numCells; c++) {
+      const u = c / numCells
+      const x = -halfSpan + u * halfSpan * 2
+      const normX = Math.abs(x) / halfSpan
+
+      // Elliptical arch and aerodynamic wingtip sweep
+      const archY = (1 - Math.pow(normX, 1.9)) * (isXc ? 1.75 : 1.58)
+      const sweepZ = Math.pow(normX, 1.7) * (isXc ? 0.95 : 0.75)
+      const taperChord = chord * (1 - normX * (isXc ? 0.35 : 0.42))
+      const maxThick = taperChord * (isXc ? 0.17 : 0.16)
+
+      // Leading edge (+Z) and Trailing edge (-Z)
+      const leZ = sweepZ + taperChord * 0.48
+      const teZ = sweepZ - taperChord * 0.52
+
+      upperRibbon.push(new Vector3(x, archY + maxThick * 0.65, leZ))
+      upperRibbon.push(new Vector3(x, archY, teZ))
+
+      lowerRibbon.push(new Vector3(x, archY - maxThick * 0.35, leZ))
+      lowerRibbon.push(new Vector3(x, archY - 0.02, teZ))
+
+      if (c % 2 === 0) {
+        this.cellAttachmentPoints.push(new Vector3(x, archY - maxThick * 0.32, (leZ + teZ) * 0.5))
+      }
+      this.trailingEdgePoints.push(new Vector3(x, archY, teZ))
+    }
+
+    this.canopyMesh = MeshBuilder.CreateRibbon(
+      'rig-canopy-top',
+      { pathArray: [upperRibbon.filter((_, idx) => idx % 2 === 0), upperRibbon.filter((_, idx) => idx % 2 === 1)], updatable: true },
+      this.scene,
+    )
+    this.canopyMesh.material = isXc ? this.canopyTopXcMat : this.canopyTopSpeedMat
+    this.canopyMesh.parent = this.canopyRoot
+
+    this.underMesh = MeshBuilder.CreateRibbon(
+      'rig-canopy-under',
+      { pathArray: [lowerRibbon.filter((_, idx) => idx % 2 === 0), lowerRibbon.filter((_, idx) => idx % 2 === 1)], updatable: true },
+      this.scene,
+    )
+    this.underMesh.material = this.canopyUnderMat
+    this.underMesh.parent = this.canopyRoot
+
     const linesData: Vector3[][] = []
-    const leftCarabinerPos = new Vector3(-0.26, -5.0, 0.06)
-    const rightCarabinerPos = new Vector3(0.26, -5.0, 0.06)
+    const leftCarabinerPos = new Vector3(-0.26, lineDrop, 0.06)
+    const rightCarabinerPos = new Vector3(0.26, lineDrop, 0.06)
 
     for (const pt of this.cellAttachmentPoints) {
       const target = pt.x < 0 ? leftCarabinerPos : rightCarabinerPos
@@ -320,7 +338,7 @@ export class ParagliderRig {
     this.suspensionLinesMesh = MeshBuilder.CreateLineSystem(
       'rig-suspension-lines',
       { lines: linesData, updatable: true },
-      scene,
+      this.scene,
     )
     this.suspensionLinesMesh.color = new Color3(0.88, 0.92, 0.98)
     this.suspensionLinesMesh.parent = this.canopyRoot
@@ -332,13 +350,17 @@ export class ParagliderRig {
     this.brakeLinesMesh = MeshBuilder.CreateLineSystem(
       'rig-brake-lines',
       { lines: brakeLinesData, updatable: true },
-      scene,
+      this.scene,
     )
     this.brakeLinesMesh.color = new Color3(0.98, 0.42, 0.12)
     this.brakeLinesMesh.parent = this.canopyRoot
   }
 
   public update(sim: ParagliderSimulation, vantage: string = 'pilot-fpv'): void {
+    if (sim.currentWingType !== this.currentWingType) {
+      this.buildCanopyAndLines(sim.currentWingType)
+    }
+
     // In pilot FPV, disable head and torso to eliminate camera clipping while keeping legs, boots, arms, and harness visible
     const isFpv = vantage === 'pilot-fpv'
     this.helmetMesh.setEnabled(!isFpv)

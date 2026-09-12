@@ -100,4 +100,12 @@ export type FlightTelemetry = {
   isNegativeSpin: boolean
   tumbleStreak: number
   isReverseStance: boolean
+  isStalled: boolean
+  bankDeg: number
+  pitchDeg: number
+  headingDeg: number
+  wingType: 'speedwing' | 'paraglider'
+  xcDistanceMeters: number
+  maxAltitudeMeters: number
+  thermalClimbMps: number
 }

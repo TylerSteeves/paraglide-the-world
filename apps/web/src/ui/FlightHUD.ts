@@ -6,7 +6,7 @@ export class FlightHUD {
   private varioEl!: HTMLElement
   private speedEl!: HTMLElement
   private gForceEl!: HTMLElement
-  private tensionEl!: HTMLElement
+  private tensionEl: HTMLElement | null = null
   private scoreEl!: HTMLElement
   private trickBannerEl!: HTMLElement
   private stanceEl!: HTMLElement
@@ -18,15 +18,19 @@ export class FlightHUD {
   private rightBrakePct!: HTMLElement
   private trackpadBadge!: HTMLElement
   private trackpadInvertBtn!: HTMLElement
+  private wingBtn!: HTMLElement
   private startModalEl!: HTMLElement
   private lensBtnLabel!: HTMLElement
   private vantageBtnLabel!: HTMLElement
+  private xcDistanceEl!: HTMLElement
 
   private onStartCallback: () => void = () => {}
   private onRecenterCallback: () => void = () => {}
   private onRelaunchCallback: () => void = () => {}
+  private onSpawnHimalayasCallback: () => void = () => {}
   private onSpawnAlpineCallback: () => void = () => {}
   private onSpawnDunesCallback: () => void = () => {}
+  private onToggleWingCallback: () => void = () => {}
   private onCycleLensCallback: () => void = () => {}
   private onCycleVantageCallback: () => void = () => {}
   private onToggleReverseCallback: () => void = () => {}
@@ -44,12 +48,20 @@ export class FlightHUD {
     this.onStartCallback = callback
   }
 
+  public setOnSpawnHimalayas(callback: () => void) {
+    this.onSpawnHimalayasCallback = callback
+  }
+
   public setOnSpawnAlpine(callback: () => void) {
     this.onSpawnAlpineCallback = callback
   }
 
   public setOnSpawnDunes(callback: () => void) {
     this.onSpawnDunesCallback = callback
+  }
+
+  public setOnToggleWing(callback: () => void) {
+    this.onToggleWingCallback = callback
   }
 
   public setOnRecenter(callback: () => void) {
@@ -74,6 +86,22 @@ export class FlightHUD {
 
   public setOnToggleInvertTrackpad(callback: () => void) {
     this.onToggleInvertTrackpadCallback = callback
+  }
+
+  public updateWingLabel(wingType: 'speedwing' | 'paraglider') {
+    if (this.wingBtn) {
+      if (wingType === 'paraglider') {
+        this.wingBtn.innerHTML = 'WING: 🦅 XC PARAGLIDER 24m² [G]'
+        this.wingBtn.style.borderColor = '#fbbf24'
+        this.wingBtn.style.color = '#fef08a'
+        this.wingBtn.style.background = 'rgba(251, 191, 36, 0.2)'
+      } else {
+        this.wingBtn.innerHTML = 'WING: ⚡ SPEEDWING 13.5m² [G]'
+        this.wingBtn.style.borderColor = '#f43f5e'
+        this.wingBtn.style.color = '#fca5a5'
+        this.wingBtn.style.background = 'rgba(244, 63, 94, 0.2)'
+      }
+    }
   }
 
   public updateTrackpadInvertLabel(inverted: boolean) {
@@ -115,7 +143,7 @@ export class FlightHUD {
     this.container.innerHTML = `
       <!-- Build Version Badge -->
       <div style="position: absolute; top: 12px; right: 14px; background: rgba(14, 165, 233, 0.25); border: 1px solid #0ea5e9; color: #7dd3fc; font-size: 11px; font-weight: 800; padding: 4px 10px; border-radius: 8px; letter-spacing: 0.5px; z-index: 25; backdrop-filter: blur(8px); box-shadow: 0 2px 10px rgba(0,0,0,0.3);">
-        BUILD v3.0 • MOBILE & TRACKPAD ENGINE
+        BUILD v3.1 • SPEEDWING & HIMALAYAS XC
       </div>
 
       <!-- Top Telemetry Bar -->
@@ -135,14 +163,14 @@ export class FlightHUD {
           <span class="telemetry-value" id="hud-vario">-2.2 m/s</span>
         </div>
 
-        <div class="telemetry-pill">
-          <span class="telemetry-label">G-FORCE</span>
-          <span class="telemetry-value" id="hud-gforce">1.0G</span>
+        <div class="telemetry-pill highlight" style="border-color: #38bdf8;">
+          <span class="telemetry-label">XC DIST</span>
+          <span class="telemetry-value" id="hud-xc-dist" style="color: #38bdf8;">0.00 km</span>
         </div>
 
         <div class="telemetry-pill">
-          <span class="telemetry-label">LINE TENSION</span>
-          <span class="telemetry-value" id="hud-tension">860 N</span>
+          <span class="telemetry-label">G-FORCE</span>
+          <span class="telemetry-value" id="hud-gforce">1.0G</span>
         </div>
 
         <div class="telemetry-pill highlight">
@@ -153,6 +181,9 @@ export class FlightHUD {
 
       <!-- Mode & Stance Indicator -->
       <div style="position: absolute; top: 72px; left: 24px; z-index: 20; display: flex; gap: 8px; flex-wrap: wrap;">
+        <button id="hud-wing-btn" style="background: rgba(244, 63, 94, 0.2); border: 1px solid #f43f5e; color: #fca5a5; padding: 6px 14px; border-radius: 8px; font-weight: 700; font-size: 12px; cursor: pointer; backdrop-filter: blur(6px);">
+          WING: ⚡ SPEEDWING 13.5m² [G]
+        </button>
         <button id="hud-stance-btn" style="background: rgba(0,0,0,0.55); border: 1px solid rgba(255,255,255,0.2); color: #fff; padding: 6px 14px; border-radius: 8px; font-weight: 700; font-size: 12px; cursor: pointer; backdrop-filter: blur(6px);">
           STANCE: FORWARD FLIGHT [R]
         </button>
@@ -198,17 +229,23 @@ export class FlightHUD {
 
       <!-- Bottom Quick Actions Toolbar -->
       <div class="quick-toolbar">
+        <button class="tool-btn" id="btn-spawn-himalayas" style="border-color: #38bdf8;">
+          <span>🏔️ HIMALAYAS [1]</span>
+        </button>
+        <button class="tool-btn" id="btn-spawn-alpine" style="border-color: #10b981;">
+          <span>🎿 DOWNHILL [2]</span>
+        </button>
+        <button class="tool-btn" id="btn-spawn-dunes" style="border-color: #f59e0b;">
+          <span>🏖️ DUNES [3]</span>
+        </button>
+        <button class="tool-btn" id="btn-toggle-wing" style="border-color: #f43f5e;">
+          <span id="toolbar-wing-label">WING: [G]</span>
+        </button>
         <button class="tool-btn" id="btn-cycle-vantage">
           <span id="vantage-btn-label">VIEW: [C] PILOT FPV</span>
         </button>
         <button class="tool-btn" id="btn-cycle-lens">
           <span id="lens-btn-label">LENS: [L] ACTION CAM</span>
-        </button>
-        <button class="tool-btn" id="btn-spawn-alpine" style="border-color: #38bdf8;">
-          <span>🏔️ ALPINE [1]</span>
-        </button>
-        <button class="tool-btn" id="btn-spawn-dunes" style="border-color: #f59e0b;">
-          <span>🏖️ DUNES [2]</span>
         </button>
         <button class="tool-btn" id="btn-recenter">
           <span>RECENTER</span>
@@ -219,9 +256,13 @@ export class FlightHUD {
       <div class="start-modal" id="hud-start-modal">
         <div class="modal-card">
           <h1>PARAGLIDE THE WORLD</h1>
-          <p class="subtitle">Realistic First-Principles Speedwing & Acro Physics</p>
+          <p class="subtitle">Speedwing Downhill Proximity & Himalayan Thermal XC</p>
 
           <div class="controls-guide">
+            <div class="guide-item" style="background: rgba(244, 63, 94, 0.15); border: 1px solid rgba(244, 63, 94, 0.35);">
+              <span class="key-badge" style="background: #e11d48;">🦅 WINGS [G]</span>
+              <span class="guide-desc"><b>⚡ Speedwing 13.5m²</b> (Downhill speed, swoops & tricks) ↔ <b>🦅 XC Paraglider 24m²</b> (Ride thermals to 6,000m+ & cross-country distance).</span>
+            </div>
             <div class="guide-item" style="background: rgba(14, 165, 233, 0.15); border: 1px solid rgba(14, 165, 233, 0.35);">
               <span class="key-badge" style="background: #0284c7;">📱 MOBILE</span>
               <span class="guide-desc"><b>Dual-Thumb Controls</b>: Drag left thumb down for left brake, right thumb down for right brake. Both down = Flare / Stall. Drag up for Speed Bar. Tilt phone to lean.</span>
@@ -248,12 +289,15 @@ export class FlightHUD {
             </div>
           </div>
 
-          <div style="display: flex; gap: 12px; margin-top: 14px; flex-wrap: wrap;">
-            <button class="launch-btn" id="hud-launch-alpine-btn" style="flex: 1; min-width: 220px;">
-              🏔️ ALPINE PEAK (2,050m) [1]
+          <div style="display: flex; gap: 10px; margin-top: 14px; flex-wrap: wrap;">
+            <button class="launch-btn" id="hud-launch-himalayas-btn" style="flex: 1; min-width: 180px; background: linear-gradient(135deg, #0284c7 0%, #0369a1 100%);">
+              🏔️ HIMALAYAS XC (4,200m) [1]
             </button>
-            <button class="launch-btn" id="hud-launch-dunes-btn" style="flex: 1; min-width: 220px; background: linear-gradient(135deg, #f59e0b 0%, #d97706 100%);">
-              🏖️ DUNE DU PILAT (208m) [2]
+            <button class="launch-btn" id="hud-launch-alpine-btn" style="flex: 1; min-width: 180px;">
+              🎿 ALPINE DOWNHILL (2,050m) [2]
+            </button>
+            <button class="launch-btn" id="hud-launch-dunes-btn" style="flex: 1; min-width: 180px; background: linear-gradient(135deg, #f59e0b 0%, #d97706 100%);">
+              🏖️ DUNE DU PILAT (208m) [3]
             </button>
           </div>
         </div>
@@ -264,10 +308,12 @@ export class FlightHUD {
     this.varioEl = document.getElementById('hud-vario')!
     this.speedEl = document.getElementById('hud-speed')!
     this.gForceEl = document.getElementById('hud-gforce')!
-    this.tensionEl = document.getElementById('hud-tension')!
+    this.tensionEl = document.getElementById('hud-tension')
     this.scoreEl = document.getElementById('hud-score')!
+    this.xcDistanceEl = document.getElementById('hud-xc-dist')!
     this.trickBannerEl = document.getElementById('hud-trick-banner')!
     this.stanceEl = document.getElementById('hud-stance-btn')!
+    this.wingBtn = document.getElementById('hud-wing-btn')!
     this.trackpadInvertBtn = document.getElementById('hud-trackpad-invert-btn')!
     this.trackpadBadge = document.getElementById('hud-trackpad-badge')!
     this.leftThumbIndicator = document.getElementById('left-brake-fill')!
@@ -279,6 +325,15 @@ export class FlightHUD {
     this.startModalEl = document.getElementById('hud-start-modal')!
     this.lensBtnLabel = document.getElementById('lens-btn-label')!
     this.vantageBtnLabel = document.getElementById('vantage-btn-label')!
+
+    const launchHimalayasBtn = document.getElementById('hud-launch-himalayas-btn')
+    if (launchHimalayasBtn) {
+      launchHimalayasBtn.addEventListener('click', () => {
+        this.hideStartModal()
+        this.onStartCallback()
+        this.onSpawnHimalayasCallback()
+      })
+    }
 
     const launchAlpineBtn = document.getElementById('hud-launch-alpine-btn')
     if (launchAlpineBtn) {
@@ -298,6 +353,11 @@ export class FlightHUD {
       })
     }
 
+    const spawnHimalayasBtn = document.getElementById('btn-spawn-himalayas')
+    if (spawnHimalayasBtn) {
+      spawnHimalayasBtn.addEventListener('click', () => this.onSpawnHimalayasCallback())
+    }
+
     const spawnAlpineBtn = document.getElementById('btn-spawn-alpine')
     if (spawnAlpineBtn) {
       spawnAlpineBtn.addEventListener('click', () => this.onSpawnAlpineCallback())
@@ -306,6 +366,15 @@ export class FlightHUD {
     const spawnDunesBtn = document.getElementById('btn-spawn-dunes')
     if (spawnDunesBtn) {
       spawnDunesBtn.addEventListener('click', () => this.onSpawnDunesCallback())
+    }
+
+    const toggleWingBtn = document.getElementById('btn-toggle-wing')
+    if (toggleWingBtn) {
+      toggleWingBtn.addEventListener('click', () => this.onToggleWingCallback())
+    }
+
+    if (this.wingBtn) {
+      this.wingBtn.addEventListener('click', () => this.onToggleWingCallback())
     }
 
     const recenterBtn = document.getElementById('btn-recenter')
@@ -376,6 +445,13 @@ export class FlightHUD {
       }
     }
     if (this.scoreEl) this.scoreEl.innerText = telemetry.score.toLocaleString()
+    if (this.xcDistanceEl) {
+      const km = (telemetry.xcDistanceMeters / 1000).toFixed(2)
+      this.xcDistanceEl.innerText = `${km} km`
+    }
+    if (telemetry.wingType) {
+      this.updateWingLabel(telemetry.wingType)
+    }
 
     if (this.stanceEl) {
       this.stanceEl.innerText = telemetry.isReverseStance

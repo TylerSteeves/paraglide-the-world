@@ -22,7 +22,7 @@ export class TrickDetector {
     }
   }
 
-  public update(sim: ParagliderSimulation, dt: number): TrickState {
+  public update(sim: ParagliderSimulation, dt: number, _obstacleSystem?: any): TrickState {
     const bankDeg = Math.abs(sim.canopy.rollDeg)
     const gForce = sim.pilot.gForce
     const sinkRate = -sim.canopy.velocity.y

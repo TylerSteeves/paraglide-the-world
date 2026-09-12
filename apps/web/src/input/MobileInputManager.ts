@@ -84,6 +84,8 @@ export class MobileInputManager {
   public onCycleLens: (() => void) | null = null
   public onCycleVantage: (() => void) | null = null
   public onToggleReverse: (() => void) | null = null
+  public onToggleWing: (() => void) | null = null
+  public onSpawnHimalayas: (() => void) | null = null
   public onSpawnAlpine: (() => void) | null = null
   public onSpawnDunes: (() => void) | null = null
   public onToggleInvertTrackpad: ((inverted: boolean) => void) | null = null
@@ -350,9 +352,13 @@ export class MobileInputManager {
         this.onToggleReverse?.()
       } else if (e.code === 'KeyI') {
         this.toggleInvertTrackpad()
+      } else if (e.code === 'KeyG') {
+        this.onToggleWing?.()
       } else if (e.code === 'Digit1') {
-        this.onSpawnAlpine?.()
+        this.onSpawnHimalayas?.()
       } else if (e.code === 'Digit2') {
+        this.onSpawnAlpine?.()
+      } else if (e.code === 'Digit3') {
         this.onSpawnDunes?.()
       }
     })

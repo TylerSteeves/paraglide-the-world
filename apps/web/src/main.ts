@@ -16,6 +16,7 @@ import { TrickDetector } from './physics/tricks'
 import { ActionCamera } from './rendering/ActionCamera'
 import { ParagliderRig } from './rendering/ParagliderRig'
 import { WhistlerMountain } from './world/WhistlerMountain'
+import { HimalayasMountain } from './world/HimalayasMountain'
 import { ChairliftSystem } from './world/ChairliftSystem'
 import { CoinRings } from './world/CoinRings'
 import { MobileInputManager } from './input/MobileInputManager'
@@ -68,10 +69,17 @@ function initApp() {
   sunLight.diffuse = new Color3(1.0, 0.88, 0.72) // Warm afternoon alpine sun
   sunLight.intensity = 2.6
 
-  // 2. Build World: Whistler Mountain, Chairlifts, Coin Rings
-  const mountain = new WhistlerMountain(scene)
-  new ChairliftSystem(scene, mountain)
-  const coinRings = new CoinRings(scene, mountain)
+  // 2. Build Worlds: Whistler Mountain, Himalayas Mountain, Chairlifts, Coin Rings
+  const whistlerMountain = new WhistlerMountain(scene)
+  const himalayasMountain = new HimalayasMountain(scene)
+  // Initially show Whistler, keep Himalayas ready
+  himalayasMountain.terrainMesh.setEnabled(false)
+  if (himalayasMountain.riverMesh) himalayasMountain.riverMesh.setEnabled(false)
+
+  let activeMountain: WhistlerMountain | HimalayasMountain = whistlerMountain
+
+  new ChairliftSystem(scene, whistlerMountain)
+  const coinRings = new CoinRings(scene, whistlerMountain)
 
   // 3. Build Flight Core, Camera, and Rig
   const sim = new ParagliderSimulation(2050, 5) // Launch off Whistler Peak facing down the bowl
@@ -81,7 +89,8 @@ function initApp() {
   ;(window as any).rig = rig
   const actionCam = new ActionCamera(scene)
   ;(window as any).actionCam = actionCam
-  ;(window as any).mountain = mountain
+  ;(window as any).mountain = whistlerMountain
+  ;(window as any).himalayas = himalayasMountain
   const trickDetector = new TrickDetector()
 
   // 4. Input, Audio, HUD
@@ -129,21 +138,66 @@ function initApp() {
     hud.updateTrackpadInvertLabel(inverted)
   }
 
+  const toggleWing = () => {
+    const nextWing = sim.currentWingType === 'speedwing' ? 'paraglider' : 'speedwing'
+    sim.setWing(nextWing)
+    rig.buildCanopyAndLines(nextWing)
+    hud.updateWingLabel(nextWing)
+  }
+  hud.setOnToggleWing(toggleWing)
+  inputManager.onToggleWing = toggleWing
+
+  const spawnHimalayas = () => {
+    whistlerMountain.terrainMesh.setEnabled(false)
+    if (whistlerMountain.waterMesh) whistlerMountain.waterMesh.setEnabled(false)
+    himalayasMountain.terrainMesh.setEnabled(true)
+    if (himalayasMountain.riverMesh) himalayasMountain.riverMesh.setEnabled(true)
+    activeMountain = himalayasMountain
+    sim.setWing('paraglider')
+    rig.buildCanopyAndLines('paraglider')
+    sim.reset(4200, 0, { x: 0, y: 4200, z: 0 })
+    actionCam.snap()
+    hud.updateWingLabel('paraglider')
+  }
+
   const spawnAlpine = () => {
+    himalayasMountain.terrainMesh.setEnabled(false)
+    if (himalayasMountain.riverMesh) himalayasMountain.riverMesh.setEnabled(false)
+    whistlerMountain.terrainMesh.setEnabled(true)
+    if (whistlerMountain.waterMesh) whistlerMountain.waterMesh.setEnabled(true)
+    activeMountain = whistlerMountain
+    sim.setWing('speedwing')
+    rig.buildCanopyAndLines('speedwing')
     sim.reset(2050, 5, { x: 0, y: 2050, z: 0 })
     actionCam.snap()
+    hud.updateWingLabel('speedwing')
   }
 
   const spawnDunes = () => {
+    himalayasMountain.terrainMesh.setEnabled(false)
+    if (himalayasMountain.riverMesh) himalayasMountain.riverMesh.setEnabled(false)
+    whistlerMountain.terrainMesh.setEnabled(true)
+    if (whistlerMountain.waterMesh) whistlerMountain.waterMesh.setEnabled(true)
+    activeMountain = whistlerMountain
+    sim.setWing('speedwing')
+    rig.buildCanopyAndLines('speedwing')
     sim.reset(208, 10, { x: 0, y: 208, z: 2550 })
     actionCam.snap()
+    hud.updateWingLabel('speedwing')
   }
 
+  hud.setOnSpawnHimalayas(spawnHimalayas)
   hud.setOnSpawnAlpine(spawnAlpine)
   hud.setOnSpawnDunes(spawnDunes)
+  inputManager.onSpawnHimalayas = spawnHimalayas
   inputManager.onSpawnAlpine = spawnAlpine
   inputManager.onSpawnDunes = spawnDunes
   hud.setOnRelaunch(spawnAlpine)
+
+  ;(window as any).spawnAlpine = spawnAlpine
+  ;(window as any).spawnHimalayas = spawnHimalayas
+  ;(window as any).spawnDunes = spawnDunes
+  ;(window as any).toggleWing = toggleWing
 
   // 5. Main Simulation & Render Loop
   engine.runRenderLoop(() => {
@@ -155,7 +209,7 @@ function initApp() {
       sim.controls = { ...inputManager.controls }
 
       // Step B: Sample Atmosphere (Thermals & Updrafts)
-      const updraft = mountain.sampleUpdraft(
+      const updraft = activeMountain.sampleUpdraft(
         sim.pilot.position.x,
         sim.pilot.position.y,
         sim.pilot.position.z,
@@ -163,7 +217,7 @@ function initApp() {
       sim.atmosphere.thermalUpdraftMps = updraft
 
       // Step C: Step 2-Body Pendulum Physics
-      sim.step(dt, (x, z) => mountain.sampleHeight(x, z))
+      sim.step(dt, (x, z) => activeMountain.sampleHeight(x, z))
 
       // Step D: Detect Emergent Acrobatics & Tricks
       const trickState = trickDetector.update(sim, dt)

@@ -23,3 +23,5 @@ ParaglideTheWorldUE/*.xcworkspace/
 __pycache__/
 ParaglideTheWorldUE/Plugins/**/Binaries/
 ParaglideTheWorldUE/Plugins/**/Intermediate/
+preview-*.png
+apps/web/preview-*.png
