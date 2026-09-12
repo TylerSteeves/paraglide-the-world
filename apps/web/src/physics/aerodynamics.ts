@@ -174,7 +174,8 @@ export type PanelAerodynamics = {
 }
 
 /**
- * Sectional ram-air lift, drag, and moment polar with brake trailing-edge deflection.
+ * Sectional ram-air lift, drag, and moment polar with brake trailing-edge deflection
+ * and dynamic transient brake rate-of-change (violence of brake application).
  */
 export function evaluateAirfoil(
   alphaDeg: number,
@@ -182,6 +183,7 @@ export function evaluateAirfoil(
   speedBar: number,
   groundEffectFactor: number,
   aspectRatio: number = 4.5,
+  brakeRate: number = 0,
 ): { cl: number; cd: number; cm: number; separation: number; isStalled: boolean } {
   const alphaClamped = wrapDeg180(alphaDeg)
 
@@ -208,9 +210,9 @@ export function evaluateAirfoil(
 
     // Profile & parasitic drag + authentic trailing-edge flap drag
     const baseCd = (isHighAspect ? 0.024 : 0.042) + 0.00030 * Math.pow(alphaClamped - 2.0, 2)
-    const brakeCd = 0.055 * brakeDeflection + 0.36 * Math.pow(brakeDeflection, 2.0)
+    const brakeCd = 0.055 * brakeDeflection + 0.42 * Math.pow(brakeDeflection, 2.0)
     cd = baseCd + brakeCd
-    cm = -0.045 - 0.065 * brakeDeflection
+    cm = -0.045 - 0.075 * brakeDeflection
     separation = brakeDeflection * 0.45
   } else {
     // Separated post-stall regime
@@ -220,8 +222,17 @@ export function evaluateAirfoil(
 
     // Flat-plate separated crossflow
     cl = 1.15 * Math.sin(2 * aRad) * 0.65
-    cd = 0.35 + 1.25 * Math.pow(Math.sin(aRad), 2) + brakeDeflection * 0.35
+    cd = 0.35 + 1.25 * Math.pow(Math.sin(aRad), 2) + brakeDeflection * 0.45
     cm = -0.15 * Math.sin(aRad)
+  }
+
+  // Dynamic transient separation & drag surge: violence of brake yank (d_brake / dt)
+  if (brakeRate > 0) {
+    const dynamicCd = Math.min(3.2, 0.24 * brakeRate)
+    cd += dynamicCd
+    if (brakeRate > 3.0) {
+      cl *= Math.max(0.35, 1.0 - (brakeRate - 3.0) * 0.08)
+    }
   }
 
   return { cl, cd, cm, separation, isStalled }
@@ -269,6 +280,7 @@ export function evaluateWingAerodynamics(
   for (const cfg of stations) {
     const isLeft = cfg.station === 'leftOuter' || cfg.station === 'leftInner'
     const brakeRaw = isLeft ? controls.leftBrake : controls.rightBrake
+    const brakeRate = isLeft ? controls.leftBrakeRate : controls.rightBrakeRate
     const brake = clamp(brakeRaw * cfg.brakeGain, 0, 1)
 
     // Station arm position in body frame
@@ -291,8 +303,8 @@ export function evaluateWingAerodynamics(
 
     const alphaEffDeg = rawAlphaDeg
 
-    // Evaluate airfoil section
-    const foil = evaluateAirfoil(alphaEffDeg, brake, controls.speedBar, groundEffectMultiplier, wing.aspectRatio)
+    // Evaluate airfoil section with dynamic brake rate
+    const foil = evaluateAirfoil(alphaEffDeg, brake, controls.speedBar, groundEffectMultiplier, wing.aspectRatio, brakeRate)
 
     // Induced drag from finite aspect ratio and tip vortices
     const indK = (1.0 / (Math.PI * wing.aspectRatio * 0.82)) * inducedDragReduction

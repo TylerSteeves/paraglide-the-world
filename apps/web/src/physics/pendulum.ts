@@ -490,34 +490,34 @@ export class ParagliderSimulation {
     }
 
     // 7. Canopy Rotational Dynamics
-    // Multi-row suspension line pyramid (A, B, C, D lines) acts as a stiff geometric truss
-    // locking the canopy to the pilot pendulum vector at trim incidence & harness weight shift.
+    // Multi-row suspension line bridles (A, B, C risers) provide aerodynamic pitch stability
+    // around trim incidence, allowing full 360° dynamic swings and tumbles under acro momentum.
     const lineToPilotWorld = vSub(this.pPos, this.cPos)
     const lineToPilotBody = qRotateInv(this.cQ, vNorm(lineToPilotWorld))
 
-    // Pitch truss: locks canopy chord to trim incidence (-1.2° trim nose-down, -6.7° at full speedbar)
+    // Flexible Multi-Row Line Bridle Restoring Torque:
+    // Natural pendulum restoring moment: tau = -sin(delta) * kTruss.
+    // Holds trim incidence during straight flight, while passing smoothly through zero
+    // at 180° inversion to allow full acro tumbles and loops!
     const targetPitchRad = (w.riggingAngleDeg + this.controls.speedBar * w.speedBarAngleDeg) * DEG
     const currentPitchOffsetRad = Math.atan2(lineToPilotBody.z, -lineToPilotBody.y)
     const deltaPitchRad = currentPitchOffsetRad - targetPitchRad
 
-    // Roll truss: couples canopy roll directly to harness weight shift (- = left, + = right)
-    const targetRollShiftRad = -effWeightShift * 0.45 // ~26 degrees bank command
+    // Line tension factor: when lines go slack, bridle restoring moments unload
+    const tensionFrac = clamp(this.lineTensionNewtons / (mPilot * G), 0, 3.0)
+
+    // Dynamic bridle stiffness (N*m/rad)
+    const kTrussPitch = 2600.0 * tensionFrac
+    const dTrussPitch = 340.0 * tensionFrac
+    const kTrussRoll = 1400.0 * tensionFrac
+    const dTrussRoll = 180.0 * tensionFrac
+
+    const trussPitchTorque = -Math.sin(deltaPitchRad) * kTrussPitch - this.cOmega.x * dTrussPitch
     const currentRollOffsetRad = Math.atan2(lineToPilotBody.x, -lineToPilotBody.y)
-    const deltaRollRad = currentRollOffsetRad - targetRollShiftRad
+    const deltaRollRad = currentRollOffsetRad - (-effWeightShift * 0.45)
+    const trussRollTorque = -Math.sin(deltaRollRad) * kTrussRoll - this.cOmega.z * dTrussRoll
 
-    // Line tension factor: when lines go slack, truss compliance unloads
-    const tensionFrac = clamp(this.lineTensionNewtons / (mPilot * G), 0, 2.5)
-
-    // Truss stiffness & damping (N*m/rad) - critically damped speedwing response
-    const kTrussPitch = 3200.0 * tensionFrac
-    const dTrussPitch = 480.0 * tensionFrac
-    const kTrussRoll = 1600.0 * tensionFrac
-    const dTrussRoll = 240.0 * tensionFrac
-
-    const trussPitchTorque = -deltaPitchRad * kTrussPitch - this.cOmega.x * dTrussPitch
-    const trussRollTorque = -deltaRollRad * kTrussRoll - this.cOmega.z * dTrussRoll
-
-    // Total body torques: aero torques + suspension line truss torques
+    // Total body torques: aerodynamic torques + flexible bridle restoring moments
     const totalTorque = v3(
       aero.totalMomentBody.x + trussPitchTorque,
       aero.totalMomentBody.y,
@@ -525,17 +525,16 @@ export class ParagliderSimulation {
     )
 
     // Canopy effective rotational inertia (Canopy structural + apparent added inertia)
-    // Body Frame: +X = Transverse/Pitch axis, +Y = Vertical/Yaw axis, +Z = Longitudinal/Roll axis
     const b = w.projectedSpanMeters
     const c = w.chordMeters
-    const Ixx = (mCanopy * (c * c) / 12) + mApp.iPitch + 12.0 // ~25 kg*m^2 (Pitch)
-    const Iyy = (mCanopy * (b * b + c * c) / 12) + mApp.iYaw + 25.0 // ~75 kg*m^2 (Yaw)
-    const Izz = (mCanopy * (b * b) / 12) + mApp.iRoll + 15.0  // ~50 kg*m^2 (Roll - CRISP SPEEDWING RESPONSE!)
+    const Ixx = (mCanopy * (c * c) / 12) + mApp.iPitch + 10.0 // ~22 kg*m^2 (Pitch)
+    const Iyy = (mCanopy * (b * b + c * c) / 12) + mApp.iYaw + 20.0 // ~65 kg*m^2 (Yaw)
+    const Izz = (mCanopy * (b * b) / 12) + mApp.iRoll + 12.0  // ~42 kg*m^2 (Roll)
 
-    // Vortex aerodynamic damping per axis
-    const pitchDamp = -this.cOmega.x * (Ixx * 4.5)
-    const yawDamp = -this.cOmega.y * (Iyy * 3.8)
-    const rollDamp = -this.cOmega.z * (Izz * 5.2)
+    // Natural vortex aerodynamic rotational damping
+    const pitchDamp = -this.cOmega.x * (Ixx * 1.5)
+    const yawDamp = -this.cOmega.y * (Iyy * 1.8)
+    const rollDamp = -this.cOmega.z * (Izz * 1.6)
 
     const alphaCanopy = v3(
       (totalTorque.x + pitchDamp) / Ixx,

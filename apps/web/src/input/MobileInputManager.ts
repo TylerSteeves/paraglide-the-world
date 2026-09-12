@@ -11,21 +11,12 @@ function moveToward(current: number, target: number, rate: number, dt: number): 
   return current + Math.sign(diff) * maxDelta
 }
 
-// ---- Keyboard brake pressure model -----------------------------------
-export const STEER_CEILING = 0.42
-export const DEEP_CEILING = 0.92
-export const STALL_CEILING = 0.97
-export const FLARE_CEILING = 0.90
-
-export const STEER_PRESS_RATE = 1.0
-export const DEEP_PRESS_RATE = 1.2
-export const STALL_PRESS_RATE = 1.3
-export const FLARE_PRESS_RATE = 6.5
-export const BRAKE_RELEASE_RATE = 2.8
-
-export const WEIGHT_SHIFT_RATE = 3.0
-export const SPEEDBAR_RATE_IN = 1.4
-export const SPEEDBAR_RATE_OUT = 2.0
+// ---- Dynamic direct brake pressure model -----------------------------------
+export const FULL_BRAKE_RATE = 22.0     // Direct, violent dynamic application (<0.05s)
+export const BRAKE_RELEASE_RATE = 16.0  // Crisp rebound
+export const WEIGHT_SHIFT_RATE = 12.0
+export const SPEEDBAR_RATE_IN = 8.0
+export const SPEEDBAR_RATE_OUT = 10.0
 
 // ---- Touch & Mouse drag model ----------------------------------------
 const TOUCH_MAX_DRAG_PX = 140
@@ -417,94 +408,78 @@ export class MobileInputManager {
     if (gamepadDrove) {
       // Gamepad is actively controlling
     } else if (touchActive) {
-      // Touch/Mouse Dual-Thumb input
-      this.controls.leftBrake = moveToward(this.controls.leftBrake, this.touchLeftBrake, 8.0, dt)
-      this.controls.rightBrake = moveToward(this.controls.rightBrake, this.touchRightBrake, 8.0, dt)
+      // Touch/Mouse Dual-Thumb input: direct, instant tracking
+      this.controls.leftBrake = moveToward(this.controls.leftBrake, this.touchLeftBrake, FULL_BRAKE_RATE, dt)
+      this.controls.rightBrake = moveToward(this.controls.rightBrake, this.touchRightBrake, FULL_BRAKE_RATE, dt)
       const combinedSpeedBar = Math.max(this.touchLeftSpeedBar, this.touchRightSpeedBar)
-      this.controls.speedBar = moveToward(this.controls.speedBar, combinedSpeedBar, 4.0, dt)
-
-      if (this.touchWeightShift !== 0 || !this.hasGyroPermission) {
-        this.controls.weightShift = moveToward(this.controls.weightShift, this.touchWeightShift, WEIGHT_SHIFT_RATE * 2, dt)
-      } else if (this.hasGyroPermission) {
-        this.controls.weightShift = moveToward(this.controls.weightShift, this.gyroTargetWeightShift, WEIGHT_SHIFT_RATE * 2, dt)
-      }
+      this.controls.speedBar = moveToward(this.controls.speedBar, combinedSpeedBar, SPEEDBAR_RATE_IN, dt)
+      const targetWeightShift =
+        this.touchWeightShift !== 0 || !this.hasGyroPermission
+          ? this.touchWeightShift
+          : this.gyroTargetWeightShift
+      this.controls.weightShift = moveToward(this.controls.weightShift, targetWeightShift, WEIGHT_SHIFT_RATE, dt)
     } else if (this.trackpadActive) {
       // Trackpad 2-Gesture Model (Up/Down + Left/Right)
       const timeSinceWheel = performance.now() - this.lastTrackpadTime
 
       // Spring-return to neutral trim when user pauses or lifts fingers
       if (timeSinceWheel > 70) {
-        const springRateY = 3.2
-        const springRateX = 3.6
+        const springRateY = 5.0
+        const springRateX = 6.0
         this.trackpadPitch = moveToward(this.trackpadPitch, 0, springRateY, dt)
         this.trackpadRoll = moveToward(this.trackpadRoll, 0, springRateX, dt)
 
-        if (Math.abs(this.trackpadPitch) < 0.01 && Math.abs(this.trackpadRoll) < 0.01 && timeSinceWheel > 300) {
+        if (Math.abs(this.trackpadPitch) < 0.01 && Math.abs(this.trackpadRoll) < 0.01 && timeSinceWheel > 250) {
           this.trackpadPitch = 0
           this.trackpadRoll = 0
           this.trackpadActive = false
         }
       }
 
-      this.controls.weightShift = moveToward(this.controls.weightShift, this.trackpadRoll, WEIGHT_SHIFT_RATE * 2, dt)
+      this.controls.weightShift = moveToward(this.controls.weightShift, this.trackpadRoll, WEIGHT_SHIFT_RATE, dt)
 
       if (this.trackpadPitch > 0) {
-        // Downward gesture: Brake / Flare / Stall
+        // Downward gesture: direct brake / flare / stall
         const baseBrake = this.trackpadPitch
         this.controls.speedBar = moveToward(this.controls.speedBar, 0, SPEEDBAR_RATE_OUT, dt)
 
         if (this.trackpadRoll < 0) {
-          // Left steer with brake bite
-          const steerBite = Math.abs(this.trackpadRoll) * 0.45
+          // Left steer with inside brake bite
+          const steerBite = Math.abs(this.trackpadRoll) * 0.55
           const targetLeft = clamp(baseBrake + steerBite, 0, 1)
           const targetRight = clamp(baseBrake - steerBite * 0.7, 0, 1)
-          this.controls.leftBrake = moveToward(this.controls.leftBrake, targetLeft, 6.0, dt)
-          this.controls.rightBrake = moveToward(this.controls.rightBrake, targetRight, 6.0, dt)
+          this.controls.leftBrake = moveToward(this.controls.leftBrake, targetLeft, FULL_BRAKE_RATE, dt)
+          this.controls.rightBrake = moveToward(this.controls.rightBrake, targetRight, FULL_BRAKE_RATE, dt)
         } else if (this.trackpadRoll > 0) {
-          // Right steer with brake bite
-          const steerBite = Math.abs(this.trackpadRoll) * 0.45
+          // Right steer with inside brake bite
+          const steerBite = Math.abs(this.trackpadRoll) * 0.55
           const targetRight = clamp(baseBrake + steerBite, 0, 1)
           const targetLeft = clamp(baseBrake - steerBite * 0.7, 0, 1)
-          this.controls.rightBrake = moveToward(this.controls.rightBrake, targetRight, 6.0, dt)
-          this.controls.leftBrake = moveToward(this.controls.leftBrake, targetLeft, 6.0, dt)
+          this.controls.rightBrake = moveToward(this.controls.rightBrake, targetRight, FULL_BRAKE_RATE, dt)
+          this.controls.leftBrake = moveToward(this.controls.leftBrake, targetLeft, FULL_BRAKE_RATE, dt)
         } else {
           // Symmetrical brake / flare
-          this.controls.leftBrake = moveToward(this.controls.leftBrake, baseBrake, 7.0, dt)
-          this.controls.rightBrake = moveToward(this.controls.rightBrake, baseBrake, 7.0, dt)
+          this.controls.leftBrake = moveToward(this.controls.leftBrake, baseBrake, FULL_BRAKE_RATE, dt)
+          this.controls.rightBrake = moveToward(this.controls.rightBrake, baseBrake, FULL_BRAKE_RATE, dt)
         }
       } else if (this.trackpadPitch < 0) {
-        // Upward gesture: Speed Bar / Alpine Dive
+        // Upward gesture: Speed Bar / Dive
         const targetSpeedBar = clamp(-this.trackpadPitch, 0, 1)
-        this.controls.speedBar = moveToward(this.controls.speedBar, targetSpeedBar, SPEEDBAR_RATE_IN * 2, dt)
-
-        if (this.trackpadRoll < 0) {
-          this.controls.leftBrake = moveToward(this.controls.leftBrake, Math.abs(this.trackpadRoll) * 0.35, 4.0, dt)
-          this.controls.rightBrake = moveToward(this.controls.rightBrake, 0, BRAKE_RELEASE_RATE, dt)
-        } else if (this.trackpadRoll > 0) {
-          this.controls.rightBrake = moveToward(this.controls.rightBrake, Math.abs(this.trackpadRoll) * 0.35, 4.0, dt)
-          this.controls.leftBrake = moveToward(this.controls.leftBrake, 0, BRAKE_RELEASE_RATE, dt)
-        } else {
-          this.controls.leftBrake = moveToward(this.controls.leftBrake, 0, BRAKE_RELEASE_RATE, dt)
-          this.controls.rightBrake = moveToward(this.controls.rightBrake, 0, BRAKE_RELEASE_RATE, dt)
-        }
+        this.controls.speedBar = moveToward(this.controls.speedBar, targetSpeedBar, SPEEDBAR_RATE_IN, dt)
+        const leftTarget = this.trackpadRoll < 0 ? Math.abs(this.trackpadRoll) * 0.4 : 0
+        const rightTarget = this.trackpadRoll > 0 ? Math.abs(this.trackpadRoll) * 0.4 : 0
+        this.controls.leftBrake = moveToward(this.controls.leftBrake, leftTarget, FULL_BRAKE_RATE, dt)
+        this.controls.rightBrake = moveToward(this.controls.rightBrake, rightTarget, FULL_BRAKE_RATE, dt)
       } else {
         // Neutral trim: Pure steering
         this.controls.speedBar = moveToward(this.controls.speedBar, 0, SPEEDBAR_RATE_OUT, dt)
-        if (this.trackpadRoll < 0) {
-          const steerTarget = Math.abs(this.trackpadRoll) * STEER_CEILING
-          this.controls.leftBrake = moveToward(this.controls.leftBrake, steerTarget, 4.0, dt)
-          this.controls.rightBrake = moveToward(this.controls.rightBrake, 0, BRAKE_RELEASE_RATE, dt)
-        } else if (this.trackpadRoll > 0) {
-          const steerTarget = Math.abs(this.trackpadRoll) * STEER_CEILING
-          this.controls.rightBrake = moveToward(this.controls.rightBrake, steerTarget, 4.0, dt)
-          this.controls.leftBrake = moveToward(this.controls.leftBrake, 0, BRAKE_RELEASE_RATE, dt)
-        } else {
-          this.controls.leftBrake = moveToward(this.controls.leftBrake, 0, BRAKE_RELEASE_RATE, dt)
-          this.controls.rightBrake = moveToward(this.controls.rightBrake, 0, BRAKE_RELEASE_RATE, dt)
-        }
+        const leftTarget = this.trackpadRoll < 0 ? Math.abs(this.trackpadRoll) * 0.85 : 0
+        const rightTarget = this.trackpadRoll > 0 ? Math.abs(this.trackpadRoll) * 0.85 : 0
+        this.controls.leftBrake = moveToward(this.controls.leftBrake, leftTarget, FULL_BRAKE_RATE, dt)
+        this.controls.rightBrake = moveToward(this.controls.rightBrake, rightTarget, FULL_BRAKE_RATE, dt)
       }
     } else {
-      // Keyboard fallback
+      // Keyboard fallback: Direct, responsive acro authority
       const bothBrakes = this.keysDown.has('KeyS') || this.keysDown.has('ArrowDown')
       const leftDeepBrake = this.keysDown.has('KeyF')
       const rightDeepBrake = this.keysDown.has('KeyJ')
@@ -519,24 +494,19 @@ export class MobileInputManager {
         this.keysDown.has('Semicolon')
 
       if (bothBrakes || flare) {
-        const ceiling = flare && !bothBrakes ? FLARE_CEILING : STALL_CEILING
-        const rate = flare && !bothBrakes ? FLARE_PRESS_RATE : STALL_PRESS_RATE
-        this.controls.leftBrake = moveToward(this.controls.leftBrake, ceiling, rate, dt)
-        this.controls.rightBrake = moveToward(this.controls.rightBrake, ceiling, rate, dt)
+        this.controls.leftBrake = moveToward(this.controls.leftBrake, 1.0, FULL_BRAKE_RATE, dt)
+        this.controls.rightBrake = moveToward(this.controls.rightBrake, 1.0, FULL_BRAKE_RATE, dt)
       } else {
-        this.controls.leftBrake = this.chaseBrakeCeiling(this.controls.leftBrake, leftSteer, leftDeepBrake, dt)
-        this.controls.rightBrake = this.chaseBrakeCeiling(this.controls.rightBrake, rightSteer, rightDeepBrake, dt)
+        const targetLeft = leftDeepBrake ? 1.0 : leftSteer ? 0.85 : 0
+        const targetRight = rightDeepBrake ? 1.0 : rightSteer ? 0.85 : 0
+        this.controls.leftBrake = moveToward(this.controls.leftBrake, targetLeft, targetLeft > 0 ? FULL_BRAKE_RATE : BRAKE_RELEASE_RATE, dt)
+        this.controls.rightBrake = moveToward(this.controls.rightBrake, targetRight, targetRight > 0 ? FULL_BRAKE_RATE : BRAKE_RELEASE_RATE, dt)
       }
 
       let kbWeightShift = 0
       if ((leftSteer || leftDeepBrake) && !(rightSteer || rightDeepBrake)) kbWeightShift = -1.0
       if ((rightSteer || rightDeepBrake) && !(leftSteer || leftDeepBrake)) kbWeightShift = 1.0
-
-      if (kbWeightShift !== 0 || !this.hasGyroPermission) {
-        this.controls.weightShift = moveToward(this.controls.weightShift, kbWeightShift, WEIGHT_SHIFT_RATE, dt)
-      } else {
-        this.controls.weightShift = moveToward(this.controls.weightShift, this.gyroTargetWeightShift, WEIGHT_SHIFT_RATE * 3, dt)
-      }
+      this.controls.weightShift = moveToward(this.controls.weightShift, kbWeightShift, WEIGHT_SHIFT_RATE, dt)
 
       const barHeld =
         this.keysDown.has('Space') || this.keysDown.has('KeyW') || this.keysDown.has('ArrowUp')
@@ -548,23 +518,12 @@ export class MobileInputManager {
       )
     }
 
-    // Dynamic snap rate: d(brake)/dt for flare detection
+    // Dynamic snap rate: d(brake)/dt for flare and violent dynamic maneuvers
     const safeDt = Math.max(0.001, dt)
     this.controls.leftBrakeRate = (this.controls.leftBrake - this.prevLeftBrake) / safeDt
     this.controls.rightBrakeRate = (this.controls.rightBrake - this.prevRightBrake) / safeDt
 
     this.prevLeftBrake = this.controls.leftBrake
     this.prevRightBrake = this.controls.rightBrake
-  }
-
-  private chaseBrakeCeiling(
-    current: number,
-    steerActive: boolean,
-    deepActive: boolean,
-    dt: number,
-  ): number {
-    if (deepActive) return moveToward(current, DEEP_CEILING, DEEP_PRESS_RATE, dt)
-    if (steerActive) return moveToward(current, STEER_CEILING, STEER_PRESS_RATE, dt)
-    return moveToward(current, 0, BRAKE_RELEASE_RATE, dt)
   }
 }
