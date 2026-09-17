@@ -108,4 +108,9 @@ export type FlightTelemetry = {
   xcDistanceMeters: number
   maxAltitudeMeters: number
   thermalClimbMps: number
+  leftBrakeForceN: number
+  rightBrakeForceN: number
+  stallWarning: number
+  leftStalled: boolean
+  rightStalled: boolean
 }

@@ -66,16 +66,16 @@ if (typeof Effect !== 'undefined') {
 }
 
 export type LensMode = 'action-cam' | 'subtle' | 'linear'
-export type CameraVantage = 'pilot-fpv' | 'shoulder-chase' | 'front-selfie' | 'wide-chase'
+export type CameraVantage = 'chase-360' | 'shoulder-chase' | 'pilot-fpv' | 'front-selfie' | 'wide-chase'
 
 export class ActionCamera {
   public camera: FreeCamera
   public postProcess: PostProcess
   public lensMode: LensMode = 'action-cam'
-  public vantage: CameraVantage = 'pilot-fpv'
-  public fisheyeStrength: number = 0.28 // Authentic GoPro SuperView action-cam curvature
+  public vantage: CameraVantage = 'chase-360'
+  public fisheyeStrength: number = 0.32 // Authentic GoPro SuperView / Insta360 fisheye barrel curvature
   public chromaticAberration: number = 0.0035 // Optical glass dispersion
-  public vignetteStrength: number = 0.34 // Peripheral lens shading
+  public vignetteStrength: number = 0.30 // Peripheral action-cam lens shading
   private smoothedTarget: Vector3
   private smoothedCamPos: Vector3
   private targetCamPos: Vector3
@@ -140,32 +140,34 @@ export class ActionCamera {
   public setLensMode(mode: LensMode) {
     this.lensMode = mode
     if (mode === 'action-cam') {
-      this.fisheyeStrength = 0.28
+      this.fisheyeStrength = 0.32
       this.chromaticAberration = 0.0035
-      this.vignetteStrength = 0.34
+      this.vignetteStrength = 0.30
       this.camera.fov = 1.95
     } else if (mode === 'subtle') {
-      this.fisheyeStrength = 0.14
+      this.fisheyeStrength = 0.16
       this.chromaticAberration = 0.0018
       this.vignetteStrength = 0.20
-      this.camera.fov = 1.80
+      this.camera.fov = 1.82
     } else {
       this.fisheyeStrength = 0.0
       this.chromaticAberration = 0.0
       this.vignetteStrength = 0.0
-      this.camera.fov = 1.65
+      this.camera.fov = 1.68
     }
   }
 
   public cycleVantage(): CameraVantage {
-    if (this.vantage === 'pilot-fpv') {
+    if (this.vantage === 'chase-360') {
       this.setVantage('shoulder-chase')
     } else if (this.vantage === 'shoulder-chase') {
+      this.setVantage('pilot-fpv')
+    } else if (this.vantage === 'pilot-fpv') {
       this.setVantage('front-selfie')
     } else if (this.vantage === 'front-selfie') {
       this.setVantage('wide-chase')
     } else {
-      this.setVantage('pilot-fpv')
+      this.setVantage('chase-360')
     }
     return this.vantage
   }
@@ -195,7 +197,12 @@ export class ActionCamera {
     const yawRad = (sim.canopy.yawDeg * Math.PI) / 180
     const hFwd = new Vector3(Math.sin(yawRad), 0, Math.cos(yawRad))
 
-    const uRight = Vector3.Cross(hFwd, uTether).normalize()
+    let uRight = Vector3.Cross(hFwd, uTether)
+    if (uRight.lengthSquared() < 0.01) {
+      uRight = new Vector3(Math.cos(yawRad), 0, -Math.sin(yawRad))
+    } else {
+      uRight.normalize()
+    }
     const uFwd = Vector3.Cross(uTether, uRight).normalize()
 
     // Pilot body orientation (supporting 180° reverse stance swivel)
@@ -219,17 +226,18 @@ export class ActionCamera {
       )
     }
 
-    if (this.vantage === 'pilot-fpv') {
-      // 1. First-Person Pilot Chest / Mouth Mount (Reference Reel: media_1789151841324.jpg):
-      // Mounted right at chest harness forward point, angled downward ~16° to frame outstretched legs & running shoes in foreground!
+    if (this.vantage === 'chase-360') {
+      // 1. Action-Cam 360 Fisheye Chase Pole (Default - Insta360 / GoPro MAX):
+      // Mounted 3.8m directly behind pilot harness, elevated 1.35m above harness center
+      // Ultra-wide barrel fisheye frames pilot in foreground, line pyramid, and speedwing overhead!
       this.targetCamPos = pilotPos
-        .add(uTether.scale(0.58))
-        .add(bodyFwd.scale(0.36))
+        .subtract(uFwd.scale(3.8))
+        .add(uTether.scale(1.35))
         .add(shake)
 
-      this.lookTarget = this.targetCamPos
-        .add(bodyFwd.scale(16.0))
-        .subtract(uTether.scale(4.2))
+      this.lookTarget = pilotPos
+        .add(uFwd.scale(14.0))
+        .add(uTether.scale(1.6))
     } else if (this.vantage === 'shoulder-chase') {
       // 2. Over-the-Shoulder Action Chase (Reference Reel media_1789151847537.jpg):
       // Mounted 2.1m behind and 1.05m to the right, framing helmet, arms on brake toggles, and terrain!
@@ -243,8 +251,19 @@ export class ActionCamera {
         .add(uFwd.scale(18.0))
         .add(uRight.scale(0.32))
         .subtract(uTether.scale(0.4))
+    } else if (this.vantage === 'pilot-fpv') {
+      // 3. First-Person Pilot Chest / Mouth Mount:
+      // Mounted right at chest harness forward point, angled downward ~16° to frame legs & shoes
+      this.targetCamPos = pilotPos
+        .add(uTether.scale(0.58))
+        .add(bodyFwd.scale(0.36))
+        .add(shake)
+
+      this.lookTarget = this.targetCamPos
+        .add(bodyFwd.scale(16.0))
+        .subtract(uTether.scale(4.2))
     } else if (this.vantage === 'front-selfie') {
-      // 3. Action Selfie Pole (Reference Reel media_1789151832334.jpg & acro tumbling):
+      // 4. Action Selfie Pole:
       // 2.9m in front on selfie pole, looking back at shoes, pilot, and the speedwing canopy!
       this.targetCamPos = pilotPos
         .add(uFwd.scale(2.9))
@@ -254,7 +273,7 @@ export class ActionCamera {
       this.lookTarget = pilotPos
         .add(uTether.scale(1.55))
     } else {
-      // 4. Wide 3rd-Person Cinematic Chase:
+      // 5. Wide 3rd-Person Cinematic Chase:
       // Framed 6.2m behind and 2.4m up, viewing the entire speedwing, suspension lines, and landscape
       this.targetCamPos = pilotPos
         .subtract(uFwd.scale(6.2))
@@ -276,7 +295,9 @@ export class ActionCamera {
     this.smoothedTarget.y += (this.lookTarget.y - this.smoothedTarget.y) * lerpSpeed
     this.smoothedTarget.z += (this.lookTarget.z - this.smoothedTarget.z) * lerpSpeed
 
-    this.camera.upVector.copyFrom(uTether)
+    // FlowState Horizon-Stabilized Up Vector: blends world vertical with dynamic bank lean
+    const camUp = Vector3.Up().scale(0.70).add(uTether.scale(0.30)).normalize()
+    this.camera.upVector.copyFrom(camUp)
     this.camera.setTarget(this.smoothedTarget)
 
     const speedAboveTrim = Math.max(0, sim.telemetry.airspeedKmh - 50)

@@ -128,14 +128,24 @@ function initApp() {
 
   ;(window as any).relaunchFlight = relaunchFlight
   ;(window as any).startFlight = startFlight
+  ;(window as any).sim = sim
+  ;(window as any).inputManager = inputManager
 
   // 5. Main Simulation & Render Loop
   engine.runRenderLoop(() => {
     const dt = engine.getDeltaTime() * 0.001 // seconds
 
     if (hasStarted) {
-      // Step A: Update Inputs (Touch, Trackpad, Keys)
-      inputManager.update(dt)
+      // Step A: Update Inputs (Touch, Trackpad, Keys with Aerodynamic Resistance & Haptics)
+      inputManager.update(
+        dt,
+        sim.telemetry.leftBrakeForceN,
+        sim.telemetry.rightBrakeForceN,
+        sim.telemetry.isStalled,
+        sim.telemetry.stallWarning,
+        sim.telemetry.gForce,
+        sim.isFootDragging,
+      )
       sim.controls = { ...inputManager.controls }
 
       // Step B: Sample Atmosphere (Thermals & Ridge Lift)
@@ -168,11 +178,16 @@ function initApp() {
         soundscape.playCoinSound()
       }
 
-      // Step F: Update Soundscape
+      // Step F: Update Soundscape with Aeolian Singing Lines, Flutter Bass, and Stall Buffet
       soundscape.update(
         sim.telemetry.airspeedKmh,
         sim.telemetry.verticalSpeedMps,
         sim.telemetry.gForce,
+        sim.telemetry.lineTensionNewtons,
+        sim.telemetry.leftBrakeForceN,
+        sim.telemetry.rightBrakeForceN,
+        sim.telemetry.stallWarning,
+        sim.telemetry.isStalled,
         dt,
       )
 
@@ -180,9 +195,18 @@ function initApp() {
       rig.update(sim, actionCam.vantage)
       actionCam.update(sim, dt)
 
-      // Step H: Update Minimal HUD
-      hud.update(sim.telemetry, sim.controls, trickState)
+      // Step H: Update Minimal HUD with Pseudo-Haptic Lag & Tension Tethers
+      hud.update(
+        sim.telemetry,
+        sim.controls,
+        trickState,
+        inputManager.leftLagFrac,
+        inputManager.rightLagFrac,
+        inputManager.leftThumbYFrac,
+        inputManager.rightThumbYFrac,
+      )
     } else {
+
       // Pre-launch preview state
       rig.update(sim, actionCam.vantage)
       actionCam.update(sim, dt)

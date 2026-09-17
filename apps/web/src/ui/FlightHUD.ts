@@ -5,12 +5,16 @@ export class FlightHUD {
   private speedEl!: HTMLElement
   private altEl!: HTMLElement
   private gEl!: HTMLElement
-  private leftRingEl!: HTMLElement
-  private rightRingEl!: HTMLElement
-  private leftFillEl!: HTMLElement
-  private rightFillEl!: HTMLElement
+  private leftToggleEl!: HTMLElement
+  private rightToggleEl!: HTMLElement
   private leftLabelEl!: HTMLElement
   private rightLabelEl!: HTMLElement
+  private leftForceEl!: HTMLElement
+  private rightForceEl!: HTMLElement
+  private leftRailLineEl!: HTMLElement
+  private rightRailLineEl!: HTMLElement
+  private leftTetherEl!: HTMLElement
+  private rightTetherEl!: HTMLElement
   private trickBannerEl!: HTMLElement
   private trickTitleEl!: HTMLElement
   private relaunchOverlayEl!: HTMLElement
@@ -41,7 +45,7 @@ export class FlightHUD {
     this.onCycleCameraCallback = callback
   }
 
-  public showRelaunch(title: string = 'PARAGLIDE THE WORLD', subtitle: string = 'Tap or press Space to fly') {
+  public showRelaunch(title: string = 'PARAGLIDE THE WORLD', subtitle: string = 'Tap screen or press Space to fly') {
     if (this.relaunchTitleEl) this.relaunchTitleEl.innerText = title
     if (this.relaunchSubEl) this.relaunchSubEl.innerText = subtitle
     if (this.relaunchOverlayEl) this.relaunchOverlayEl.style.display = 'flex'
@@ -73,27 +77,45 @@ export class FlightHUD {
         </button>
       </div>
 
-      <!-- Center Trick / Loop Announcement -->
+      <!-- Center Acro / Trick Announcement -->
       <div class="acro-banner" id="hud-trick-banner" style="display: none;">
         <div class="acro-title" id="hud-trick-text">INFINITY TUMBLE!</div>
       </div>
 
-      <!-- Ergonomic Mobile Dual-Thumb Touch Rings -->
-      <div class="thumb-rings">
-        <div class="thumb-ring-container">
-          <div class="thumb-ring" id="left-thumb-ring">
-            <div class="thumb-ring-fill" id="left-ring-fill"></div>
-            <span class="thumb-ring-label" id="left-ring-label">L</span>
-          </div>
-          <span class="thumb-hint">BRAKE</span>
+      <!-- Left Landscape Hand-Height Rail (Left Brake / Speed Bar) -->
+      <div class="hand-rail left-rail" id="left-hand-rail">
+        <div class="rail-line" id="left-rail-line"></div>
+        <div class="tension-tether" id="left-tension-tether" style="display: none;"></div>
+        <div class="rail-notch bar-notch" style="top: 6%;">BAR</div>
+        <div class="rail-notch trim-notch" style="top: 22%;">TRIM</div>
+        <div class="rail-notch stall-notch" style="top: 88%;">STALL</div>
+        <div class="hand-toggle" id="left-hand-toggle" style="top: 22%;">
+          <div class="toggle-core"></div>
+          <span class="toggle-label" id="left-toggle-label">TRIM</span>
+          <span class="toggle-force" id="left-toggle-force"></span>
         </div>
+      </div>
 
-        <div class="thumb-ring-container">
-          <div class="thumb-ring" id="right-thumb-ring">
-            <div class="thumb-ring-fill" id="right-ring-fill"></div>
-            <span class="thumb-ring-label" id="right-ring-label">R</span>
-          </div>
-          <span class="thumb-hint">BRAKE</span>
+      <!-- Right Landscape Hand-Height Rail (Right Brake / Speed Bar) -->
+      <div class="hand-rail right-rail" id="right-hand-rail">
+        <div class="rail-line" id="right-rail-line"></div>
+        <div class="tension-tether" id="right-tension-tether" style="display: none;"></div>
+        <div class="rail-notch bar-notch" style="top: 6%;">BAR</div>
+        <div class="rail-notch trim-notch" style="top: 22%;">TRIM</div>
+        <div class="rail-notch stall-notch" style="top: 88%;">STALL</div>
+        <div class="hand-toggle" id="right-hand-toggle" style="top: 22%;">
+          <div class="toggle-core"></div>
+          <span class="toggle-label" id="right-toggle-label">TRIM</span>
+          <span class="toggle-force" id="right-toggle-force"></span>
+        </div>
+      </div>
+
+      <!-- Portrait Orientation Alert (Encourages Landscape Holding) -->
+      <div class="portrait-guard" id="hud-portrait-guard">
+        <div class="guard-card">
+          <div class="guard-icon">🔄</div>
+          <h2>ROTATE IPHONE TO LANDSCAPE</h2>
+          <p>Hand-height controls are mapped to your left and right thumbs for full-screen flight.</p>
         </div>
       </div>
 
@@ -101,7 +123,7 @@ export class FlightHUD {
       <div class="relaunch-overlay" id="hud-relaunch">
         <div class="relaunch-card">
           <h2 id="relaunch-title">PARAGLIDE THE WORLD</h2>
-          <p id="relaunch-sub">Drag thumbs down to brake • Drag up for speed bar</p>
+          <p id="relaunch-sub">Left & Right thumbs control hand height • Tap or press Space to fly</p>
         </div>
       </div>
     `
@@ -109,17 +131,22 @@ export class FlightHUD {
     this.speedEl = document.getElementById('hud-speed')!
     this.altEl = document.getElementById('hud-alt')!
     this.gEl = document.getElementById('hud-g')!
-    this.leftRingEl = document.getElementById('left-thumb-ring')!
-    this.rightRingEl = document.getElementById('right-thumb-ring')!
-    this.leftFillEl = document.getElementById('left-ring-fill')!
-    this.rightFillEl = document.getElementById('right-ring-fill')!
-    this.leftLabelEl = document.getElementById('left-ring-label')!
-    this.rightLabelEl = document.getElementById('right-ring-label')!
+    this.leftToggleEl = document.getElementById('left-hand-toggle')!
+    this.rightToggleEl = document.getElementById('right-hand-toggle')!
+    this.leftLabelEl = document.getElementById('left-toggle-label')!
+    this.rightLabelEl = document.getElementById('right-toggle-label')!
+    this.leftForceEl = document.getElementById('left-toggle-force')!
+    this.rightForceEl = document.getElementById('right-toggle-force')!
+    this.leftRailLineEl = document.getElementById('left-rail-line')!
+    this.rightRailLineEl = document.getElementById('right-rail-line')!
+    this.leftTetherEl = document.getElementById('left-tension-tether')!
+    this.rightTetherEl = document.getElementById('right-tension-tether')!
     this.trickBannerEl = document.getElementById('hud-trick-banner')!
     this.trickTitleEl = document.getElementById('hud-trick-text')!
     this.relaunchOverlayEl = document.getElementById('hud-relaunch')!
     this.relaunchTitleEl = document.getElementById('relaunch-title')!
     this.relaunchSubEl = document.getElementById('relaunch-sub')!
+
 
     const camBtn = document.getElementById('btn-camera')
     if (camBtn) {
@@ -129,14 +156,26 @@ export class FlightHUD {
       })
     }
 
-    this.relaunchOverlayEl.addEventListener('click', () => {
+    const triggerStart = (e: Event) => {
+      e.stopPropagation()
       this.hideRelaunch()
       this.onStartCallback()
       this.onRelaunchCallback()
-    })
+    }
+    this.relaunchOverlayEl.addEventListener('click', triggerStart)
+    this.relaunchOverlayEl.addEventListener('touchstart', triggerStart, { passive: true })
   }
 
-  public update(telemetry: FlightTelemetry, controls: FlightControls, trick?: TrickState) {
+  public update(
+    telemetry: FlightTelemetry,
+
+    controls: FlightControls,
+    trick?: TrickState,
+    leftLagFrac: number = 0,
+    rightLagFrac: number = 0,
+    leftThumbYFrac: number | null = null,
+    rightThumbYFrac: number | null = null,
+  ) {
     if (this.speedEl) this.speedEl.innerText = `${Math.round(telemetry.airspeedKmh)}`
     if (this.altEl) this.altEl.innerText = `${Math.round(telemetry.altitudeMeters)}`
 
@@ -150,37 +189,99 @@ export class FlightHUD {
       }
     }
 
-    // Update thumb rings: brake depth
-    const leftPct = Math.round(controls.leftBrake * 100)
-    const rightPct = Math.round(controls.rightBrake * 100)
+    // Dynamic Line Tension on Landscape Rails:
+    // Heavy G-loads (>1250 N) cause lines to glow electric cyan with high tension.
+    // Slack lines (<250 N or zero-G float) loosen and dim.
+    const isHighTension = telemetry.lineTensionNewtons > 1250
+    const isSlack = telemetry.isLinesSlack || telemetry.lineTensionNewtons < 250
+    const railClass = isHighTension ? 'rail-line high-tension' : isSlack ? 'rail-line slack-tension' : 'rail-line'
+    if (this.leftRailLineEl) this.leftRailLineEl.className = railClass
+    if (this.rightRailLineEl) this.rightRailLineEl.className = railClass
 
-    if (this.leftFillEl) {
-      this.leftFillEl.style.height = `${leftPct}%`
-    }
-    if (this.rightFillEl) {
-      this.rightFillEl.style.height = `${rightPct}%`
-    }
+    const isBuffeting = telemetry.stallWarning > 0.6 && !telemetry.isStalled
 
-    if (this.leftRingEl) {
-      if (leftPct > 10) {
-        this.leftRingEl.classList.add('active')
+    // Dynamic hand height position along landscape rails:
+    // Speed Bar (0 to 1): 22% -> 6%
+    // Neutral Trim: 22%
+    // Brake (0 to 1): 22% -> 88%
+    const leftBar = controls.speedBar > 0 && controls.leftBrake === 0 ? controls.speedBar : 0
+    const leftPosPct = leftBar > 0 ? 22 - leftBar * 16 : 22 + controls.leftBrake * 66
+
+    const rightBar = controls.speedBar > 0 && controls.rightBrake === 0 ? controls.speedBar : 0
+    const rightPosPct = rightBar > 0 ? 22 - rightBar * 16 : 22 + controls.rightBrake * 66
+
+    if (this.leftToggleEl) {
+      this.leftToggleEl.style.top = `${leftPosPct}%`
+      let baseClass = 'hand-toggle'
+      if (leftBar > 0.1) {
+        baseClass += ' bar-active'
+        this.leftLabelEl.innerText = 'BAR'
+      } else if (controls.leftBrake > 0.75 || telemetry.leftStalled) {
+        baseClass += ' stall-active'
+        this.leftLabelEl.innerText = 'STALL'
+      } else if (controls.leftBrake > 0.1) {
+        baseClass += ' brake-active'
+        this.leftLabelEl.innerText = `${Math.round(controls.leftBrake * 100)}%`
       } else {
-        this.leftRingEl.classList.remove('active')
+        this.leftLabelEl.innerText = 'TRIM'
+      }
+      if (isBuffeting && controls.leftBrake > 0.35) baseClass += ' buffet-shake'
+      this.leftToggleEl.className = baseClass
+
+      if (this.leftForceEl) {
+        this.leftForceEl.innerText = telemetry.leftBrakeForceN > 8 ? `${Math.round(telemetry.leftBrakeForceN)}N` : ''
       }
     }
-    if (this.rightRingEl) {
-      if (rightPct > 10) {
-        this.rightRingEl.classList.add('active')
+
+    if (this.rightToggleEl) {
+      this.rightToggleEl.style.top = `${rightPosPct}%`
+      let baseClass = 'hand-toggle'
+      if (rightBar > 0.1) {
+        baseClass += ' bar-active'
+        this.rightLabelEl.innerText = 'BAR'
+      } else if (controls.rightBrake > 0.75 || telemetry.rightStalled) {
+        baseClass += ' stall-active'
+        this.rightLabelEl.innerText = 'STALL'
+      } else if (controls.rightBrake > 0.1) {
+        baseClass += ' brake-active'
+        this.rightLabelEl.innerText = `${Math.round(controls.rightBrake * 100)}%`
       } else {
-        this.rightRingEl.classList.remove('active')
+        this.rightLabelEl.innerText = 'TRIM'
+      }
+      if (isBuffeting && controls.rightBrake > 0.35) baseClass += ' buffet-shake'
+      this.rightToggleEl.className = baseClass
+
+      if (this.rightForceEl) {
+        this.rightForceEl.innerText = telemetry.rightBrakeForceN > 8 ? `${Math.round(telemetry.rightBrakeForceN)}N` : ''
       }
     }
 
-    if (this.leftLabelEl) {
-      this.leftLabelEl.innerText = leftPct > 15 ? `${leftPct}%` : 'L'
+    // Elastic Tension Tethers:
+    // Render glowing tension cables stretching between user thumb contact and resisted handle toggle
+    if (this.leftTetherEl) {
+      if (leftLagFrac > 0.04 && leftThumbYFrac !== null) {
+        const thumbPct = leftThumbYFrac * 100
+        const top = Math.min(leftPosPct, thumbPct)
+        const height = Math.abs(leftPosPct - thumbPct)
+        this.leftTetherEl.style.display = 'block'
+        this.leftTetherEl.style.top = `${top}%`
+        this.leftTetherEl.style.height = `${Math.max(4, height)}%`
+      } else {
+        this.leftTetherEl.style.display = 'none'
+      }
     }
-    if (this.rightLabelEl) {
-      this.rightLabelEl.innerText = rightPct > 15 ? `${rightPct}%` : 'R'
+
+    if (this.rightTetherEl) {
+      if (rightLagFrac > 0.04 && rightThumbYFrac !== null) {
+        const thumbPct = rightThumbYFrac * 100
+        const top = Math.min(rightPosPct, thumbPct)
+        const height = Math.abs(rightPosPct - thumbPct)
+        this.rightTetherEl.style.display = 'block'
+        this.rightTetherEl.style.top = `${top}%`
+        this.rightTetherEl.style.height = `${Math.max(4, height)}%`
+      } else {
+        this.rightTetherEl.style.display = 'none'
+      }
     }
 
     // Acro trick banner
@@ -195,3 +296,4 @@ export class FlightHUD {
     }
   }
 }
+

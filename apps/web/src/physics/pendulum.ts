@@ -89,6 +89,11 @@ export class ParagliderSimulation {
   public isCrashed: boolean = false
   public isLanded: boolean = false
   public isLinesSlack: boolean = false
+  public leftBrakeForceN: number = 0
+  public rightBrakeForceN: number = 0
+  public stallWarning: number = 0
+  public leftStalled: boolean = false
+  public rightStalled: boolean = false
   public tumbleStreak: number = 0
   public cumulativePitchDeg: number = 0
   public lastTumblePitchDeg: number = 0
@@ -135,7 +140,8 @@ export class ParagliderSimulation {
     this.cQ = qFromAxisAngle(v3(0, 1, 0), headingRad)
     this.cOmega = v3()
 
-    this.pPos = v3(0, initialAltitude - this.wing.tetherLengthMeters, 0)
+    const riserPos = vAdd(this.cPos, qRotate(this.cQ, v3(0, -0.35, 0)))
+    this.pPos = vAdd(riserPos, v3(0, -this.wing.tetherLengthMeters, 0))
     this.pVel = v3(this.cVel.x, this.cVel.y, this.cVel.z)
 
     this.canopy = {
@@ -217,6 +223,11 @@ export class ParagliderSimulation {
       xcDistanceMeters: 0,
       maxAltitudeMeters: initialAltitude,
       thermalClimbMps: 0,
+      leftBrakeForceN: 0,
+      rightBrakeForceN: 0,
+      stallWarning: 0,
+      leftStalled: false,
+      rightStalled: false,
     }
 
     this.poseCurr = this.capturePose()
@@ -257,7 +268,8 @@ export class ParagliderSimulation {
     this.cQ = qFromAxisAngle(v3(0, 1, 0), headingRad)
     this.cOmega = v3()
 
-    this.pPos = v3(spawn.x, spawn.y - this.wing.tetherLengthMeters, spawn.z)
+    const riserPos = vAdd(this.cPos, qRotate(this.cQ, v3(0, -0.35, 0)))
+    this.pPos = vAdd(riserPos, v3(0, -this.wing.tetherLengthMeters, 0))
     this.pVel = v3(this.cVel.x, this.cVel.y, this.cVel.z)
 
     this.isCrashed = false
@@ -377,6 +389,11 @@ export class ParagliderSimulation {
     this.isSpinning = aero.asymmetricStallSide !== 'none'
     this.leftWingCollapse = aero.asymmetricStallSide === 'left' ? 0.95 : aero.isFullStall ? 0.8 : 0
     this.rightWingCollapse = aero.asymmetricStallSide === 'right' ? 0.95 : aero.isFullStall ? 0.8 : 0
+    this.leftBrakeForceN = aero.leftBrakeForceN
+    this.rightBrakeForceN = aero.rightBrakeForceN
+    this.stallWarning = aero.stallWarning
+    this.leftStalled = aero.leftStalled
+    this.rightStalled = aero.rightStalled
 
     // Canopy Apparent Mass Tensor
     const mApp = computeApparentMass(rho, w)
@@ -481,12 +498,6 @@ export class ParagliderSimulation {
       const overshoot = postLineDist - tetherL
       this.pPos = vAddScaled(this.pPos, postLineDir, -overshoot * (mCanopyEff / (mPilot + mCanopyEff)))
       this.cPos = vAddScaled(this.cPos, postLineDir, overshoot * (mPilot / (mPilot + mCanopyEff)))
-
-      const vRelOut = vDot(vSub(this.pVel, this.cVel), postLineDir)
-      if (vRelOut > 0) {
-        this.pVel = vAddScaled(this.pVel, postLineDir, -vRelOut * (reducedMass / mPilot))
-        this.cVel = vAddScaled(this.cVel, postLineDir, vRelOut * (reducedMass / mCanopyEff))
-      }
     }
 
     // 7. Canopy Rotational Dynamics
@@ -499,23 +510,41 @@ export class ParagliderSimulation {
     // Natural pendulum restoring moment: tau = -sin(delta) * kTruss.
     // Holds trim incidence during straight flight, while passing smoothly through zero
     // at 180° inversion to allow full acro tumbles and loops!
-    const targetPitchRad = (w.riggingAngleDeg + this.controls.speedBar * w.speedBarAngleDeg) * DEG
+    // Speedbar accelerates glider by pitching canopy nose down (positive pitchDeg convention: + nose down)
+    const baseRigging = Math.abs(w.riggingAngleDeg)
+    const targetPitchRad = (baseRigging + this.controls.speedBar * 8.5) * DEG
     const currentPitchOffsetRad = Math.atan2(lineToPilotBody.z, -lineToPilotBody.y)
     const deltaPitchRad = currentPitchOffsetRad - targetPitchRad
 
     // Line tension factor: when lines go slack, bridle restoring moments unload
     const tensionFrac = clamp(this.lineTensionNewtons / (mPilot * G), 0, 3.0)
 
-    // Dynamic bridle stiffness (N*m/rad)
-    const kTrussPitch = 2600.0 * tensionFrac
-    const dTrussPitch = 340.0 * tensionFrac
-    const kTrussRoll = 1400.0 * tensionFrac
-    const dTrussRoll = 180.0 * tensionFrac
+    // Dynamic bridle stiffness (N*m/rad): allows high-energy acro swings and 360° flips
+    // Pitch stiffness from multi-row triangulation (~280 N*m/rad)
+    // Roll stiffness from harness chest-strap carabiner spacing (w ~ 0.42m -> ~220 N*m/rad)
+    const kTrussPitch = 320.0 * tensionFrac
+    const dTrussPitch = 24.0 * tensionFrac
+    const kTrussRoll = 240.0 * tensionFrac
+    const dTrussRoll = 32.0 * tensionFrac
 
-    const trussPitchTorque = -Math.sin(deltaPitchRad) * kTrussPitch - this.cOmega.x * dTrussPitch
+    // Tether line angular velocity in canopy body frame (for relative oscillation damping):
+    // Damping against relative wing-tether motion instead of world space allows full whole-system
+    // acro loops, barrel rolls, and infinite tumbles without artificial viscous resistance!
+    const rLineWorld = vSub(this.pPos, this.cPos)
+    const rLineLenSq = vLen(rLineWorld) * vLen(rLineWorld)
+    const vRelWorld = vSub(this.pVel, this.cVel)
+    const omegaLineWorld = rLineLenSq > 0.1
+      ? vScale(vCross(rLineWorld, vRelWorld), 1 / rLineLenSq)
+      : v3()
+    const omegaLineBody = qRotateInv(this.cQ, omegaLineWorld)
+
+    const relOmegaX = this.cOmega.x - omegaLineBody.x
+    const relOmegaZ = this.cOmega.z - omegaLineBody.z
+
+    const trussPitchTorque = -Math.sin(deltaPitchRad) * kTrussPitch - relOmegaX * dTrussPitch
     const currentRollOffsetRad = Math.atan2(lineToPilotBody.x, -lineToPilotBody.y)
-    const deltaRollRad = currentRollOffsetRad - (-effWeightShift * 0.45)
-    const trussRollTorque = -Math.sin(deltaRollRad) * kTrussRoll - this.cOmega.z * dTrussRoll
+    const deltaRollRad = currentRollOffsetRad - (effWeightShift * 0.35)
+    const trussRollTorque = Math.sin(deltaRollRad) * kTrussRoll - relOmegaZ * dTrussRoll
 
     // Total body torques: aerodynamic torques + flexible bridle restoring moments
     const totalTorque = v3(
@@ -523,6 +552,7 @@ export class ParagliderSimulation {
       aero.totalMomentBody.y,
       aero.totalMomentBody.z + trussRollTorque,
     )
+
 
     // Canopy effective rotational inertia (Canopy structural + apparent added inertia)
     const b = w.projectedSpanMeters
@@ -532,9 +562,9 @@ export class ParagliderSimulation {
     const Izz = (mCanopy * (b * b) / 12) + mApp.iRoll + 12.0  // ~42 kg*m^2 (Roll)
 
     // Natural vortex aerodynamic rotational damping
-    const pitchDamp = -this.cOmega.x * (Ixx * 1.5)
-    const yawDamp = -this.cOmega.y * (Iyy * 1.8)
-    const rollDamp = -this.cOmega.z * (Izz * 1.6)
+    const pitchDamp = -this.cOmega.x * (Ixx * 2.0)
+    const yawDamp = -this.cOmega.y * (Iyy * 2.4)
+    const rollDamp = -this.cOmega.z * (Izz * 2.2)
 
     const alphaCanopy = v3(
       (totalTorque.x + pitchDamp) / Ixx,
@@ -616,6 +646,11 @@ export class ParagliderSimulation {
     this.telemetry.headingDeg = att.yawDeg
     this.telemetry.wingType = this.currentWingType
     this.telemetry.xcDistanceMeters = Math.hypot(pPos.x - this.launchPos.x, pPos.z - this.launchPos.z)
+    this.telemetry.leftBrakeForceN = this.leftBrakeForceN
+    this.telemetry.rightBrakeForceN = this.rightBrakeForceN
+    this.telemetry.stallWarning = this.stallWarning
+    this.telemetry.leftStalled = this.leftStalled
+    this.telemetry.rightStalled = this.rightStalled
   }
 
   /**

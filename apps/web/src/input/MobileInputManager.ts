@@ -1,4 +1,5 @@
 import type { FlightControls } from '../physics/types'
+import { HapticManager } from './HapticManager'
 
 function clamp(v: number, lo: number, hi: number): number {
   return Math.max(lo, Math.min(hi, v))
@@ -18,39 +19,52 @@ export const WEIGHT_SHIFT_RATE = 12.0
 export const SPEEDBAR_RATE_IN = 8.0
 export const SPEEDBAR_RATE_OUT = 10.0
 
-// ---- Touch & Mouse drag model ----------------------------------------
-const TOUCH_MAX_DRAG_PX = 140
-const TOUCH_DEADZONE_PX = 8
-const TOUCH_CURVE_EXPONENT = 1.4
-
-function touchCurve(dragY: number): number {
-  if (dragY <= 0) return 0
-  const eff = Math.max(0, dragY - TOUCH_DEADZONE_PX)
-  const range = TOUCH_MAX_DRAG_PX - TOUCH_DEADZONE_PX
-  const t = clamp(eff / range, 0, 1)
-  return Math.pow(t, TOUCH_CURVE_EXPONENT)
+/**
+ * Converts vertical screen position (Y) to hand height:
+ * - Upper ~20% of screen: Speed Bar dive (hands pushed high)
+ * - 20% to 26% of screen: Neutral Trim (hands at pulleys)
+ * - 26% to 90% of screen: Dynamic Brake (hands lowering from shoulders to hips)
+ */
+export function handHeightToBrakeAndBar(y: number, screenHeight: number): { brake: number; bar: number } {
+  const fracY = clamp(y / Math.max(1, screenHeight), 0, 1)
+  if (fracY < 0.20) {
+    const bar = clamp((0.20 - fracY) / 0.16, 0, 1)
+    return { brake: 0, bar }
+  } else if (fracY <= 0.26) {
+    return { brake: 0, bar: 0 }
+  } else {
+    // Progressive line tension resistance: light initial pull for smooth carving,
+    // requiring deliberate deeper dragging down to hips for dynamic flare or stall
+    const rawPull = clamp((fracY - 0.26) / 0.64, 0, 1)
+    const brake = Math.pow(rawPull, 1.4)
+    return { brake, bar: 0 }
+  }
 }
 
 export class MobileInputManager {
   public controls: FlightControls
+  public haptic: HapticManager = new HapticManager()
   private neutralGamma: number = 0
   private hasGyroPermission: boolean = false
   private prevLeftBrake: number = 0
   private prevRightBrake: number = 0
   private gyroTargetWeightShift: number = 0
 
+  // Pseudo-haptic visual lag & touch coordinates
+  public leftLagFrac: number = 0
+  public rightLagFrac: number = 0
+  public leftThumbYFrac: number | null = null
+  public rightThumbYFrac: number | null = null
+
   // Touch tracking (Mobile dual-thumb)
   private leftTouchId: number | null = null
   private rightTouchId: number | null = null
-  private leftStartX: number = 0
-  private leftStartY: number = 0
-  private rightStartX: number = 0
-  private rightStartY: number = 0
   private touchLeftBrake: number = 0
   private touchRightBrake: number = 0
   private touchLeftSpeedBar: number = 0
   private touchRightSpeedBar: number = 0
   private touchWeightShift: number = 0
+
 
   // Trackpad 2-gesture tracking (Up/Down + Left/Right)
   public trackpadPitch: number = 0 // -1.0 (speed bar) to +1.0 (full brake / flare / stall)
@@ -62,8 +76,6 @@ export class MobileInputManager {
   // Mouse drag tracking (Desktop fallback)
   private isMouseDown: boolean = false
   private mouseSide: 'left' | 'right' | null = null
-  private mouseStartY: number = 0
-  private mouseStartX: number = 0
 
   // Keyboard tracking
   private keysDown: Set<string> = new Set()
@@ -207,25 +219,27 @@ export class MobileInputManager {
       'touchstart',
       (e) => {
         const screenWidth = window.innerWidth
+        const screenHeight = window.innerHeight
         for (let i = 0; i < e.changedTouches.length; i++) {
           const touch = e.changedTouches[i]
-          // Ignore touches on UI buttons
-          if ((touch.target as HTMLElement)?.closest('button, .tool-btn, .start-modal, .quick-toolbar')) {
+          if ((touch.target as HTMLElement)?.closest('button, .hud-icon-btn, .relaunch-overlay')) {
             continue
           }
 
           if (touch.clientX < screenWidth * 0.5) {
-            if (this.leftTouchId === null) {
-              this.leftTouchId = touch.identifier
-              this.leftStartX = touch.clientX
-              this.leftStartY = touch.clientY
-            }
+            this.leftTouchId = touch.identifier
+            this.leftThumbYFrac = touch.clientY / screenHeight
+            const { brake, bar } = handHeightToBrakeAndBar(touch.clientY, screenHeight)
+            this.touchLeftBrake = brake
+            this.touchLeftSpeedBar = bar
+            this.touchWeightShift = clamp((touch.clientX - screenWidth * 0.2) / (screenWidth * 0.2), -1.0, 1.0)
           } else {
-            if (this.rightTouchId === null) {
-              this.rightTouchId = touch.identifier
-              this.rightStartX = touch.clientX
-              this.rightStartY = touch.clientY
-            }
+            this.rightTouchId = touch.identifier
+            this.rightThumbYFrac = touch.clientY / screenHeight
+            const { brake, bar } = handHeightToBrakeAndBar(touch.clientY, screenHeight)
+            this.touchRightBrake = brake
+            this.touchRightSpeedBar = bar
+            this.touchWeightShift = clamp((touch.clientX - screenWidth * 0.8) / (screenWidth * 0.2), -1.0, 1.0)
           }
         }
       },
@@ -235,32 +249,22 @@ export class MobileInputManager {
     window.addEventListener(
       'touchmove',
       (e) => {
+        const screenWidth = window.innerWidth
+        const screenHeight = window.innerHeight
         for (let i = 0; i < e.changedTouches.length; i++) {
           const touch = e.changedTouches[i]
           if (touch.identifier === this.leftTouchId) {
-            const dragY = touch.clientY - this.leftStartY
-            const dragX = touch.clientX - this.leftStartX
-
-            if (dragY >= 0) {
-              this.touchLeftBrake = touchCurve(dragY)
-              this.touchLeftSpeedBar = 0
-            } else {
-              this.touchLeftBrake = 0
-              this.touchLeftSpeedBar = clamp(-dragY / TOUCH_MAX_DRAG_PX, 0, 1)
-            }
-            this.touchWeightShift = clamp(dragX / (TOUCH_MAX_DRAG_PX * 0.8), -1.0, 1.0)
+            this.leftThumbYFrac = touch.clientY / screenHeight
+            const { brake, bar } = handHeightToBrakeAndBar(touch.clientY, screenHeight)
+            this.touchLeftBrake = brake
+            this.touchLeftSpeedBar = bar
+            this.touchWeightShift = clamp((touch.clientX - screenWidth * 0.2) / (screenWidth * 0.2), -1.0, 1.0)
           } else if (touch.identifier === this.rightTouchId) {
-            const dragY = touch.clientY - this.rightStartY
-            const dragX = touch.clientX - this.rightStartX
-
-            if (dragY >= 0) {
-              this.touchRightBrake = touchCurve(dragY)
-              this.touchRightSpeedBar = 0
-            } else {
-              this.touchRightBrake = 0
-              this.touchRightSpeedBar = clamp(-dragY / TOUCH_MAX_DRAG_PX, 0, 1)
-            }
-            this.touchWeightShift = clamp(dragX / (TOUCH_MAX_DRAG_PX * 0.8), -1.0, 1.0)
+            this.rightThumbYFrac = touch.clientY / screenHeight
+            const { brake, bar } = handHeightToBrakeAndBar(touch.clientY, screenHeight)
+            this.touchRightBrake = brake
+            this.touchRightSpeedBar = bar
+            this.touchWeightShift = clamp((touch.clientX - screenWidth * 0.8) / (screenWidth * 0.2), -1.0, 1.0)
           }
         }
       },
@@ -270,11 +274,15 @@ export class MobileInputManager {
     const endTouch = (touch: Touch) => {
       if (touch.identifier === this.leftTouchId) {
         this.leftTouchId = null
+        this.leftThumbYFrac = null
+        this.leftLagFrac = 0
         this.touchLeftBrake = 0
         this.touchLeftSpeedBar = 0
       }
       if (touch.identifier === this.rightTouchId) {
         this.rightTouchId = null
+        this.rightThumbYFrac = null
+        this.rightLagFrac = 0
         this.touchRightBrake = 0
         this.touchRightSpeedBar = 0
       }
@@ -296,36 +304,54 @@ export class MobileInputManager {
    */
   private setupMouseListeners() {
     window.addEventListener('mousedown', (e) => {
-      if ((e.target as HTMLElement)?.closest('button, .tool-btn, .start-modal, .quick-toolbar')) {
+      if ((e.target as HTMLElement)?.closest('button, .hud-icon-btn, .relaunch-overlay')) {
         return
       }
       this.isMouseDown = true
-      this.mouseStartX = e.clientX
-      this.mouseStartY = e.clientY
       this.mouseSide = e.clientX < window.innerWidth * 0.5 ? 'left' : 'right'
+      const { brake, bar } = handHeightToBrakeAndBar(e.clientY, window.innerHeight)
+      if (this.mouseSide === 'left') {
+        this.leftThumbYFrac = e.clientY / window.innerHeight
+        this.touchLeftBrake = brake
+        this.touchLeftSpeedBar = bar
+      } else {
+        this.rightThumbYFrac = e.clientY / window.innerHeight
+        this.touchRightBrake = brake
+        this.touchRightSpeedBar = bar
+      }
     })
 
     window.addEventListener('mousemove', (e) => {
       if (!this.isMouseDown || !this.mouseSide) return
-      const dragY = e.clientY - this.mouseStartY
-      const dragX = e.clientX - this.mouseStartX
-      const brakeVal = touchCurve(dragY)
+      const { brake, bar } = handHeightToBrakeAndBar(e.clientY, window.innerHeight)
       if (this.mouseSide === 'left') {
-        this.touchLeftBrake = brakeVal
+        this.leftThumbYFrac = e.clientY / window.innerHeight
+        this.touchLeftBrake = brake
+        this.touchLeftSpeedBar = bar
       } else {
-        this.touchRightBrake = brakeVal
+        this.rightThumbYFrac = e.clientY / window.innerHeight
+        this.touchRightBrake = brake
+        this.touchRightSpeedBar = bar
       }
-      this.touchWeightShift = clamp(dragX / (TOUCH_MAX_DRAG_PX * 0.8), -1.0, 1.0)
     })
 
     const endMouse = () => {
       if (!this.isMouseDown) return
       this.isMouseDown = false
-      if (this.mouseSide === 'left') this.touchLeftBrake = 0
-      if (this.mouseSide === 'right') this.touchRightBrake = 0
+      if (this.mouseSide === 'left') {
+        this.touchLeftBrake = 0
+        this.leftThumbYFrac = null
+        this.leftLagFrac = 0
+      }
+      if (this.mouseSide === 'right') {
+        this.touchRightBrake = 0
+        this.rightThumbYFrac = null
+        this.rightLagFrac = 0
+      }
       this.touchWeightShift = 0
       this.mouseSide = null
     }
+
 
     window.addEventListener('mouseup', endMouse)
     window.addEventListener('mouseleave', endMouse)
@@ -401,16 +427,43 @@ export class MobileInputManager {
     return true
   }
 
-  public update(dt: number) {
+  public update(
+    dt: number,
+    aeroResistanceLeftN: number = 0,
+    aeroResistanceRightN: number = 0,
+    isStalled: boolean = false,
+    stallWarning: number = 0,
+    gForce: number = 1.0,
+    isFootDragging: boolean = false,
+  ) {
     const gamepadDrove = this.updateGamepad(dt)
     const touchActive = this.leftTouchId !== null || this.rightTouchId !== null || this.isMouseDown
 
     if (gamepadDrove) {
-      // Gamepad is actively controlling
+      this.leftLagFrac = 0
+      this.rightLagFrac = 0
     } else if (touchActive) {
-      // Touch/Mouse Dual-Thumb input: direct, instant tracking
-      this.controls.leftBrake = moveToward(this.controls.leftBrake, this.touchLeftBrake, FULL_BRAKE_RATE, dt)
-      this.controls.rightBrake = moveToward(this.controls.rightBrake, this.touchRightBrake, FULL_BRAKE_RATE, dt)
+      // Touch/Mouse Dual-Thumb input:
+      // Pulling DOWN is resisted by aerodynamic force on the deflected cloth.
+      // Releasing UP is assisted by mechanical line tension & spring return.
+      // When stalled, aerodynamic resistance collapses, letting the controls snap down freely!
+      const pullRateL =
+        this.touchLeftBrake > this.controls.leftBrake
+          ? FULL_BRAKE_RATE / (1.0 + Math.max(0, aeroResistanceLeftN) / 45.0)
+          : BRAKE_RELEASE_RATE
+
+      const pullRateR =
+        this.touchRightBrake > this.controls.rightBrake
+          ? FULL_BRAKE_RATE / (1.0 + Math.max(0, aeroResistanceRightN) / 45.0)
+          : BRAKE_RELEASE_RATE
+
+      this.controls.leftBrake = moveToward(this.controls.leftBrake, this.touchLeftBrake, pullRateL, dt)
+      this.controls.rightBrake = moveToward(this.controls.rightBrake, this.touchRightBrake, pullRateR, dt)
+
+      // Pseudo-haptic visual elastic lag
+      this.leftLagFrac = clamp(this.touchLeftBrake - this.controls.leftBrake, 0, 1)
+      this.rightLagFrac = clamp(this.touchRightBrake - this.controls.rightBrake, 0, 1)
+
       const combinedSpeedBar = Math.max(this.touchLeftSpeedBar, this.touchRightSpeedBar)
       this.controls.speedBar = moveToward(this.controls.speedBar, combinedSpeedBar, SPEEDBAR_RATE_IN, dt)
       const targetWeightShift =
@@ -419,6 +472,9 @@ export class MobileInputManager {
           : this.gyroTargetWeightShift
       this.controls.weightShift = moveToward(this.controls.weightShift, targetWeightShift, WEIGHT_SHIFT_RATE, dt)
     } else if (this.trackpadActive) {
+      this.leftLagFrac = 0
+      this.rightLagFrac = 0
+
       // Trackpad 2-Gesture Model (Up/Down + Left/Right)
       const timeSinceWheel = performance.now() - this.lastTrackpadTime
 
@@ -471,15 +527,15 @@ export class MobileInputManager {
         this.controls.leftBrake = moveToward(this.controls.leftBrake, leftTarget, FULL_BRAKE_RATE, dt)
         this.controls.rightBrake = moveToward(this.controls.rightBrake, rightTarget, FULL_BRAKE_RATE, dt)
       } else {
-        // Neutral trim: Pure steering
+        // Neutral trim: Pure steering (smooth 30% carve max)
         this.controls.speedBar = moveToward(this.controls.speedBar, 0, SPEEDBAR_RATE_OUT, dt)
-        const leftTarget = this.trackpadRoll < 0 ? Math.abs(this.trackpadRoll) * 0.85 : 0
-        const rightTarget = this.trackpadRoll > 0 ? Math.abs(this.trackpadRoll) * 0.85 : 0
+        const leftTarget = this.trackpadRoll < 0 ? Math.abs(this.trackpadRoll) * 0.30 : 0
+        const rightTarget = this.trackpadRoll > 0 ? Math.abs(this.trackpadRoll) * 0.30 : 0
         this.controls.leftBrake = moveToward(this.controls.leftBrake, leftTarget, FULL_BRAKE_RATE, dt)
         this.controls.rightBrake = moveToward(this.controls.rightBrake, rightTarget, FULL_BRAKE_RATE, dt)
       }
     } else {
-      // Keyboard fallback: Direct, responsive acro authority
+      // Keyboard fallback: Authentic paraglider control framing
       const bothBrakes = this.keysDown.has('KeyS') || this.keysDown.has('ArrowDown')
       const leftDeepBrake = this.keysDown.has('KeyF')
       const rightDeepBrake = this.keysDown.has('KeyJ')
@@ -493,19 +549,27 @@ export class MobileInputManager {
         this.keysDown.has('KeyE') ||
         this.keysDown.has('Semicolon')
 
-      if (bothBrakes || flare) {
-        this.controls.leftBrake = moveToward(this.controls.leftBrake, 1.0, FULL_BRAKE_RATE, dt)
-        this.controls.rightBrake = moveToward(this.controls.rightBrake, 1.0, FULL_BRAKE_RATE, dt)
+      if (flare) {
+        // Full dual flare / swoop (90% brake)
+        this.controls.leftBrake = moveToward(this.controls.leftBrake, 0.90, FULL_BRAKE_RATE, dt)
+        this.controls.rightBrake = moveToward(this.controls.rightBrake, 0.90, FULL_BRAKE_RATE, dt)
+      } else if (bothBrakes) {
+        // Half brake speed control (45% brake)
+        this.controls.leftBrake = moveToward(this.controls.leftBrake, 0.45, FULL_BRAKE_RATE, dt)
+        this.controls.rightBrake = moveToward(this.controls.rightBrake, 0.45, FULL_BRAKE_RATE, dt)
       } else {
-        const targetLeft = leftDeepBrake ? 1.0 : leftSteer ? 0.85 : 0
-        const targetRight = rightDeepBrake ? 1.0 : rightSteer ? 0.85 : 0
+        // Normal steering: 28% brake carve (A/D keys); deliberate deep acro spin (F/J keys)
+        const targetLeft = leftDeepBrake ? 0.95 : leftSteer ? 0.28 : 0
+        const targetRight = rightDeepBrake ? 0.95 : rightSteer ? 0.28 : 0
         this.controls.leftBrake = moveToward(this.controls.leftBrake, targetLeft, targetLeft > 0 ? FULL_BRAKE_RATE : BRAKE_RELEASE_RATE, dt)
         this.controls.rightBrake = moveToward(this.controls.rightBrake, targetRight, targetRight > 0 ? FULL_BRAKE_RATE : BRAKE_RELEASE_RATE, dt)
       }
 
       let kbWeightShift = 0
-      if ((leftSteer || leftDeepBrake) && !(rightSteer || rightDeepBrake)) kbWeightShift = -1.0
-      if ((rightSteer || rightDeepBrake) && !(leftSteer || leftDeepBrake)) kbWeightShift = 1.0
+      if (leftDeepBrake) kbWeightShift = -0.9
+      else if (leftSteer) kbWeightShift = -0.35
+      if (rightDeepBrake) kbWeightShift = 0.9
+      else if (rightSteer) kbWeightShift = 0.35
       this.controls.weightShift = moveToward(this.controls.weightShift, kbWeightShift, WEIGHT_SHIFT_RATE, dt)
 
       const barHeld =
@@ -525,5 +589,17 @@ export class MobileInputManager {
 
     this.prevLeftBrake = this.controls.leftBrake
     this.prevRightBrake = this.controls.rightBrake
+
+    // Update native iOS Taptic Engine & tactile vibration feedback
+    this.haptic.update(
+      aeroResistanceLeftN,
+      aeroResistanceRightN,
+      isStalled,
+      stallWarning,
+      gForce,
+      isFootDragging,
+      dt,
+    )
   }
 }
+
