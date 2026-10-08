@@ -11,6 +11,10 @@ export type FlightControls = {
   rightBrakeRate: number
   weightShift: number // -1 (lean left) to +1 (lean right)
   speedBar: number // 0 to 1
+  pullingA: number // 0 to 1 (A-risers / Speed bar leading edge pull)
+  pullingB: number // 0 to 1 (B-risers / B-line stall)
+  throttle?: number // 0 (idle) to 1 (full power) for Paramotor / PPG
+  trimmers?: number // 0 (slow trim) to 1 (fast reflex) for Paramotor / Slalom
   reverseStance: boolean // Pilot flipped 180° in harness facing wing for ground-handling / kiting
 }
 
@@ -30,6 +34,7 @@ export type CanopyState = {
   rightWingCollapse: number
   asymmetricStallSide: 'none' | 'left' | 'right'
   isNegativeSpin: boolean
+  isBStall: boolean
 }
 
 export type PilotState = {
@@ -64,6 +69,7 @@ export type TrickName =
   | 'Proximity Skim'
   | 'Foot Drag'
   | 'Infinite Tumble'
+  | 'Barrel Roll'
   | 'Misty Flip'
   | 'Reverse Dune Kite'
   | 'Swoop Flare Landing'
@@ -104,7 +110,7 @@ export type FlightTelemetry = {
   bankDeg: number
   pitchDeg: number
   headingDeg: number
-  wingType: 'speedwing' | 'paraglider'
+  wingType: 'speedwing' | 'paraglider' | 'paramotor'
   xcDistanceMeters: number
   maxAltitudeMeters: number
   thermalClimbMps: number
@@ -113,4 +119,16 @@ export type FlightTelemetry = {
   stallWarning: number
   leftStalled: boolean
   rightStalled: boolean
+  isBStall: boolean
+  pullingA: number
+  pullingB: number
+  throttlePercent?: number
+  engineRpm?: number
+  thrustNewtons?: number
+  staticChargeField?: number
+  thermalFluidVx?: number
+  thermalFluidVy?: number
+  thermalFluidVz?: number
+  thermalTempAnomalyC?: number
+  isDraftingZone?: boolean
 }

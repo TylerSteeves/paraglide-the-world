@@ -10,7 +10,8 @@
   },
   "dependencies": {
     "@babylonjs/core": "^9.23.0",
-    "@babylonjs/loaders": "^9.23.0"
+    "@babylonjs/loaders": "^9.23.0",
+    "@wilder-future/world-data-engine": "workspace:*"
   },
   "devDependencies": {
     "typescript": "^5.9.3",

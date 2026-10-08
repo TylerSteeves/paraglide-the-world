@@ -8,6 +8,7 @@ export type HapticType =
   | 'snap'
   | 'soft'
   | 'stallRelease'
+  | 'thermalKick'
 
 export class HapticManager {
   private hasNativeBridge: boolean = false
@@ -17,6 +18,7 @@ export class HapticManager {
   private rightNotchAccumulator: number = 0
   private lastHapticTime: number = 0
   private wasStalled: boolean = false
+  private prevVerticalWind: number = 0
 
   constructor() {
     this.checkBridge()
@@ -112,6 +114,7 @@ export class HapticManager {
     gForce: number,
     isFootDragging: boolean,
     dt: number,
+    verticalWind: number = 0,
   ) {
     // 1. Stall Breakaway Event: Instantaneous loss of control line pressure!
     if (isStalled && !this.wasStalled) {
@@ -179,7 +182,14 @@ export class HapticManager {
       }
     }
 
+    // 7. Thermal Entry Kick: Sudden thermal core entry creates a solid punch into the harness lines
+    const updraftDelta = verticalWind - this.prevVerticalWind
+    if (updraftDelta > 1.8 && verticalWind > 2.0) {
+      this.trigger('thermalKick', Math.min(1.0, 0.6 + updraftDelta * 0.15))
+    }
+
     this.prevLeftForce = leftForceN
     this.prevRightForce = rightForceN
+    this.prevVerticalWind = verticalWind
   }
 }

@@ -1,8 +1,9 @@
 import SwiftUI
 import WebKit
+import CoreMotion
 
 struct ContentView: View {
-    @State private var serverUrlString: String = "http://192.168.40.141:5181/"
+    @State private var serverUrlString: String = "http://192.168.40.141:5173/"
     @State private var showingSettings: Bool = false
     @State private var webView = WKWebView()
 
@@ -44,9 +45,11 @@ struct ParaglideWebView: UIViewRepresentable {
         config.mediaTypesRequiringUserActionForPlayback = []
         config.preferences.isElementFullscreenEnabled = true
 
-        // Register native Taptic Engine bridge
+        // Register native Taptic Engine & CoreMotion bridge
         config.userContentController.removeScriptMessageHandler(forName: "haptic")
         config.userContentController.add(context.coordinator, name: "haptic")
+        config.userContentController.removeScriptMessageHandler(forName: "motion")
+        config.userContentController.add(context.coordinator, name: "motion")
 
         #if DEBUG
         if #available(iOS 16.4, *) {
@@ -97,6 +100,8 @@ struct ParaglideWebView: UIViewRepresentable {
         private let rigidFeedback = UIImpactFeedbackGenerator(style: .rigid)
         private let softFeedback = UIImpactFeedbackGenerator(style: .soft)
         private let selectionFeedback = UISelectionFeedbackGenerator()
+        private let motionManager = CMMotionManager()
+        private var isStreamingMotion: Bool = false
 
         init(_ parent: ParaglideWebView) {
             self.parent = parent
@@ -110,11 +115,51 @@ struct ParaglideWebView: UIViewRepresentable {
         }
 
         func userContentController(_ userContentController: WKUserContentController, didReceive message: WKScriptMessage) {
-            guard message.name == "haptic" else { return }
-            if let type = message.body as? String {
-                triggerHaptic(type: type)
-            } else if let dict = message.body as? [String: Any], let type = dict["type"] as? String {
-                triggerHaptic(type: type, intensity: dict["intensity"] as? Double)
+            if message.name == "haptic" {
+                if let type = message.body as? String {
+                    triggerHaptic(type: type)
+                } else if let dict = message.body as? [String: Any], let type = dict["type"] as? String {
+                    triggerHaptic(type: type, intensity: dict["intensity"] as? Double)
+                }
+            } else if message.name == "motion" {
+                if let cmd = message.body as? String {
+                    if cmd == "start" {
+                        startMotionUpdates()
+                    } else if cmd == "stop" {
+                        stopMotionUpdates()
+                    }
+                }
+            }
+        }
+
+        func startMotionUpdates() {
+            guard motionManager.isDeviceMotionAvailable, !isStreamingMotion else { return }
+            motionManager.deviceMotionUpdateInterval = 1.0 / 60.0
+            isStreamingMotion = true
+            motionManager.startDeviceMotionUpdates(using: .xArbitraryZVertical, to: .main) { [weak self] motion, error in
+                guard let self = self, let motion = motion else { return }
+                let roll = motion.attitude.roll
+                let pitch = motion.attitude.pitch
+                let yaw = motion.attitude.yaw
+                let ax = motion.userAcceleration.x
+                let ay = motion.userAcceleration.y
+                let az = motion.userAcceleration.z
+                let rx = motion.rotationRate.x
+                let ry = motion.rotationRate.y
+                let rz = motion.rotationRate.z
+                let gx = motion.gravity.x
+                let gy = motion.gravity.y
+                let gz = motion.gravity.z
+
+                let js = "window.onNativeMotion && window.onNativeMotion({ roll: \(roll), pitch: \(pitch), yaw: \(yaw), ax: \(ax), ay: \(ay), az: \(az), rx: \(rx), ry: \(ry), rz: \(rz), gx: \(gx), gy: \(gy), gz: \(gz) });"
+                self.parent.webView.evaluateJavaScript(js, completionHandler: nil)
+            }
+        }
+
+        func stopMotionUpdates() {
+            if isStreamingMotion {
+                motionManager.stopDeviceMotionUpdates()
+                isStreamingMotion = false
             }
         }
 
@@ -144,6 +189,9 @@ struct ParaglideWebView: UIViewRepresentable {
                 case "rigid", "snap":
                     rigidFeedback.impactOccurred()
                     rigidFeedback.prepare()
+                case "thermalKick":
+                    heavyFeedback.impactOccurred(intensity: 1.0)
+                    heavyFeedback.prepare()
                 case "soft", "stallRelease":
                     softFeedback.impactOccurred()
                     softFeedback.prepare()
@@ -154,9 +202,17 @@ struct ParaglideWebView: UIViewRepresentable {
             }
         }
 
+        func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
+            startMotionUpdates()
+        }
+
         func webView(_ webView: WKWebView, didFailProvisionalNavigation navigation: WKNavigation!, withError error: Error) {
             print("[ParaglideTheWorld] Remote dev server connection failed: \(error.localizedDescription). Falling back to local bundle.")
             parent.loadBundledDist(in: webView)
+        }
+
+        deinit {
+            stopMotionUpdates()
         }
     }
 }
@@ -170,7 +226,7 @@ struct ServerConfigView: View {
         NavigationStack {
             Form {
                 Section(header: Text("Dev Server URL")) {
-                    TextField("http://192.168.40.141:5181/", text: $urlString)
+                    TextField("http://192.168.40.141:5173/", text: $urlString)
                         .autocapitalization(.none)
                         .disableAutocorrection(true)
                 }

@@ -3,6 +3,7 @@ import { Vector3 } from '@babylonjs/core/Maths/math.vector'
 import { MeshBuilder } from '@babylonjs/core/Meshes/meshBuilder'
 import { StandardMaterial } from '@babylonjs/core/Materials/standardMaterial'
 import type { Scene } from '@babylonjs/core/scene'
+import type { Mesh } from '@babylonjs/core/Meshes/mesh'
 import type { WhistlerMountain } from './WhistlerMountain'
 
 export type ChairliftTower = {
@@ -12,27 +13,30 @@ export type ChairliftTower = {
 
 export class ChairliftSystem {
   public towers: ChairliftTower[] = []
+  private spawnedMeshes: (Mesh | any)[] = []
 
   constructor(scene: Scene, mountain: WhistlerMountain) {
     const metalMat = new StandardMaterial('lift-metal-mat', scene)
-    metalMat.diffuseColor = new Color3(0.35, 0.4, 0.44) // Galvanized steel
-    metalMat.specularColor = new Color3(0.2, 0.2, 0.2)
+    metalMat.diffuseColor = new Color3(0.42, 0.46, 0.50) // Galvanized steel
+    metalMat.specularColor = new Color3(0.35, 0.35, 0.35)
 
     const cableMat = new StandardMaterial('lift-cable-mat', scene)
-    cableMat.diffuseColor = new Color3(0.15, 0.16, 0.18)
+    cableMat.diffuseColor = new Color3(0.12, 0.14, 0.16)
 
     const chairMat = new StandardMaterial('lift-chair-mat', scene)
-    chairMat.diffuseColor = new Color3(0.85, 0.2, 0.15) // Bright red chairs
+    chairMat.diffuseColor = new Color3(0.92, 0.18, 0.12) // High-vis alpine red chairs
 
-    // 1. Build 10 Towers stretching up the Mountain Bowl
-    const towerZPositions = [200, 450, 700, 950, 1200, 1450, 1700, 1950, 2200, 2450]
-    const towerXOffset = -85 // Running along the west flank of the ski run
+    this.spawnedMeshes.push(metalMat, cableMat, chairMat)
+
+    // 1. Build 10 Towers stretching up the Mountain Bowl parallel to the ski piste
+    const towerZPositions = [180, 420, 680, 940, 1200, 1460, 1720, 1980, 2240, 2460]
 
     const towerTopPoints: Vector3[] = []
 
     for (let i = 0; i < towerZPositions.length; i++) {
       const z = towerZPositions[i]
-      const x = towerXOffset + Math.sin(z * 0.003) * 35
+      const pisteCenter = Math.sin(z * 0.0028) * 32.0
+      const x = pisteCenter - 46.0 // 46m to the west flank of the ski run
       const groundY = mountain.sampleHeight(x, z)
       const towerHeight = 18.0 // 18m tall towers
 
@@ -44,6 +48,7 @@ export class ChairliftSystem {
       )
       pylon.position.set(x, groundY + towerHeight * 0.5, z)
       pylon.material = metalMat
+      this.spawnedMeshes.push(pylon)
 
       // Crossarm at the top
       const crossarm = MeshBuilder.CreateBox(
@@ -53,12 +58,13 @@ export class ChairliftSystem {
       )
       crossarm.position.set(x, groundY + towerHeight, z)
       crossarm.material = metalMat
+      this.spawnedMeshes.push(crossarm)
 
       const topPos = new Vector3(x, groundY + towerHeight, z)
       towerTopPoints.push(topPos)
       this.towers.push({ position: topPos, topY: groundY + towerHeight })
 
-      // Add a couple hanging chairs along the span
+      // Hanging chairs along the span
       if (i > 0) {
         const prevTop = towerTopPoints[i - 1]
         for (let c = 1; c <= 2; c++) {
@@ -74,6 +80,7 @@ export class ChairliftSystem {
           )
           chairStem.position.set(chairPos.x, chairPos.y - 0.9, chairPos.z)
           chairStem.material = cableMat
+          this.spawnedMeshes.push(chairStem)
 
           const chairBench = MeshBuilder.CreateBox(
             `chair-bench-${i}-${c}`,
@@ -82,6 +89,7 @@ export class ChairliftSystem {
           )
           chairBench.position.set(chairPos.x, chairPos.y - 1.8, chairPos.z)
           chairBench.material = chairMat
+          this.spawnedMeshes.push(chairBench)
         }
       }
     }
@@ -111,6 +119,7 @@ export class ChairliftSystem {
       scene,
     )
     cableLeft.material = cableMat
+    this.spawnedMeshes.push(cableLeft)
 
     const cableRight = MeshBuilder.CreateTube(
       'lift-cable-right',
@@ -118,5 +127,13 @@ export class ChairliftSystem {
       scene,
     )
     cableRight.material = cableMat
+    this.spawnedMeshes.push(cableRight)
+  }
+
+  public dispose(): void {
+    for (const m of this.spawnedMeshes) {
+      if (m && m.dispose) m.dispose(false, true)
+    }
+    this.spawnedMeshes = []
   }
 }

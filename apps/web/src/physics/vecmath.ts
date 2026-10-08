@@ -130,6 +130,13 @@ export function qNlerp(a: Quat, b: Quat, t: number): Quat {
   })
 }
 
+export function qFromYawPitchRoll(yawDeg: number, pitchDeg: number, bankDeg: number): Quat {
+  const qYaw = qFromAxisAngle(v3(0, 1, 0), yawDeg * DEG)
+  const qPitch = qFromAxisAngle(v3(1, 0, 0), pitchDeg * DEG)
+  const qRoll = qFromAxisAngle(v3(0, 0, 1), -bankDeg * DEG)
+  return qNormalize(qMul(qYaw, qMul(qPitch, qRoll)))
+}
+
 /** Yaw/pitch/roll extraction in the game's conventions (all in degrees). */
 export function qToAttitude(q: Quat): { yawDeg: number; pitchDeg: number; bankDeg: number } {
   const fwd = qRotate(q, v3(0, 0, 1))

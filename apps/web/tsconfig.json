@@ -18,9 +18,11 @@
   "include": [
     "src/main.ts",
     "src/audio/**/*",
+    "src/data/**/*",
     "src/input/**/*",
     "src/physics/**/*",
     "src/rendering/**/*",
+    "src/simulation/**/*",
     "src/ui/**/*",
     "src/world/**/*"
   ]

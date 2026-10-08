@@ -18,6 +18,18 @@ export class FlightSoundscape {
   private stallBuffetOsc: OscillatorNode | null = null
   private stallBuffetGain: GainNode | null = null
 
+  // 6. Triboelectric Ionization & Shear Static Crackle
+  private staticCrackleGain: GainNode | null = null
+  private staticCrackleFilter: BiquadFilterNode | null = null
+
+  // 7. Paramotor 2-Stroke Tuned Engine & Propeller Wash Synthesizer
+  private engineOsc: OscillatorNode | null = null
+  private engineSubOsc: OscillatorNode | null = null
+  private engineFilter: BiquadFilterNode | null = null
+  private engineGain: GainNode | null = null
+  private propWashGain: GainNode | null = null
+  private propWashFilter: BiquadFilterNode | null = null
+
   private initialized: boolean = false
 
   public init() {
@@ -104,6 +116,66 @@ export class FlightSoundscape {
       this.stallBuffetGain.connect(this.ctx.destination)
       this.stallBuffetOsc.start()
 
+      // 6. Triboelectric RF Static Crackle (5.4 kHz bandpass filtered noise)
+      const crackleNoise = this.ctx.createBufferSource()
+      crackleNoise.buffer = noiseBuffer
+      crackleNoise.loop = true
+
+      this.staticCrackleFilter = this.ctx.createBiquadFilter()
+      this.staticCrackleFilter.type = 'bandpass'
+      this.staticCrackleFilter.frequency.value = 5400
+      this.staticCrackleFilter.Q.value = 4.0
+
+      this.staticCrackleGain = this.ctx.createGain()
+      this.staticCrackleGain.gain.value = 0
+
+      crackleNoise.connect(this.staticCrackleFilter)
+      this.staticCrackleFilter.connect(this.staticCrackleGain)
+      this.staticCrackleGain.connect(this.ctx.destination)
+      crackleNoise.start()
+
+      // 7. Paramotor 2-Stroke Tuned Pipe Engine Synthesizer (Vittorazi Moster 185)
+      this.engineOsc = this.ctx.createOscillator()
+      this.engineOsc.type = 'sawtooth'
+      this.engineOsc.frequency.value = 32
+
+      this.engineSubOsc = this.ctx.createOscillator()
+      this.engineSubOsc.type = 'triangle'
+      this.engineSubOsc.frequency.value = 16
+
+      this.engineFilter = this.ctx.createBiquadFilter()
+      this.engineFilter.type = 'bandpass'
+      this.engineFilter.frequency.value = 240
+      this.engineFilter.Q.value = 2.8
+
+      this.engineGain = this.ctx.createGain()
+      this.engineGain.gain.value = 0
+
+      this.engineOsc.connect(this.engineFilter)
+      this.engineSubOsc.connect(this.engineFilter)
+      this.engineFilter.connect(this.engineGain)
+      this.engineGain.connect(this.ctx.destination)
+      this.engineOsc.start()
+      this.engineSubOsc.start()
+
+      // Propeller Wash Noise (carbon prop thrust chop)
+      const propNoise = this.ctx.createBufferSource()
+      propNoise.buffer = noiseBuffer
+      propNoise.loop = true
+
+      this.propWashFilter = this.ctx.createBiquadFilter()
+      this.propWashFilter.type = 'bandpass'
+      this.propWashFilter.frequency.value = 450
+      this.propWashFilter.Q.value = 1.8
+
+      this.propWashGain = this.ctx.createGain()
+      this.propWashGain.gain.value = 0
+
+      propNoise.connect(this.propWashFilter)
+      this.propWashFilter.connect(this.propWashGain)
+      this.propWashGain.connect(this.ctx.destination)
+      propNoise.start()
+
       this.initialized = true
     } catch (err) {
       console.warn('Web Audio could not be initialized:', err)
@@ -120,6 +192,10 @@ export class FlightSoundscape {
     stallWarning: number = 0,
     isStalled: boolean = false,
     dt: number = 0.016,
+    staticChargeField: number = 0,
+    engineRpm: number = 0,
+    throttlePercent: number = 0,
+    wingType: string = 'paraglider',
   ) {
     if (
       !this.initialized ||
@@ -140,39 +216,45 @@ export class FlightSoundscape {
       this.ctx.resume()
     }
 
-    // 1. Modulate Wind Noise: Clean laminar rush during flight; dull low rumble during stall
-    const speedRatio = Math.max(0.1, Math.min(3.0, airspeedKmh / 54.0))
-    let targetGain = 0.05 * speedRatio + (gForce - 1) * 0.06
-    let targetFreq = 280 + speedRatio * 520 + (gForce - 1) * 260
+    // 1. Modulate Wind Noise: Clean laminar rush; exhilarating roar on surges & G-turns; quiet float on zero-G
+    const speedRatio = Math.max(0.1, Math.min(3.5, airspeedKmh / 58.0))
+    const gHeaviness = Math.max(0, gForce - 1.0)
+    const zeroGFloat = Math.max(0, 1.0 - gForce)
+    let targetGain = (0.08 + Math.pow(speedRatio, 1.4) * 0.16 + gHeaviness * 0.18) * (1.0 - zeroGFloat * 0.35)
+    let targetFreq = (340 + Math.pow(speedRatio, 1.5) * 920 + gHeaviness * 550) * (1.0 - zeroGFloat * 0.25)
 
     if (isStalled) {
       // Stall breakaway: laminar airflow detaches! Highs vanish, dull turbulence remains
-      targetGain *= 0.4
+      targetGain *= 0.35
       targetFreq = 220
     }
 
-    this.windGain.gain.setTargetAtTime(Math.min(0.45, targetGain), this.ctx.currentTime, 0.08)
-    this.windFilter.frequency.setTargetAtTime(targetFreq, this.ctx.currentTime, 0.08)
+    this.windGain.gain.setTargetAtTime(Math.min(0.68, targetGain), this.ctx.currentTime, 0.06)
+    this.windFilter.frequency.setTargetAtTime(Math.min(2700, targetFreq), this.ctx.currentTime, 0.06)
 
     // 2. Aeolian Line Whistle (Singing Lines)
     // Resonates when lines are taut and fast; cuts out when lines go slack
     const isSlack = lineTensionN < 250 || isStalled
-    if (isSlack || airspeedKmh < 35) {
+    if (isSlack || airspeedKmh < 34) {
       this.lineWhistleGain.gain.setTargetAtTime(0, this.ctx.currentTime, 0.05)
     } else {
       const tensionFrac = Math.min(2.5, lineTensionN / 860.0)
-      const whistleFreq = 1800 + (airspeedKmh / 60.0) * 550 + (tensionFrac - 1.0) * 850
-      const whistleGain = Math.min(0.06, 0.012 * speedRatio * Math.min(1.8, tensionFrac))
+      const whistleFreq = 1500 + (airspeedKmh / 60.0) * 850 + (tensionFrac - 1.0) * 850
+      const whistleGain = Math.min(0.10, 0.018 * speedRatio * Math.min(1.8, tensionFrac))
       this.lineWhistleOsc.frequency.setTargetAtTime(whistleFreq, this.ctx.currentTime, 0.05)
       this.lineWhistleGain.gain.setTargetAtTime(whistleGain, this.ctx.currentTime, 0.06)
     }
 
-    // 3. Trailing Edge Flutter & Cloth Billow (Physical Sub-Bass Chassis Vibration)
-    // Low-frequency acoustic hum (48 - 75 Hz) that physically shakes the phone in your hands
+    // 3. Trailing Edge Flutter & High-G Line Tension Groan (Physical Sub-Bass Chassis Vibration)
+    // Resonates deeply under heavy carving G-forces (G > 1.2) or deep brake pull
     const totalBrakeForce = leftForceN + rightForceN
-    if (totalBrakeForce > 8 && !isStalled) {
-      const flutterGain = Math.min(0.22, (totalBrakeForce / 120.0) * 0.18)
+    const gTensionLoad = Math.max(0, gForce - 1.2) * 0.20
+    if ((totalBrakeForce > 8 || gTensionLoad > 0.01) && !isStalled) {
+      const flutterGain = Math.min(0.28, (totalBrakeForce / 120.0) * 0.18 + gTensionLoad)
       this.brakeFlutterGain.gain.setTargetAtTime(flutterGain, this.ctx.currentTime, 0.04)
+      if (this.brakeFlutterFilter) {
+        this.brakeFlutterFilter.frequency.setTargetAtTime(55 + gTensionLoad * 45, this.ctx.currentTime, 0.04)
+      }
     } else {
       this.brakeFlutterGain.gain.setTargetAtTime(0, this.ctx.currentTime, 0.08)
     }
@@ -203,14 +285,57 @@ export class FlightSoundscape {
       // Beep on/off pulse
       const isBeeping = this.varioTimer < beepInterval && !this.varioMuted
       this.varioGain.gain.setTargetAtTime(isBeeping ? 0.09 : 0, this.ctx.currentTime, 0.015)
-    } else if (verticalSpeedMps < -2.4 && !this.varioMuted) {
-      // Strong sink (> 2.4 m/s sink) -> low sink tone
+    } else if (verticalSpeedMps < -2.4 && !this.varioMuted && wingType !== 'speedwing') {
+      // Strong sink tone only for paraglider XC thermal mode, not speedwing downhill riding
       const sinkPitch = Math.max(220, 420 + verticalSpeedMps * 35)
       this.varioOsc.frequency.setTargetAtTime(sinkPitch, this.ctx.currentTime, 0.05)
       this.varioGain.gain.setTargetAtTime(0.05, this.ctx.currentTime, 0.05)
     } else {
       // Near neutral glide -> quiet
       this.varioGain.gain.setTargetAtTime(0, this.ctx.currentTime, 0.05)
+    }
+
+    // 6. Triboelectric RF Static Crackle at Thermal Shear Margin
+    if (this.staticCrackleGain && staticChargeField > 0.12) {
+      // Sporadic burst ionization crackles
+      const crackleBurst = Math.random() < staticChargeField * 0.45 ? 0.045 * staticChargeField : 0.002 * staticChargeField
+      this.staticCrackleGain.gain.setTargetAtTime(crackleBurst, this.ctx.currentTime, 0.015)
+    } else if (this.staticCrackleGain) {
+      this.staticCrackleGain.gain.setTargetAtTime(0, this.ctx.currentTime, 0.05)
+    }
+
+    // 7. Paramotor Engine Sound Dynamics (Vittorazi Moster 185 2-Stroke)
+    if (
+      this.engineGain &&
+      this.engineOsc &&
+      this.engineSubOsc &&
+      this.engineFilter &&
+      this.propWashGain &&
+      this.propWashFilter
+    ) {
+      if (wingType === 'paramotor' && engineRpm > 500) {
+        // Firing frequency f0 = RPM / 60 (2-stroke single cylinder fires once per rev)
+        const firingFreq = Math.max(25, Math.min(145, engineRpm / 60))
+        this.engineOsc.frequency.setTargetAtTime(firingFreq, this.ctx.currentTime, 0.03)
+        this.engineSubOsc.frequency.setTargetAtTime(firingFreq * 0.5, this.ctx.currentTime, 0.03)
+
+        // Expansion chamber resonant frequency shifts upward under high throttle / RPM
+        const throttleFrac = Math.max(0, Math.min(1, throttlePercent / 100))
+        const pipeFreq = 180 + throttleFrac * 360 + (engineRpm / 8400) * 220
+        this.engineFilter.frequency.setTargetAtTime(pipeFreq, this.ctx.currentTime, 0.04)
+
+        // Engine volume: idle burble (0.07) to wide-open scream (0.26)
+        const targetVol = 0.07 + throttleFrac * 0.20
+        this.engineGain.gain.setTargetAtTime(targetVol, this.ctx.currentTime, 0.04)
+
+        // Propeller chop and wash noise
+        const propVol = 0.02 + Math.pow(throttleFrac, 1.4) * 0.15
+        this.propWashGain.gain.setTargetAtTime(propVol, this.ctx.currentTime, 0.04)
+        this.propWashFilter.frequency.setTargetAtTime(320 + throttleFrac * 680, this.ctx.currentTime, 0.04)
+      } else {
+        this.engineGain.gain.setTargetAtTime(0, this.ctx.currentTime, 0.08)
+        this.propWashGain.gain.setTargetAtTime(0, this.ctx.currentTime, 0.08)
+      }
     }
   }
 

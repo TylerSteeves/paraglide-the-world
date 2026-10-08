@@ -7,18 +7,16 @@ import { StandardMaterial } from '@babylonjs/core/Materials/standardMaterial'
 import type { Scene } from '@babylonjs/core/scene'
 import type { Mesh } from '@babylonjs/core/Meshes/mesh'
 import { SpherePackingMeshBuilder } from './SpherePackingMeshBuilder'
+import type { FlightWorld, ThermalZone, Vector3Like, ThermalFluidSample } from './types'
+import { calculateToroidalThermalFluid } from './ThermalFluidDynamics'
 
-export type ThermalZone = {
-  center: Vector3
-  radius: number
-  strengthMps: number
-  name: string
-}
-
-export class HimalayasMountain {
+export class HimalayasMountain implements FlightWorld {
   public terrainMesh: Mesh
   public riverMesh: Mesh | null = null
   public thermals: ThermalZone[] = []
+  public readonly launchPosition = new Vector3(0, 4200, 10)
+  public readonly launchHeadingDeg = 25.0
+  private spawnedMeshes: Mesh[] = []
   private scene: Scene
 
   constructor(scene: Scene) {
@@ -179,37 +177,79 @@ export class HimalayasMountain {
     return Math.max(1120, height)
   }
 
-  public sampleUpdraft(x: number, y: number, z: number): number {
-    let totalUpdraft = 0
+  public sampleThermalFluidVelocity(
+    x: number,
+    y: number,
+    z: number,
+    timeSeconds: number = 0,
+    windVector?: Vector3Like,
+  ): ThermalFluidSample {
+    return calculateToroidalThermalFluid(
+      this.thermals,
+      (gx, gz) => this.sampleHeight(gx, gz),
+      x,
+      y,
+      z,
+      timeSeconds,
+      windVector,
+    )
+  }
 
-    // Thermal columns
-    for (const t of this.thermals) {
-      const dx = x - t.center.x
-      const dz = z - t.center.z
-      const distHoriz = Math.sqrt(dx * dx + dz * dz)
+  public sampleUpdraft(
+    x: number,
+    y: number,
+    z: number,
+    timeSeconds: number = 0,
+    windVector?: Vector3Like,
+  ): number {
+    return this.sampleThermalFluidVelocity(x, y, z, timeSeconds, windVector).velocity.y
+  }
 
-      // Thermal envelope from 1,200m up to cloudbase ~5,500m
-      if (distHoriz < t.radius && y > 1200 && y < 5800) {
-        const coreFactor = Math.cos((distHoriz / t.radius) * (Math.PI * 0.5))
-        const altitudeGain = 0.7 + Math.min(0.5, (y - 1200) / 4000)
-        totalUpdraft += t.strengthMps * coreFactor * altitudeGain
+  public sampleRidgeLift(
+    x: number,
+    y: number,
+    z: number,
+    windDir: { x: number; y: number; z: number },
+    windSpeedMps: number,
+  ): number {
+    const eps = 6.0
+    const hL = this.sampleHeight(x - eps, z)
+    const hR = this.sampleHeight(x + eps, z)
+    const hD = this.sampleHeight(x, z - eps)
+    const hU = this.sampleHeight(x, z + eps)
+
+    const dhdx = (hR - hL) / (2 * eps)
+    const dhdz = (hU - hD) / (2 * eps)
+    const slopeNorm = Math.sqrt(1 + dhdx * dhdx + dhdz * dhdz)
+
+    const normalUpdraft = -(windDir.x * dhdx + windDir.z * dhdz) / slopeNorm
+
+    const groundY = this.sampleHeight(x, z)
+    const clearance = y - groundY
+    if (clearance < 0 || clearance > 350) return 0
+
+    const decay = Math.exp(-clearance / 120.0)
+    return Math.max(-2.0, normalUpdraft * windSpeedMps * decay * 1.25)
+  }
+
+  public sampleVenturi(
+    _x: number,
+    _y: number,
+    _z: number,
+    baseWind: { x: number; y: number; z: number },
+  ): { x: number; y: number; z: number } {
+    return { x: baseWind.x, y: baseWind.y, z: baseWind.z }
+  }
+
+  public dispose() {
+    try {
+      this.terrainMesh.dispose(false, true)
+      if (this.riverMesh) this.riverMesh.dispose(false, true)
+      for (const m of this.spawnedMeshes) {
+        m.dispose(false, true)
       }
-    }
-
-    // Anabatic Ridge Lift: Valley breezes pushed up against steep sunny mountain faces
-    const terrainH = this.sampleHeight(x, z)
-    const clearance = y - terrainH
-    if (clearance > 15 && clearance < 350) {
-      const slopeX = (this.sampleHeight(x + 20, z) - this.sampleHeight(x - 20, z)) / 40
-      const slopeZ = (this.sampleHeight(x, z + 20) - this.sampleHeight(x, z - 20)) / 40
-      const steepness = Math.sqrt(slopeX * slopeX + slopeZ * slopeZ)
-      if (steepness > 0.4) {
-        const ridgeLift = Math.min(3.8, steepness * 2.5) * (1 - clearance / 350)
-        totalUpdraft += ridgeLift
-      }
-    }
-
-    return totalUpdraft
+    } catch {}
+    this.spawnedMeshes = []
   }
 
   private buildThermalCloudMarkers() {
