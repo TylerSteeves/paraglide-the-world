@@ -518,10 +518,10 @@ export class ParagliderRig {
 
     const isXc = wingType === 'paraglider'
     const isParamotor = wingType === 'paramotor'
-    const numCells = isXc ? 44 : (isParamotor ? 36 : 32)
-    const halfSpan = isXc ? 5.9 : (isParamotor ? 4.7 : 4.4)
-    const chord = isXc ? 2.45 : (isParamotor ? 2.25 : 2.35)
-    const lineDrop = isXc ? -6.8 : (isParamotor ? -5.6 : -5.0)
+    const numCells = isXc ? 42 : (isParamotor ? 34 : 30)
+    const halfSpan = isXc ? 5.1 : (isParamotor ? 4.2 : 3.8)
+    const chord = isXc ? 1.85 : (isParamotor ? 1.75 : 1.55)
+    const lineDrop = isXc ? -4.6 : (isParamotor ? -3.9 : -3.6)
 
     const upperRibbon: Vector3[] = []
     const lowerRibbon: Vector3[] = []
@@ -532,8 +532,8 @@ export class ParagliderRig {
       const normX = Math.abs(x) / halfSpan
 
       // Elliptical arch and aerodynamic wingtip sweep
-      const archY = (1 - Math.pow(normX, 1.9)) * (isXc ? 1.75 : (isParamotor ? 1.62 : 1.58))
-      const sweepZ = Math.pow(normX, 1.7) * (isXc ? 0.95 : (isParamotor ? 0.82 : 0.75))
+      const archY = (1 - Math.pow(normX, 1.9)) * (isXc ? 1.45 : (isParamotor ? 1.35 : 1.25))
+      const sweepZ = Math.pow(normX, 1.7) * (isXc ? 0.75 : (isParamotor ? 0.65 : 0.58))
       const taperChord = chord * (1 - normX * (isXc ? 0.35 : (isParamotor ? 0.38 : 0.42)))
       const maxThick = taperChord * (isXc ? 0.17 : (isParamotor ? 0.155 : 0.16))
 

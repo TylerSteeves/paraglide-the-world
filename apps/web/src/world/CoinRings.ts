@@ -1,152 +1,371 @@
 import { Color3 } from '@babylonjs/core/Maths/math.color'
 import { Vector3 } from '@babylonjs/core/Maths/math.vector'
 import { MeshBuilder } from '@babylonjs/core/Meshes/meshBuilder'
+import { TransformNode } from '@babylonjs/core/Meshes/transformNode'
 import { StandardMaterial } from '@babylonjs/core/Materials/standardMaterial'
 import type { Scene } from '@babylonjs/core/scene'
 import type { Mesh } from '@babylonjs/core/Meshes/mesh'
 import type { FlightWorld } from './types'
 
+export type RingCategory = 'dive' | 'carve' | 'thermal' | 'couloir' | 'acro' | 'swoop' | 'finish' | 'standard'
+
 export type CoinRing = {
+  root: TransformNode
   mesh: Mesh
+  coreMesh: Mesh
   position: Vector3
+  forward: Vector3
   radius: number
   collected: boolean
   baseRotationY: number
+  category: RingCategory
+  points: number
+  collecting: boolean
+  collectAnim: number
 }
 
 /**
- * Golden Coin Lift Highway
+ * Dynamic Flight Mechanics Course & Aerial Rings
  *
- * Places 50+ golden soaring coins in the sky that trace the exact lift highway:
- * - Following knife-edge mountain ridges where dynamic slope lift is strongest
- * - Circling upward through thermal elevator cores to cloudbase
- * - Guiding the pilot through optimal cross-country mountain lines
+ * Whistler Olympic 7-Stage Course:
+ * - Stage 1: Summit Chute & Steep Speed Dive (Cyan Gates - prompts diving, speed surges to 135+ km/h)
+ * - Stage 2: High-G Centrifugal Sling Slalom (Amber Gold Gates - S-turns exercising slow-to-fast centrifugal whip)
+ * - Stage 3: Thermal Elevator Corkscrew & Dynamic Flare (Emerald Green Gates - climbing 360° spiral updraft)
+ * - Stage 4: Couloir & Chairlift Weave (Cobalt Blue Gates - high-speed terrain roller contour carving)
+ * - Stage 5: Acro Bowl Arena (Electric Violet Gates - high aerial waves for loops and barrel rolls)
+ * - Stage 6: Olympic Village Ground Swoop Highway (Radiant Platinum/Gold Gates - ultra low-altitude >120 km/h skim)
+ * - Stage 7: Frozen Green Lake Flare & Grand Finish Arch (Regal Gold Crown Arch - victory touchdown flare)
  */
 export class CoinRings {
   public rings: CoinRing[] = []
-  private goldMat: StandardMaterial
-  private glowMat: StandardMaterial
-  private spawnedMeshes: (Mesh | any)[] = []
+  private materials: Map<RingCategory, { ringMat: StandardMaterial; coreMat: StandardMaterial }> = new Map()
+  private spawnedMeshes: (Mesh | TransformNode | any)[] = []
   public comboStreak: number = 0
 
   constructor(scene: Scene, world: FlightWorld) {
-    this.goldMat = new StandardMaterial('coin-gold-mat', scene)
-    this.goldMat.diffuseColor = new Color3(1.0, 0.84, 0.18)
-    this.goldMat.emissiveColor = new Color3(0.75, 0.55, 0.10)
-    this.goldMat.specularColor = new Color3(0.9, 0.85, 0.5)
+    this.initMaterials(scene)
 
-    this.glowMat = new StandardMaterial('coin-glow-mat', scene)
-    this.glowMat.diffuseColor = new Color3(1.0, 0.95, 0.6)
-    this.glowMat.emissiveColor = new Color3(0.9, 0.75, 0.2)
-    this.glowMat.alpha = 0.55
+    const rawWaypoints: {
+      x: number
+      y: number
+      z: number
+      category: RingCategory
+      radius: number
+      points: number
+    }[] = []
 
-    this.spawnedMeshes.push(this.goldMat, this.glowMat)
-
-    const waypoints: { x: number; y: number; z: number }[] = []
-
-    // Check if world is Roldanillo (or has sampleRidgeSpineX)
     const roldanilloWorld = world as any
     const isRoldanillo = typeof roldanilloWorld.sampleRidgeSpineX === 'function'
 
     if (isRoldanillo) {
-      // 1. Ridge Highway Coins: Along the knife-edge crest (from z = 40 to z = 4600)
-      for (let z = 50; z <= 4600; z += 90) {
+      // --- 🇨🇴 ROLDANILLO XC RIDGE & THERMAL HIGHWAY ---
+      for (let z = 50; z <= 4600; z += 80) {
         const spineX = roldanilloWorld.sampleRidgeSpineX(z)
-        // Windward offset: slightly to the west (-18m) where orographic lift is strongest
-        const x = spineX - 18
+        const x = spineX - 18 // Windward slope
         const groundY = world.sampleHeight(x, z)
         const clearance = 16.0 + Math.sin(z * 0.01) * 4.0
-        waypoints.push({ x, y: groundY + clearance, z })
+        rawWaypoints.push({ x, y: groundY + clearance, z, category: 'carve', radius: 4.8, points: 100 })
 
-        // 2. Ascending Thermal Elevator Spirals at key thermal triggers
-        // Spiral A: La Tulia Amphitheater (z around 1150)
+        // Thermal elevators at La Tulia, Piedra del Sol, Lago Calima
         if (z === 1130) {
           const thermalCenter = new Vector3(320, 2260, 1150)
           const baseAlt = world.sampleHeight(thermalCenter.x, thermalCenter.z) + 20
           for (let step = 0; step < 8; step++) {
             const angle = (step / 8) * Math.PI * 2
             const r = 110
-            waypoints.push({
+            rawWaypoints.push({
               x: thermalCenter.x + Math.cos(angle) * r,
-              y: baseAlt + step * 32, // Climbs +256m in a full circle!
+              y: baseAlt + step * 32,
               z: thermalCenter.z + Math.sin(angle) * r,
+              category: 'thermal',
+              radius: 5.4,
+              points: 150,
             })
           }
-        }
-
-        // Spiral B: Piedra del Sol Notch (z around 2100)
-        if (z === 2120) {
+        } else if (z === 2130) {
           const thermalCenter = new Vector3(-250, 2320, 2100)
           const baseAlt = world.sampleHeight(thermalCenter.x, thermalCenter.z) + 25
           for (let step = 0; step < 8; step++) {
             const angle = (step / 8) * Math.PI * 2
             const r = 120
-            waypoints.push({
+            rawWaypoints.push({
               x: thermalCenter.x + Math.sin(angle) * r,
-              y: baseAlt + step * 35, // Climbs +280m!
+              y: baseAlt + step * 35,
               z: thermalCenter.z + Math.cos(angle) * r,
+              category: 'thermal',
+              radius: 5.4,
+              points: 150,
             })
           }
-        }
-
-        // Spiral C: Lago Calima Final Elevator (z around 4280)
-        if (z === 4280) {
+        } else if (z === 4290) {
           const thermalCenter = new Vector3(-150, 2360, 4300)
           const baseAlt = world.sampleHeight(thermalCenter.x, thermalCenter.z) + 30
           for (let step = 0; step < 8; step++) {
             const angle = (step / 8) * Math.PI * 2
             const r = 130
-            waypoints.push({
+            rawWaypoints.push({
               x: thermalCenter.x + Math.cos(angle) * r,
-              y: baseAlt + step * 40, // Climbs +320m to 2,900m cloudbase!
+              y: baseAlt + step * 40,
               z: thermalCenter.z + Math.sin(angle) * r,
+              category: 'thermal',
+              radius: 5.8,
+              points: 200,
             })
           }
         }
       }
     } else {
-      // Generic mountain descent / piste track (e.g. Whistler / Himalayas)
-      for (let z = 100; z <= 2500; z += 90) {
-        const x = Math.sin(z * 0.0028) * 32
-        const groundY = world.sampleHeight(x, z)
-        waypoints.push({ x, y: groundY + 8.0, z })
+      // --- 🇨🇦 WHISTLER OLYMPIC 7-STAGE FLIGHT MECHANICS COURSE ---
+      const pisteCenter = (z: number) => Math.sin(z * 0.0028) * 32.0
+
+      // Stage 1: Summit Chute & Speed Dive (z = 45 to 330)
+      // Plunging down the 34° alpine headwall. Prompts leaning forward into a speed dive!
+      for (let z = 45; z <= 330; z += 35) {
+        const x = pisteCenter(z)
+        const gy = world.sampleHeight(x, z)
+        rawWaypoints.push({
+          x,
+          y: gy + 7.5,
+          z,
+          category: 'dive',
+          radius: 4.5,
+          points: 100,
+        })
       }
-    }
 
-    // Build 3D Golden Coins at each waypoint
-    for (let i = 0; i < waypoints.length; i++) {
-      const wp = waypoints[i]
-      const ringPos = new Vector3(wp.x, wp.y, wp.z)
+      // Stage 2: High-G Centrifugal Sling Slalom (z = 360 to 780)
+      // Wide S-turns carving back and forth. Tests the slow initiation into centrifugal sling whip!
+      for (let z = 360; z <= 780; z += 35) {
+        const u = (z - 360) / (780 - 360)
+        const sTurn = Math.sin(u * Math.PI * 2.0) * 44.0
+        const driftToThermal = u * -120.0
+        const x = pisteCenter(z) + sTurn + driftToThermal
+        const gy = world.sampleHeight(x, z)
+        rawWaypoints.push({
+          x,
+          y: gy + 8.0,
+          z,
+          category: 'carve',
+          radius: 4.8,
+          points: 120,
+        })
+      }
 
-      // Outer Torus Ring
-      const ringMesh = MeshBuilder.CreateTorus(
-        `flight-coin-${i}`,
-        { diameter: 7.5, thickness: 0.65, tessellation: 24 },
-        scene,
-      )
-      ringMesh.position.copyFrom(ringPos)
-      ringMesh.material = this.goldMat
+      // Stage 3: Thermal Elevator Corkscrew & Dynamic Flare (z = 810 to 970)
+      // Located at Whistler Thermal #2 (-120, 1340, 850).
+      // Climbs in a buoyant 360° updraft spiral!
+      const thCenter = { x: -100, z: 880 }
+      const thR = 65.0
+      for (let i = 0; i <= 8; i++) {
+        const t = i / 8
+        const angle = -Math.PI / 2 + t * Math.PI * 2
+        const zDrift = t * 90
+        const x = thCenter.x + Math.cos(angle) * thR
+        const z = thCenter.z + Math.sin(angle) * thR * 0.7 + zDrift
+        const gy = world.sampleHeight(x, z)
+        rawWaypoints.push({
+          x,
+          y: gy + 14.0 + t * 24.0, // Ascends +24m above terrain inside thermal!
+          z,
+          category: 'thermal',
+          radius: 5.4,
+          points: 150,
+        })
+      }
 
-      // Inner subtle translucent shimmer disc
-      const coreDisc = MeshBuilder.CreateDisc(
-        `coin-disc-${i}`,
-        { radius: 2.8, tessellation: 20 },
-        scene,
-      )
-      coreDisc.parent = ringMesh
-      coreDisc.rotation.x = Math.PI / 2
-      coreDisc.material = this.glowMat
+      // Stage 4: Couloir & Chairlift Weave (z = 1000 to 1480)
+      // Carving along the natural ravine corridor flanking the chairlift towers!
+      for (let z = 1000; z <= 1480; z += 36) {
+        const u = Math.min(1.0, (z - 1000) / 180)
+        const targetX = pisteCenter(z) - 34.0
+        const x = -100 * (1 - u) + targetX * u
+        const gy = world.sampleHeight(x, z)
+        rawWaypoints.push({
+          x,
+          y: gy + 6.5,
+          z,
+          category: 'couloir',
+          radius: 4.6,
+          points: 120,
+        })
+      }
 
-      this.spawnedMeshes.push(ringMesh, coreDisc)
+      // Stage 5: Acro Bowl Arena (z = 1520 to 1920)
+      // Deep alpine amphitheater. Large elevated hoops for barrel rolls, loops, and wingovers!
+      for (let z = 1520; z <= 1920; z += 36) {
+        const pc = pisteCenter(z)
+        const x = pc + Math.sin(z * 0.015) * 22.0
+        const gy = world.sampleHeight(x, z)
+        const wave = Math.sin(((z - 1520) / 400) * Math.PI * 2) * 10.0
+        rawWaypoints.push({
+          x,
+          y: gy + 18.0 + wave,
+          z,
+          category: 'acro',
+          radius: 5.8,
+          points: 200,
+        })
+      }
 
-      this.rings.push({
-        mesh: ringMesh,
-        position: ringPos,
-        radius: 4.5,
-        collected: false,
-        baseRotationY: (i * 0.4) % (Math.PI * 2),
+      // Stage 6: Olympic Village Ground Swoop Highway (z = 1960 to 2440)
+      // Flat corduroy runout skimming 3.8m above the snow! Ride the 120+ km/h kinetic dive energy!
+      for (let z = 1960; z <= 2440; z += 36) {
+        const pc = pisteCenter(z)
+        const gy = world.sampleHeight(pc, z)
+        rawWaypoints.push({
+          x: pc,
+          y: gy + 4.2,
+          z,
+          category: 'swoop',
+          radius: 4.5,
+          points: 150,
+        })
+      }
+
+      // Stage 7: Frozen Green Lake Flare & Grand Finish Arch (z = 2480 to 2800)
+      // Touch-and-go glide over frozen lake, culminating in a giant golden finish arch!
+      for (let z = 2480; z <= 2740; z += 45) {
+        const gy = world.sampleHeight(0, z)
+        rawWaypoints.push({
+          x: 0,
+          y: gy + 4.5,
+          z,
+          category: 'finish',
+          radius: 5.0,
+          points: 150,
+        })
+      }
+
+      // Grand Finish Arch at z = 2800
+      const finalGy = world.sampleHeight(0, 2800)
+      rawWaypoints.push({
+        x: 0,
+        y: finalGy + 8.5,
+        z: 2800,
+        category: 'finish',
+        radius: 7.5,
+        points: 500,
       })
     }
+
+    // Build 3D Orientated Gate Hoops along Tangent Vectors
+    const totalWp = rawWaypoints.length
+    for (let i = 0; i < totalWp; i++) {
+      const wp = rawWaypoints[i]
+      const pos = new Vector3(wp.x, wp.y, wp.z)
+
+      // Calculate tangent forward direction along flight course
+      let fwd: Vector3
+      if (i < totalWp - 1) {
+        const next = rawWaypoints[i + 1]
+        fwd = new Vector3(next.x - wp.x, next.y - wp.y, next.z - wp.z).normalize()
+      } else {
+        const prev = rawWaypoints[i - 1]
+        fwd = new Vector3(wp.x - prev.x, wp.y - prev.y, wp.z - prev.z).normalize()
+      }
+
+      // Root TransformNode positioned and oriented along course tangent
+      const rootNode = new TransformNode(`gate-root-${i}`, scene)
+      rootNode.position.copyFrom(pos)
+      rootNode.lookAt(pos.add(fwd))
+      this.spawnedMeshes.push(rootNode)
+
+      // Get material for category
+      const matPair = this.materials.get(wp.category) ?? this.materials.get('standard')!
+
+      // Outer Torus Gate (Hoop)
+      const isGrandFinish = i === totalWp - 1
+      const torusDiameter = isGrandFinish ? 13.0 : wp.radius * 2.0
+      const torusThickness = isGrandFinish ? 1.1 : (wp.category === 'acro' ? 0.75 : 0.60)
+
+      const ringMesh = MeshBuilder.CreateTorus(
+        `gate-hoop-${i}`,
+        { diameter: torusDiameter, thickness: torusThickness, tessellation: isGrandFinish ? 32 : 24 },
+        scene,
+      )
+      ringMesh.parent = rootNode
+      ringMesh.rotation.x = Math.PI / 2 // Align torus opening with forward axis
+      ringMesh.material = matPair.ringMat
+      this.spawnedMeshes.push(ringMesh)
+
+      // Inner Spinning Star/Shimmer Disc
+      const discRadius = wp.radius * 0.45
+      const coreDisc = MeshBuilder.CreateDisc(
+        `gate-core-${i}`,
+        { radius: discRadius, tessellation: 16 },
+        scene,
+      )
+      coreDisc.parent = rootNode
+      coreDisc.material = matPair.coreMat
+      this.spawnedMeshes.push(coreDisc)
+
+      this.rings.push({
+        root: rootNode,
+        mesh: ringMesh,
+        coreMesh: coreDisc,
+        position: pos,
+        forward: fwd,
+        radius: wp.radius,
+        collected: false,
+        baseRotationY: (i * 0.35) % (Math.PI * 2),
+        category: wp.category,
+        points: wp.points,
+        collecting: false,
+        collectAnim: 0,
+      })
+    }
+  }
+
+  private initMaterials(scene: Scene) {
+    const createMat = (name: string, diff: Color3, emis: Color3, spec: Color3, alpha: number = 1.0) => {
+      const mat = new StandardMaterial(name, scene)
+      mat.diffuseColor = diff
+      mat.emissiveColor = emis
+      mat.specularColor = spec
+      mat.alpha = alpha
+      this.spawnedMeshes.push(mat)
+      return mat
+    }
+
+    // Standard Gold
+    const goldRing = createMat('mat-gold-ring', new Color3(1.0, 0.84, 0.18), new Color3(0.75, 0.55, 0.10), new Color3(0.9, 0.85, 0.5))
+    const goldCore = createMat('mat-gold-core', new Color3(1.0, 0.95, 0.6), new Color3(0.9, 0.75, 0.2), new Color3(0.9, 0.9, 0.9), 0.55)
+    this.materials.set('standard', { ringMat: goldRing, coreMat: goldCore })
+
+    // Dive: Electric Neon Cyan (Prompts tip forward into speed dive)
+    const diveRing = createMat('mat-dive-ring', new Color3(0.12, 0.88, 1.0), new Color3(0.08, 0.72, 0.95), new Color3(0.8, 0.95, 1.0))
+    const diveCore = createMat('mat-dive-core', new Color3(0.4, 0.95, 1.0), new Color3(0.2, 0.85, 1.0), new Color3(1.0, 1.0, 1.0), 0.60)
+    this.materials.set('dive', { ringMat: diveRing, coreMat: diveCore })
+
+    // Carve: Fiery Amber / Orange (High-G centrifugal sling slalom)
+    const carveRing = createMat('mat-carve-ring', new Color3(1.0, 0.52, 0.10), new Color3(0.92, 0.40, 0.05), new Color3(1.0, 0.75, 0.4))
+    const carveCore = createMat('mat-carve-core', new Color3(1.0, 0.75, 0.3), new Color3(0.95, 0.55, 0.1), new Color3(1.0, 0.9, 0.6), 0.60)
+    this.materials.set('carve', { ringMat: carveRing, coreMat: carveCore })
+
+    // Thermal: Soaring Emerald Green (360° climbing thermal elevator)
+    const thermalRing = createMat('mat-thermal-ring', new Color3(0.15, 0.95, 0.45), new Color3(0.10, 0.80, 0.35), new Color3(0.6, 1.0, 0.7))
+    const thermalCore = createMat('mat-thermal-core', new Color3(0.4, 1.0, 0.6), new Color3(0.2, 0.9, 0.45), new Color3(0.9, 1.0, 0.9), 0.55)
+    this.materials.set('thermal', { ringMat: thermalRing, coreMat: thermalCore })
+
+    // Couloir: Ice Blue (High-speed contour carving along chairlift)
+    const couloirRing = createMat('mat-couloir-ring', new Color3(0.35, 0.82, 0.98), new Color3(0.20, 0.65, 0.92), new Color3(0.7, 0.9, 1.0))
+    const couloirCore = createMat('mat-couloir-core', new Color3(0.6, 0.9, 1.0), new Color3(0.3, 0.75, 0.95), new Color3(1.0, 1.0, 1.0), 0.55)
+    this.materials.set('couloir', { ringMat: couloirRing, coreMat: couloirCore })
+
+    // Acro: Electric Violet / Magenta (Barrel rolls and loops in alpine amphitheater)
+    const acroRing = createMat('mat-acro-ring', new Color3(0.88, 0.25, 0.98), new Color3(0.72, 0.15, 0.85), new Color3(0.95, 0.6, 1.0))
+    const acroCore = createMat('mat-acro-core', new Color3(0.95, 0.5, 1.0), new Color3(0.85, 0.25, 0.95), new Color3(1.0, 0.8, 1.0), 0.65)
+    this.materials.set('acro', { ringMat: acroRing, coreMat: acroCore })
+
+    // Swoop: Radiant Platinum / Diamond Gold (Low-altitude corduroy ground skim)
+    const swoopRing = createMat('mat-swoop-ring', new Color3(1.0, 0.96, 0.85), new Color3(0.95, 0.88, 0.55), new Color3(1.0, 1.0, 0.9))
+    const swoopCore = createMat('mat-swoop-core', new Color3(1.0, 0.98, 0.9), new Color3(0.95, 0.92, 0.7), new Color3(1.0, 1.0, 1.0), 0.65)
+    this.materials.set('swoop', { ringMat: swoopRing, coreMat: swoopCore })
+
+    // Finish: Regal Royal Gold Grand Arch (Lake touchdown finish)
+    const finishRing = createMat('mat-finish-ring', new Color3(1.0, 0.82, 0.15), new Color3(0.98, 0.75, 0.20), new Color3(1.0, 0.92, 0.6))
+    const finishCore = createMat('mat-finish-core', new Color3(1.0, 0.95, 0.5), new Color3(0.98, 0.85, 0.3), new Color3(1.0, 1.0, 0.8), 0.70)
+    this.materials.set('finish', { ringMat: finishRing, coreMat: finishCore })
   }
 
   public get totalCoins(): number {
@@ -161,43 +380,70 @@ export class CoinRings {
     this.comboStreak = 0
     for (const ring of this.rings) {
       ring.collected = false
-      ring.mesh.scaling.set(1.0, 1.0, 1.0)
-      ring.mesh.setEnabled(true)
+      ring.collecting = false
+      ring.collectAnim = 0
+      ring.root.scaling.set(1.0, 1.0, 1.0)
+      ring.root.setEnabled(true)
     }
   }
 
-  public update(pilotPos: Vector3, dt: number): { ringCollected: boolean; points: number } {
+  public update(
+    pilotPos: Vector3,
+    dt: number,
+    airspeedKmh: number = 0,
+  ): { ringCollected: boolean; points: number; speedBonus: boolean; category?: RingCategory } {
     let ringCollected = false
     let points = 0
+    let speedBonus = false
+    let hitCategory: RingCategory | undefined
 
     for (const ring of this.rings) {
       if (ring.collected) continue
 
-      // Gently rotate the golden coin
-      ring.baseRotationY += dt * 2.2
-      ring.mesh.rotation.y = ring.baseRotationY
+      // Expanding burst pop animation
+      if (ring.collecting) {
+        ring.collectAnim += dt * 3.5
+        const scale = 1.0 + ring.collectAnim * 0.8
+        ring.root.scaling.set(scale, scale, scale)
+        if (ring.collectAnim >= 1.0) {
+          ring.collected = true
+          ring.collecting = false
+          ring.root.setEnabled(false)
+        }
+        continue
+      }
 
-      // Distance to paraglider pilot
+      // Rotate inner shimmer disc in the gate plane
+      ring.baseRotationY += dt * 2.4
+      ring.coreMesh.rotation.z = ring.baseRotationY
+
+      // Distance check to paraglider pilot
       const dx = pilotPos.x - ring.position.x
       const dy = pilotPos.y - ring.position.y
       const dz = pilotPos.z - ring.position.z
       const distSq = dx * dx + dy * dy + dz * dz
 
-      // Generous collection radius (7.5m)
-      const collectDist = ring.radius + 3.0
+      // Collection radius (generous 7.5m - 9.0m)
+      const collectDist = ring.radius + 3.2
       if (distSq < collectDist * collectDist) {
-        ring.collected = true
+        ring.collecting = true
         ringCollected = true
+        hitCategory = ring.category
         this.comboStreak++
-        points = 100 * Math.min(5, this.comboStreak)
 
-        // Pop animation: shrink and disappear
-        ring.mesh.scaling.set(0.001, 0.001, 0.001)
-        ring.mesh.setEnabled(false)
+        // Base points with combo multiplier
+        const comboMult = Math.min(5, this.comboStreak)
+        points = ring.points * comboMult
+
+        // High-speed swoop bonus: flying through at >105 km/h awards bonus points!
+        if (airspeedKmh > 105.0 && (ring.category === 'dive' || ring.category === 'swoop' || ring.category === 'carve')) {
+          points += 150
+          speedBonus = true
+        }
       }
     }
 
-    return { ringCollected, points }
+    return { ringCollected, points, speedBonus, category: hitCategory }
   }
 
   public dispose(): void {
@@ -206,5 +452,6 @@ export class CoinRings {
     }
     this.spawnedMeshes = []
     this.rings = []
+    this.materials.clear()
   }
 }

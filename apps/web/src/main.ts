@@ -528,14 +528,18 @@ function initApp() {
 
       // Step E: Coin Ring Collection (Active in Whistler)
       if (coinRings) {
-        const { ringCollected, points } = coinRings.update(
+        const { ringCollected, points, speedBonus } = coinRings.update(
           new Vector3(sim.pilot.position.x, sim.pilot.position.y, sim.pilot.position.z),
           dt,
+          sim.telemetry.airspeedKmh,
         )
         if (ringCollected) {
           sim.telemetry.score += points
           sim.telemetry.ringsCollected++
           soundscape.playCoinSound()
+          if (speedBonus) {
+            soundscape.playReinflationPop()
+          }
         }
       }
 

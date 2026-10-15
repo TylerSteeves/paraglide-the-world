@@ -374,8 +374,8 @@ export class ActionCamera {
       // Perfectly frames the flyer from any angle, rotating 360° around the pilot and canopy!
       const verticalMps = sim.canopy.verticalSpeedMps || 0
       const diveTighten = Math.min(0.45, (Math.max(0, -verticalMps) / 25.0) * 0.45)
-      const dist = (2.65 * portraitDistMult) + this.elasticLag * 0.45 + Math.min(0.40, speedSurge * 0.012) - diveTighten
-      const height = (0.95 * portraitHeightMult) + Math.min(0.20, speedSurge * 0.008) + downhillDescend * 0.22 - gHeavinessComp
+      const dist = (2.35 * portraitDistMult) + this.elasticLag * 0.40 + Math.min(0.35, speedSurge * 0.012) - diveTighten
+      const height = (0.78 * portraitHeightMult) + Math.min(0.18, speedSurge * 0.008) + downhillDescend * 0.20 - gHeavinessComp
 
       const cosY = Math.cos(effectiveYaw)
       const sinY = Math.sin(effectiveYaw)

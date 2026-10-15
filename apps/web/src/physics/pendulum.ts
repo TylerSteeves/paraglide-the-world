@@ -169,7 +169,7 @@ export class ParagliderSimulation {
     this.cVel = v3(Math.sin(headingRad) * trimSpeedMps, this.currentSinkMps, Math.cos(headingRad) * trimSpeedMps)
     this.cQ = qFromYawPitchRoll(initialHeadingDeg, this.pitchDeg, 0)
 
-    const tetherL = this.wing.tetherLengthMeters || 5.8
+    const tetherL = this.wing.tetherLengthMeters || 3.8
     const pilotOffset = v3(0, -tetherL, -0.42)
     this.pPos = vAdd(this.cPos, qRotate(this.cQ, pilotOffset))
     this.pVel = vCopy(this.cVel)
@@ -293,7 +293,7 @@ export class ParagliderSimulation {
     startPos?: { x: number; y: number; z: number },
   ) {
     let spawn = startPos ?? { x: 0, y: initialAltitude, z: 0 }
-    const tetherL = this.wing.tetherLengthMeters || 5.8
+    const tetherL = this.wing.tetherLengthMeters || 3.8
     if (this.world && typeof this.world.sampleHeight === 'function') {
       const terrainH = this.world.sampleHeight(spawn.x, spawn.z)
       const minCanopyY = terrainH + tetherL + 9.0 // Guaranteed 9m clean-air launch clearance
@@ -590,7 +590,7 @@ export class ParagliderSimulation {
     // The canopy is the aerodynamic tractor pulling the pilot.
     // The pilot hangs below in canopy body space and trails BEHIND the canopy along the flight path
     // due to body drag and inertia.
-    const tetherL = this.wing.tetherLengthMeters || 5.8
+    const tetherL = this.wing.tetherLengthMeters || 3.8
 
     // Forward/Aft Aerodynamic Trail in canopy body space:
     // - Trim glide (82 km/h): pilot trails ~0.42m behind (-Z in body space)
