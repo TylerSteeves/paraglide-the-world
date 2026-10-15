@@ -259,7 +259,7 @@ export class ActionCamera {
     dt: number,
     _parallaxRoll: number = 0,
     _parallaxPitch: number = 0,
-    instantTwistRad: number = 0,
+    _instantTwistRad: number = 0,
     snapIntensity: number = 0,
   ) {
     const pilotPos = new Vector3(sim.pilot.position.x, sim.pilot.position.y, sim.pilot.position.z)
@@ -472,10 +472,10 @@ export class ActionCamera {
     this.smoothedTarget.y += (this.lookTarget.y - this.smoothedTarget.y) * lookLerp
     this.smoothedTarget.z += (this.lookTarget.z - this.smoothedTarget.z) * lookLerp
 
-    // Rock-Steady Horizon Lock:
-    // Keeps the world horizon completely steady in real physical space.
-    // As the phone is tilted or rotated in the player's hands, the camera's upVector
-    // counter-rolls by instantTwistRad so the landscape and horizon outside do not move.
+    // Aerodynamic Coordinated Bank / Horizon Framing:
+    // In straight trim flight, the horizon is 100% rock-solid and level on screen (zero visual slipping in the middle!).
+    // In deep carving turns or spiral dives, the camera subtly banks with the turn (16% of glider bank)
+    // to give authentic acro G-force sensation without shaking or slipping.
     const viewDir = this.smoothedTarget.subtract(this.smoothedCamPos).normalize()
     let camRight = Vector3.Cross(Vector3.Up(), viewDir)
     if (camRight.lengthSquared() < 0.001) {
@@ -484,8 +484,11 @@ export class ActionCamera {
       camRight.normalize()
     }
     const viewUp = Vector3.Cross(viewDir, camRight).normalize()
-    const targetRoll = instantTwistRad || 0
-    const rollLerp = Math.min(1.0, 22.0 * dt)
+
+    // Aerodynamic bank: zero in trim flight, smoothly banking into steep carves/spirals
+    const gliderBankRad = (sim.bankDeg * Math.PI) / 180
+    const targetRoll = (sim.isLooping || sim.isRolling) ? 0 : (gliderBankRad * 0.16)
+    const rollLerp = Math.min(1.0, 14.0 * dt)
     this.smoothedHorizonRoll += (targetRoll - this.smoothedHorizonRoll) * rollLerp
 
     const camUp = viewUp.scale(Math.cos(this.smoothedHorizonRoll)).add(camRight.scale(Math.sin(this.smoothedHorizonRoll))).normalize()

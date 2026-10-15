@@ -353,25 +353,32 @@ export class ParagliderSimulation {
 
     // Maximum bank angle: 42° in normal carve, deepening up to 64° in high-speed spiral!
     const maxBankDeg = 42.0 + spiralFrac * 22.0
-    const targetBankDeg = combinedSteer * maxBankDeg
+
+    // Progressive Aerodynamic Steer Curve & Pendulum Arc Stability:
+    // A real paraglider resists small roll angles due to pendulum self-centering.
+    // To bank past a gentle rocking trim, the pilot must commit to the weight shift.
+    const steerSign = Math.sign(combinedSteer)
+    const absSteer = Math.abs(combinedSteer)
+    const progressiveSteer = steerSign * Math.pow(absSteer, 1.25)
+    const targetBankDeg = progressiveSteer * maxBankDeg
 
     // Aerodynamic Roll Damping & Stability in Neutrality:
-    // When returning to center, faster recovery (12.0) restores wings-level stability.
-    // When rolling into a turn, roll rate is a progressive 8.0 (or +spiralFrac*4.5 in dynamic maneuvers).
+    // When returning to center, fast recovery (14.0) firmly locks wings-level.
+    // When rolling into a turn, roll rate is a progressive 7.5 (or +spiralFrac*4.5 in dynamic maneuvers).
     const isReturningRoll = Math.abs(targetBankDeg) < Math.abs(this.bankDeg)
-    const bankLerpSpeed = isReturningRoll ? 12.0 : (8.0 + spiralFrac * 4.5)
+    const bankLerpSpeed = isReturningRoll ? 14.0 : (7.5 + spiralFrac * 4.5)
     this.bankDeg += (targetBankDeg - this.bankDeg) * Math.min(1.0, bankLerpSpeed * frameDt)
 
     // Coordinated Turn Rate with Positive Neutral Stability:
     // Real paragliders track dead straight in trim flight with positive directional damping.
-    // Below 1.5° bank, turn rate is locked to 0 (zero squirrely heading creep!).
-    // Above 1.5° bank, turn rate builds smoothly with bank angle.
+    // Below 3.0° bank, turn rate is locked to 0 (zero squirrely heading creep!).
+    // Above 3.0° bank, turn rate builds smoothly with bank angle.
     const absBank = Math.abs(this.bankDeg)
     let turnRateDegPerSec = 0
-    if (absBank > 1.5) {
-      const bankExcess = absBank - 1.5
-      const bankNorm = bankExcess / 28.5
-      const bankCurve = Math.pow(Math.min(2.0, bankNorm), 1.15)
+    if (absBank > 3.0) {
+      const bankExcess = absBank - 3.0
+      const bankNorm = bankExcess / 27.0
+      const bankCurve = Math.pow(Math.min(2.0, bankNorm), 1.20)
       const baseTurnFactor = 38.0 + spiralFrac * 48.0
       turnRateDegPerSec = Math.sign(this.bankDeg) * bankCurve * baseTurnFactor
     }

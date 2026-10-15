@@ -31,11 +31,11 @@ export class MobileInputManager {
   public hasGyroPermission: boolean = false
   public isPortrait: boolean = true
 
-  // Raw and smoothed sensor angles (degrees)
   public smoothedRollDeg: number = 0
   public smoothedElevationDeg: number = 62.0
   public phoneElevationDeg: number = 62.0
   public neutralElevationDeg: number = 62.0
+  public neutralRollDeg: number = 0.0
   public needAutoCalibration: boolean = true
   private autoCalibrateSampleCount: number = 0
 
@@ -115,7 +115,7 @@ export class MobileInputManager {
     return true
   }
 
-  public calibrateNeutral(forceAngle?: number) {
+  public calibrateNeutral(forceAngle?: number, forceRoll?: number) {
     if (typeof forceAngle === 'number' && forceAngle >= 45.0 && forceAngle <= 75.0) {
       this.neutralElevationDeg = forceAngle
     } else if (this.phoneElevationDeg >= 45.0 && this.phoneElevationDeg <= 75.0) {
@@ -123,7 +123,15 @@ export class MobileInputManager {
     } else {
       this.neutralElevationDeg = 62.0
     }
-    this.smoothedRollDeg = 0
+
+    if (typeof forceRoll === 'number') {
+      this.neutralRollDeg = forceRoll
+    } else if (Math.abs(this.smoothedRollDeg) < 22.0) {
+      this.neutralRollDeg = this.smoothedRollDeg
+    } else {
+      this.neutralRollDeg = 0
+    }
+
     this.smoothedElevationDeg = this.neutralElevationDeg
     this.needAutoCalibration = false
     this.autoCalibrateSampleCount = 0
@@ -303,27 +311,39 @@ export class MobileInputManager {
       this.autoCalibrateSampleCount++
       if (this.autoCalibrateSampleCount === 1) {
         this.neutralElevationDeg = this.smoothedElevationDeg
+        this.neutralRollDeg = Math.abs(this.smoothedRollDeg) < 20.0 ? this.smoothedRollDeg : 0
       } else {
         this.neutralElevationDeg += (this.smoothedElevationDeg - this.neutralElevationDeg) * 0.25
+        if (Math.abs(this.smoothedRollDeg) < 20.0) {
+          this.neutralRollDeg += (this.smoothedRollDeg - this.neutralRollDeg) * 0.25
+        }
       }
       if (this.autoCalibrateSampleCount >= 18) {
         this.needAutoCalibration = false
       }
     }
 
-    // 1. Roll Steering & Stability in Neutrality:
-    // Stable Neutrality: 3.5° deadband absorbs natural phone tremor and provides a solid center detent.
-    // Smoothstep Hermite curve ensures zero slope discontinuity at neutral edge:
-    // tiny tilts outside deadband make gentle, surgical corrections with zero squirrely snap,
-    // smoothly deepening into full carving authority up to 25.0°.
-    const DEADBAND_ROLL = 3.5
-    const MAX_ROLL = 25.0
-    const absRoll = Math.abs(this.smoothedRollDeg)
+    // 1. Roll Steering & Rock-Solid Stability in Neutrality:
+    // Natural human phone holding has slight resting asymmetry and tremor.
+    // 1. Roll is measured relative to calibrated neutral resting posture (neutralRollDeg).
+    // 2. Wide 5.5° deadband gives a firm, confident center detent (zero drift or wobble).
+    // 3. Smoothstep Hermite curve (3x^2 - 2x^3) ensures zero slope discontinuity at deadband boundary.
+    // 4. Subtle auto-trim slowly adapts neutralRollDeg when resting steadily in center.
+    const rollDelta = this.smoothedRollDeg - this.neutralRollDeg
+    const absRoll = Math.abs(rollDelta)
+
+    if (absRoll < 3.5 && !this.needAutoCalibration) {
+      // Gentle auto-trim while holding phone steady in the middle
+      this.neutralRollDeg += (this.smoothedRollDeg - this.neutralRollDeg) * Math.min(1.0, 0.35 * dt)
+    }
+
+    const DEADBAND_ROLL = 5.5
+    const MAX_ROLL = 26.0
 
     if (absRoll < DEADBAND_ROLL) {
       this.tiltWeightShift = 0
     } else {
-      const sign = Math.sign(this.smoothedRollDeg)
+      const sign = Math.sign(rollDelta)
       const norm = clamp((absRoll - DEADBAND_ROLL) / (MAX_ROLL - DEADBAND_ROLL), 0, 1)
       // Smoothstep curve (3x^2 - 2x^3) gives zero derivative at 0 for a velvety smooth departure from neutral
       const mag = norm * norm * (3.0 - 2.0 * norm)
@@ -332,7 +352,7 @@ export class MobileInputManager {
       this.tiltWeightShift = steerSign * mag
     }
 
-    this.instantTwistRad = (this.smoothedRollDeg * Math.PI) / 180
+    this.instantTwistRad = (this.tiltWeightShift * 0.12)
 
     // 2. Pitch & Wing Envelope:
     // - Upright resting angle (~62°): pure level trim glide (85 km/h down the slope)
@@ -401,19 +421,25 @@ export class MobileInputManager {
     }
 
     // 3. Coordinated Brake Mixing:
+    // Real paraglider pilots initiate minor trim adjustments with body weight-shift alone.
+    // Brake lines are only pulled down when deliberately carving deeper (>18% weight shift),
+    // eliminating brake-induced yaw snatch in the center!
     let targetLeftBrake = flareTarget
     let targetRightBrake = flareTarget
 
-    if (netRoll < 0) {
-      // Turning left: pull left brake, release outside right brake
-      const pull = Math.abs(netRoll) * 0.85
-      targetLeftBrake = Math.max(flareTarget, pull)
-      targetRightBrake = Math.max(0, flareTarget - pull * 0.4)
-    } else if (netRoll > 0) {
-      // Turning right: pull right brake, release outside left brake
-      const pull = netRoll * 0.85
-      targetRightBrake = Math.max(flareTarget, pull)
-      targetLeftBrake = Math.max(0, flareTarget - pull * 0.4)
+    const absRollMag = Math.abs(netRoll)
+    if (absRollMag > 0.18) {
+      const brakeEngagement = (absRollMag - 0.18) / 0.82
+      const pull = Math.pow(brakeEngagement, 1.25) * 0.85
+      if (netRoll < 0) {
+        // Turning left: pull left brake, release outside right brake
+        targetLeftBrake = Math.max(flareTarget, pull)
+        targetRightBrake = Math.max(0, flareTarget - pull * 0.4)
+      } else {
+        // Turning right: pull right brake, release outside left brake
+        targetRightBrake = Math.max(flareTarget, pull)
+        targetLeftBrake = Math.max(0, flareTarget - pull * 0.4)
+      }
     }
 
     // 4. Smooth Control Actuation & Positive Centering:
