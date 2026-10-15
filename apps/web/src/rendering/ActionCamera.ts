@@ -392,9 +392,9 @@ export class ActionCamera {
       const uOrbitDir = uH.scale(cosP).add(upRef.scale(sinP)).normalize()
 
       // Centrifugal lateral camera swing during high-G turns:
-      // When carving hard, centrifugal force pushes the chase camera slightly outward on the turn radius,
-      // giving an authentic physical sensation of speed and power as the turn bites!
-      const centLag = Math.max(-0.42, Math.min(0.42, (sim.bankDeg / 45.0) * (gForce - 1.0) * 0.18))
+      // When carving hard on the sling, centrifugal force pushes the chase camera outward on the turn radius,
+      // giving an authentic physical sensation of speed and power as the turn whips into the ground!
+      const centLag = Math.max(-0.65, Math.min(0.65, (sim.bankDeg / 45.0) * (gForce - 0.9) * 0.28))
 
       this.targetCamPos = pilotPos
         .add(uOrbitDir.scale(dist))
