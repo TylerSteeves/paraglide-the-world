@@ -988,18 +988,19 @@ export class ParagliderRig {
     const targetBodyPosZ = 0 // Securely suspended under carabiners - zero artificial forward lunge!
     const targetBodyYaw = reverseYawRad + weightShift * 0.08 // Torso naturally stays aligned with risers
 
-    // Instant, tight follow response (0.85 per frame) so the flyer mirrors phone movement immediately
-    const bodyFollowFactor = 0.85
+    // Organic Anatomical Pilot Follow: Smooth athletic weight shift into harness
+    const rigDt = clamp(this.scene.getEngine().getDeltaTime() * 0.001 || 0.016, 0.001, 0.05)
+    const bodyFollowFactor = Math.min(1.0, 7.5 * rigDt)
     this.pilotBodyPivot.rotation.z += (targetBodyRoll - this.pilotBodyPivot.rotation.z) * bodyFollowFactor
     this.pilotBodyPivot.rotation.x += (targetBodyPitch - this.pilotBodyPivot.rotation.x) * bodyFollowFactor
     this.pilotBodyPivot.rotation.y += (targetBodyYaw - this.pilotBodyPivot.rotation.y) * bodyFollowFactor
     this.pilotBodyPivot.position.x += (targetBodyPosX - this.pilotBodyPivot.position.x) * bodyFollowFactor
     this.pilotBodyPivot.position.z += (targetBodyPosZ - this.pilotBodyPivot.position.z) * bodyFollowFactor
 
-    // Dynamic Head Tracking: Pilot visibly turns head to look through the turn apex
+    // Dynamic Head Tracking: Pilot smoothly looks through the turn apex
     const targetHeadYaw = weightShift * 0.45 // ~26° head rotation looking through apex
     const targetHeadPitch = -sim.telemetry.verticalSpeedMps * 0.02
-    const headFollowFactor = 0.82
+    const headFollowFactor = Math.min(1.0, 8.5 * rigDt)
     this.pilotHeadNode.rotation.y += (targetHeadYaw - this.pilotHeadNode.rotation.y) * headFollowFactor
     this.pilotHeadNode.rotation.x += (targetHeadPitch - this.pilotHeadNode.rotation.x) * headFollowFactor
 

@@ -103,6 +103,8 @@ export class ParagliderSimulation {
   public pitchDeg: number = 1.2
   public bankDeg: number = 0.0
   public rollRateDegPerSec: number = 0.0
+  public turnRateDegPerSec: number = 0.0
+  public turnHoldTime: number = 0.0
   public airspeedKmh: number = 45.0
   private currentSinkMps: number = -1.2
 
@@ -305,6 +307,8 @@ export class ParagliderSimulation {
     this.pitchDeg = 1.0
     this.bankDeg = 0
     this.rollRateDegPerSec = 0
+    this.turnRateDegPerSec = 0
+    this.turnHoldTime = 0
     this.airspeedKmh = this.wing.trimSpeedKmh || 82.0
     this.currentSinkMps = -6.2
 
@@ -346,7 +350,16 @@ export class ParagliderSimulation {
     // Controls: weightShift is normalized [-1.0, 1.0]
     // Brake steering asymmetry: (rightBrake - leftBrake) also contributes to turn
     const brakeDiff = (this.controls.rightBrake || 0) - (this.controls.leftBrake || 0)
-    const combinedSteer = clamp((this.controls.weightShift || 0) + brakeDiff * 0.65, -1.0, 1.0)
+    const steerInput = this.controls.weightShift || 0
+    // Coordinated steering: weightShift provides the smooth roll command;
+    // inside brake adds progressive carve authority in deep turns without double-counting
+    const combinedSteer = clamp(
+      Math.abs(steerInput) > 0.05
+        ? steerInput * (1.0 + Math.abs(brakeDiff) * 0.25)
+        : brakeDiff,
+      -1.0,
+      1.0,
+    )
     const speedBar = clamp((this.controls.speedBar ?? 0) + (this.controls.pullingA ?? 0), 0, 1)
     const dualBrake = clamp(Math.min(this.controls.leftBrake ?? 0, this.controls.rightBrake ?? 0), 0, 1)
 
@@ -358,43 +371,63 @@ export class ParagliderSimulation {
 
     // Progressive Aerodynamic Steer Curve & Pendulum Arc Stability:
     // A real paraglider resists small roll angles due to pendulum self-centering.
-    // To bank past a gentle rocking trim, the pilot must commit to the weight shift.
     const steerSign = Math.sign(combinedSteer)
     const absSteer = Math.abs(combinedSteer)
     const progressiveSteer = steerSign * Math.pow(absSteer, 1.25)
     const targetBankDeg = progressiveSteer * maxBankDeg
 
-    // 2nd-Order Rotational Roll Inertia (Inertial Lag -> Accelerating Bite):
-    // In real aerodynamics, a paraglider has angular inertia (I_xx) and roll damping.
-    // At t=0: rollRate starts at 0, giving that authentic "slight lag" when initiating a turn.
-    // Over 0.2-0.5s: roll rate builds smoothly and bites with power into the carve!
+    // 2nd-Order Rotational Roll Dynamics (Authentic Wing Inertia & Roll Damping):
+    // Real paragliders have an 8-11m wingspan. When initiating a turn, the wing has
+    // genuine angular inertia (I_xx): roll rate starts at 0 and builds gracefully.
     const rollError = targetBankDeg - this.bankDeg
     const isReturningRoll = Math.abs(targetBankDeg) < Math.abs(this.bankDeg)
 
-    // Critically damped spring-damper constants:
-    // Entry: spring 28.0, damping 10.5 gives authentic ~0.25s inertial build-up
-    // Recovery: spring 42.0, damping 13.0 restores wings-level with crisp authority
-    const springK = isReturningRoll ? 42.0 : (28.0 + spiralFrac * 14.0)
-    const dampC = isReturningRoll ? 13.0 : (10.5 + spiralFrac * 3.5)
+    // Entry: spring 8.5, damping 5.8 delivers a graceful, majestic ~0.4s roll-in (no instant snapping!)
+    // Recovery: spring 18.0, damping 9.5 restores wings-level cleanly with positive stability
+    const springK = isReturningRoll ? 18.0 : (8.5 + spiralFrac * 6.5)
+    const dampC = isReturningRoll ? 9.5 : (5.8 + spiralFrac * 2.2)
 
     const rollAccel = rollError * springK - this.rollRateDegPerSec * dampC
     this.rollRateDegPerSec += rollAccel * frameDt
     this.bankDeg += this.rollRateDegPerSec * frameDt
 
-    // Coordinated Turn Rate with Aerodynamic Tangent Bite:
-    // Turns start off slow at low bank, then accelerate exponentially into a fast, powerful carve!
+    // Sustained Turn Duration Tracker:
+    // When holding a carve in a consistent direction, dynamic forces compound over time!
     const absBank = Math.abs(this.bankDeg)
-    let turnRateDegPerSec = 0
+    const isConsistentTurn =
+      absBank > 3.0 && (Math.sign(targetBankDeg) === Math.sign(this.bankDeg) || Math.abs(targetBankDeg) > 5.0)
+
+    if (isConsistentTurn) {
+      this.turnHoldTime = Math.min(3.0, this.turnHoldTime + frameDt)
+    } else {
+      this.turnHoldTime = Math.max(0.0, this.turnHoldTime - 4.5 * frameDt)
+    }
+
+    // Dynamic Carve Acceleration:
+    // Turns start off SLOW (at t=0-0.3s, authority is only ~18%),
+    // then accelerate as centrifugal load and aerodynamic vortex establish!
+    // Over 0.9-1.5s: ramps smoothly to 1.0 (full carve bite).
+    // In deep speedbar spirals: compounds even further up to 1.45x!
+    const carveProgress = clamp(this.turnHoldTime / 0.90, 0, 1)
+    const carveRamp = Math.pow(carveProgress, 1.4)
+    const spiralCarveBoost = spiralFrac * 0.45
+    const carveMultiplier = 0.18 + (0.82 + spiralCarveBoost) * carveRamp
+
+    // Steady-State Target Turn Rate with Aerodynamic Tangent Bite:
+    let targetTurnRate = 0
     if (absBank > 3.0) {
       const bankRad = absBank * DEG
-      // Aerodynamic tangent factor: tan(bank) / tan(30°)
       const tanFactor = Math.tan(Math.min(1.35, bankRad)) / Math.tan(30 * DEG)
-      // Compounding power curve: starts very gentle at low bank, surges dramatically in deep bank
-      const bitePower = Math.pow(Math.min(2.5, tanFactor), 1.65)
-      const baseTurnFactor = 36.0 + spiralFrac * 50.0
-      turnRateDegPerSec = Math.sign(this.bankDeg) * (baseTurnFactor * bitePower)
+      const bitePower = Math.pow(Math.min(2.5, tanFactor), 1.5)
+      const baseTurnFactor = 38.0 + spiralFrac * 50.0
+      targetTurnRate = Math.sign(this.bankDeg) * (baseTurnFactor * bitePower) * carveMultiplier
     }
-    this.headingDeg = (this.headingDeg + turnRateDegPerSec * frameDt + 360) % 360
+
+    // Rotational Yaw Inertia (2nd-Order Heading Rate):
+    // Turn rate does not snap instantaneously—it follows with aerodynamic inertia!
+    const turnFollowRate = isReturningRoll ? 6.5 : (4.8 + spiralFrac * 3.0)
+    this.turnRateDegPerSec += (targetTurnRate - this.turnRateDegPerSec) * Math.min(1.0, turnFollowRate * frameDt)
+    this.headingDeg = (this.headingDeg + this.turnRateDegPerSec * frameDt + 360) % 360
 
     // 2. Pitch & Speed Envelope:
     // - Speedbar / Deep Dive: accelerates up to 175 km/h, sink steepens to -32 m/s, pitch down 48°

@@ -444,10 +444,10 @@ export class MobileInputManager {
 
     // 4. Smooth Control Actuation & Positive Centering:
     // When returning to center, faster recovery (14.0) firmly locks into neutral stability.
-    // When rolling into a turn, a smooth 9.0 weight-shift rate feels like an aerodynamic wing, not a twitch.
+    // When rolling into a turn, a progressive rate (5.5) feels like a physical human weight shift, not a twitch.
     const isReturningToCenter = Math.abs(netRoll) < Math.abs(this.controls.weightShift || 0)
-    const steerRate = isReturningToCenter ? 14.0 : 9.0
-    const brakeRate = 12.0
+    const steerRate = isReturningToCenter ? 14.0 : 5.5
+    const brakeRate = isReturningToCenter ? 12.0 : 6.5
     const barRate = speedBarTarget > (this.controls.speedBar || 0) ? 14.0 : 10.0
 
     this.controls.weightShift += (netRoll - this.controls.weightShift) * Math.min(1.0, steerRate * dt)
