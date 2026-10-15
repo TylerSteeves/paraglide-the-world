@@ -351,16 +351,30 @@ export class ParagliderSimulation {
     // Spiral dive coupling intensity (banking while diving forward):
     const spiralFrac = clamp(Math.min(Math.abs(combinedSteer) * 1.25, speedBar * 1.25), 0, 1)
 
-    // Maximum bank angle: 45° in normal carve, deepening up to 64° in high-speed spiral!
-    const maxBankDeg = 45.0 + spiralFrac * 19.0
+    // Maximum bank angle: 42° in normal carve, deepening up to 64° in high-speed spiral!
+    const maxBankDeg = 42.0 + spiralFrac * 22.0
     const targetBankDeg = combinedSteer * maxBankDeg
-    const bankLerpSpeed = 16.0 + spiralFrac * 6.0
+
+    // Aerodynamic Roll Damping & Stability in Neutrality:
+    // When returning to center, faster recovery (12.0) restores wings-level stability.
+    // When rolling into a turn, roll rate is a progressive 8.0 (or +spiralFrac*4.5 in dynamic maneuvers).
+    const isReturningRoll = Math.abs(targetBankDeg) < Math.abs(this.bankDeg)
+    const bankLerpSpeed = isReturningRoll ? 12.0 : (8.0 + spiralFrac * 4.5)
     this.bankDeg += (targetBankDeg - this.bankDeg) * Math.min(1.0, bankLerpSpeed * frameDt)
 
-    // Coordinated Turn Rate (Heading change proportional to bank angle):
-    // 30° bank produces 42°/sec; in spiral dive spins up to 110°/sec!
-    const baseTurnFactor = 42.0 + spiralFrac * 36.0
-    const turnRateDegPerSec = (this.bankDeg / 30.0) * baseTurnFactor
+    // Coordinated Turn Rate with Positive Neutral Stability:
+    // Real paragliders track dead straight in trim flight with positive directional damping.
+    // Below 1.5° bank, turn rate is locked to 0 (zero squirrely heading creep!).
+    // Above 1.5° bank, turn rate builds smoothly with bank angle.
+    const absBank = Math.abs(this.bankDeg)
+    let turnRateDegPerSec = 0
+    if (absBank > 1.5) {
+      const bankExcess = absBank - 1.5
+      const bankNorm = bankExcess / 28.5
+      const bankCurve = Math.pow(Math.min(2.0, bankNorm), 1.15)
+      const baseTurnFactor = 38.0 + spiralFrac * 48.0
+      turnRateDegPerSec = Math.sign(this.bankDeg) * bankCurve * baseTurnFactor
+    }
     this.headingDeg = (this.headingDeg + turnRateDegPerSec * frameDt + 360) % 360
 
     // 2. Pitch & Speed Envelope:
@@ -393,15 +407,19 @@ export class ParagliderSimulation {
     let targetPitchDeg = 1.0
 
     if (this.collapseFrac > 0.05) {
-      // Freefall plunge when wing collapses!
-      targetAirspeedKmh = 16.0
-      targetSinkMps = -24.0 * this.collapseFrac
-      targetPitchDeg = 32.0 * this.collapseFrac // Nose down plunge
+      // True Freefall Plunge (Wing Collapse):
+      // The wing deflates and loses forward aerodynamic lift!
+      // Forward horizontal glide drops to near zero, and the pilot plummets downward under gravity!
+      targetAirspeedKmh = 14.0 // Residual forward penetration
+      targetSinkMps = -36.0 * Math.pow(this.collapseFrac, 0.75) // Gut-dropping vertical plunge!
+      targetPitchDeg = 55.0 * this.collapseFrac // Canopy rolls back/downward over falling pilot
     } else if (speedBar > 0.02) {
-      // Smooth progressive dive / spiral down the mountain slope:
-      // Accelerates aggressively up to max dive speed and plunges down the slope!
-      targetAirspeedKmh = baseTrimSpeed + speedBar * (maxDiveSpeed - baseTrimSpeed)
-      targetSinkMps = baseTrimSink + speedBar * (maxDiveSink - baseTrimSink) - spiralFrac * 6.5
+      // Steep Mountain Dive:
+      // Gravity accelerates the glider down the mountain slope!
+      // Total 3D airspeed builds up to maxDiveSpeed (175 km/h), directed down the dive angle!
+      const diveTotalSpeed = baseTrimSpeed + speedBar * (maxDiveSpeed - baseTrimSpeed)
+      targetAirspeedKmh = diveTotalSpeed
+      targetSinkMps = baseTrimSink + speedBar * (maxDiveSink - baseTrimSink) - spiralFrac * 4.5
       targetPitchDeg = 1.0 + speedBar * 48.0 // Nose down up to ~49°! Canopy leads dive!
     } else if (dualBrake > 0.02) {
       // Dynamic flare & hover:
@@ -426,11 +444,12 @@ export class ParagliderSimulation {
     const wind = this.getAtmosphericWindAt(this.cPos, sampleTerrainHeight)
     targetSinkMps += (this.atmosphere.ridgeLiftMps || 0) + (this.atmosphere.thermalUpdraftMps || 0) * 0.85
 
-    // Punchy gravity acceleration when diving forward:
+    // Punchy gravity acceleration when diving or in freefall:
+    const isCollapsing = this.collapseFrac > 0.05
     const diveAccelMult = speedBar > 0.05 ? (1.0 + speedBar * 1.35) : 1.0
-    const speedLerp = 12.0 * diveAccelMult
-    const sinkLerp = 10.0
-    const pitchLerp = 18.0
+    const speedLerp = isCollapsing ? 16.0 : (10.0 * diveAccelMult)
+    const sinkLerp = isCollapsing ? 14.0 : 10.0
+    const pitchLerp = isCollapsing ? 16.0 : 18.0
     this.airspeedKmh += (targetAirspeedKmh - this.airspeedKmh) * Math.min(1.0, speedLerp * frameDt)
     this.currentSinkMps += (targetSinkMps - this.currentSinkMps) * Math.min(1.0, sinkLerp * frameDt)
     this.pitchDeg += (targetPitchDeg - this.pitchDeg) * Math.min(1.0, pitchLerp * frameDt)
@@ -463,11 +482,30 @@ export class ParagliderSimulation {
 
     // 3. Trajectory & World Position Integration
     const headingRad = this.headingDeg * DEG
-    const hSpeedMps = this.airspeedKmh / 3.6
+
+    // In true freefall (wing collapse):
+    // Forward glide efficiency drops to zero, and the flyer falls straight down vertically!
+    const forwardGlideEff = Math.max(0.0, 1.0 - this.collapseFrac * 1.35)
+
+    // In a spiral dive:
+    // The glider is spiraling around a tight vertical cylinder of radius 10-15m.
+    // Forward translation across the map is reduced by ~75%, while vertical descent dominates!
+    const spiralTransDamp = 1.0 - spiralFrac * 0.75
+
+    // Pitch-coupled horizontal speed:
+    // As the nose pitches down into a steep dive, horizontal speed is proportional to cos(pitch),
+    // directing the increased kinetic energy into vertical descent down the slope,
+    // rather than zooming horizontally along the map!
+    const divePitchRad = Math.max(0, renderPitchDeg) * DEG
+    const horizPitchFactor = Math.cos(divePitchRad)
+
+    const rawHSpeedMps = (this.airspeedKmh / 3.6) * forwardGlideEff * horizPitchFactor * spiralTransDamp
+    const hSpeedMps = Math.max(0, rawHSpeedMps)
+
     const fwdX = Math.sin(headingRad) * hSpeedMps
     const fwdZ = Math.cos(headingRad) * hSpeedMps
-
-    this.cVel = v3(fwdX + wind.x, this.currentSinkMps + wind.y, fwdZ + wind.z)
+    const windHorizDamp = 1.0 - this.collapseFrac * 0.85
+    this.cVel = v3(fwdX + wind.x * windHorizDamp, this.currentSinkMps + wind.y, fwdZ + wind.z * windHorizDamp)
     this.cPos = vAddScaled(this.cPos, this.cVel, frameDt)
     this.cQ = qFromYawPitchRoll(this.headingDeg, renderPitchDeg, renderBankDeg)
 
@@ -574,8 +612,8 @@ export class ParagliderSimulation {
   }
 
   private getAtmosphericWindAt(pos: V3, sample: TerrainSampler): V3 {
-    const windRad = (this.atmosphere.windHeadingDeg || 190) * DEG
-    const windSpeedMps = (this.atmosphere.windSpeedKmh || 12) / 3.6
+    const windRad = (this.atmosphere.windHeadingDeg ?? 190) * DEG
+    const windSpeedMps = (this.atmosphere.windSpeedKmh ?? 12) / 3.6
     const baseWind = v3(Math.sin(windRad) * windSpeedMps, 0, Math.cos(windRad) * windSpeedMps)
 
     let ridgeLiftMps = 0

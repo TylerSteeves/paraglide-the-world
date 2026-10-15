@@ -311,10 +311,12 @@ export class MobileInputManager {
       }
     }
 
-    // 1. Roll Steering:
-    // 1.5° deadband absorbs hand tremor; 25° reaches full deflection.
-    // Progressive x^1.25 expo curve for smooth, surgical course corrections
-    const DEADBAND_ROLL = 1.5
+    // 1. Roll Steering & Stability in Neutrality:
+    // Stable Neutrality: 3.5° deadband absorbs natural phone tremor and provides a solid center detent.
+    // Smoothstep Hermite curve ensures zero slope discontinuity at neutral edge:
+    // tiny tilts outside deadband make gentle, surgical corrections with zero squirrely snap,
+    // smoothly deepening into full carving authority up to 25.0°.
+    const DEADBAND_ROLL = 3.5
     const MAX_ROLL = 25.0
     const absRoll = Math.abs(this.smoothedRollDeg)
 
@@ -323,7 +325,8 @@ export class MobileInputManager {
     } else {
       const sign = Math.sign(this.smoothedRollDeg)
       const norm = clamp((absRoll - DEADBAND_ROLL) / (MAX_ROLL - DEADBAND_ROLL), 0, 1)
-      const mag = Math.pow(norm, 1.25)
+      // Smoothstep curve (3x^2 - 2x^3) gives zero derivative at 0 for a velvety smooth departure from neutral
+      const mag = norm * norm * (3.0 - 2.0 * norm)
       // Natural steering: tilt left turns left, tilt right turns right
       const steerSign = this.invertRollSteering ? -sign : sign
       this.tiltWeightShift = steerSign * mag
@@ -413,10 +416,13 @@ export class MobileInputManager {
       targetLeftBrake = Math.max(0, flareTarget - pull * 0.4)
     }
 
-    // 4. Smooth Control Actuation
-    const steerRate = 16.0
-    const brakeRate = 16.0
-    const barRate = speedBarTarget > (this.controls.speedBar || 0) ? 18.0 : 12.0
+    // 4. Smooth Control Actuation & Positive Centering:
+    // When returning to center, faster recovery (14.0) firmly locks into neutral stability.
+    // When rolling into a turn, a smooth 9.0 weight-shift rate feels like an aerodynamic wing, not a twitch.
+    const isReturningToCenter = Math.abs(netRoll) < Math.abs(this.controls.weightShift || 0)
+    const steerRate = isReturningToCenter ? 14.0 : 9.0
+    const brakeRate = 12.0
+    const barRate = speedBarTarget > (this.controls.speedBar || 0) ? 14.0 : 10.0
 
     this.controls.weightShift += (netRoll - this.controls.weightShift) * Math.min(1.0, steerRate * dt)
     this.controls.leftBrake += (targetLeftBrake - this.controls.leftBrake) * Math.min(1.0, brakeRate * dt)

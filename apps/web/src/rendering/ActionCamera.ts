@@ -318,6 +318,11 @@ export class ActionCamera {
     const forwardAcc = dt > 0.0001 ? (speedMps - this.prevSpeedMps) / dt : 0
     this.prevSpeedMps = speedMps
 
+    // Horizontal flight heading vector for chase camera placement:
+    // Keeps camera cleanly positioned behind and above the flyer regardless of steep vertical pitch/dive angles
+    const vDirH = new Vector3(vDir.x, 0, vDir.z)
+    const uFwdH = vDirH.lengthSquared() > 0.04 ? vDirH.normalize() : hFwd
+
     // Target elastic chase lag based on forward acceleration & speed surge
     const targetElasticLag = Math.max(-0.25, Math.min(0.95, forwardAcc * 0.12 + Math.max(0, speedKmh - trimSpeed) * 0.016))
     this.elasticLag += (targetElasticLag - this.elasticLag) * Math.min(1.0, 10.0 * dt)
@@ -378,11 +383,11 @@ export class ActionCamera {
       const sinP = Math.sin(effectivePitch)
 
       // Horizontal offset direction rotated around flyer:
-      // effectiveYaw = 0: points along -vDir (trailing behind)
+      // effectiveYaw = 0: points along -uFwdH (trailing behind)
       // effectiveYaw = PI/2: points along uRight (right side)
-      // effectiveYaw = PI: points along vDir (front selfie)
+      // effectiveYaw = PI: points along uFwdH (front selfie)
       // effectiveYaw = 3*PI/2: points along -uRight (left side)
-      const uH = vDir.scale(-cosY).add(uRight.scale(sinY))
+      const uH = uFwdH.scale(-cosY).add(uRight.scale(sinY))
       const upRef = (sim.isLooping || sim.isRolling) ? Vector3.Up() : uTether
       const uOrbitDir = uH.scale(cosP).add(upRef.scale(sinP)).normalize()
 
@@ -409,7 +414,7 @@ export class ActionCamera {
       const dist = (2.15 * portraitDistMult) + this.elasticLag * 0.45
       const height = (0.75 * portraitHeightMult) + Math.min(0.12, speedSurge * 0.006) + downhillDescend * 0.15 - gHeavinessComp * 0.8
       this.targetCamPos = pilotPos
-        .subtract(vDir.scale(dist))
+        .subtract(uFwdH.scale(dist))
         .add(uRight.scale(0.70))
         .add(uTether.scale(height))
         .add(shake)
@@ -445,7 +450,7 @@ export class ActionCamera {
       const dist = (4.8 * portraitDistMult) + this.elasticLag
       const height = (1.55 * portraitHeightMult) - Math.min(0.20, speedSurge * 0.008) - gHeavinessComp
       this.targetCamPos = pilotPos
-        .subtract(vDir.scale(dist))
+        .subtract(uFwdH.scale(dist))
         .add(uTether.scale(height))
         .add(shake)
 
