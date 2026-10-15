@@ -66,7 +66,7 @@ if (typeof Effect !== 'undefined') {
 }
 
 export type LensMode = 'action-cam' | 'subtle' | 'linear'
-export type CameraVantage = 'chase-360' | 'shoulder-chase' | 'pilot-fpv' | 'front-selfie' | 'wide-chase'
+export type CameraVantage = 'chase-360' | 'orbit-360' | 'shoulder-chase' | 'pilot-fpv' | 'front-selfie' | 'wide-chase'
 
 export class ActionCamera {
   public camera: FreeCamera
@@ -76,6 +76,10 @@ export class ActionCamera {
   public fisheyeStrength: number = 0.02 // Crisp flat perspective, no severe fishbowl warping
   public chromaticAberration: number = 0.0006 // Minimal optical dispersion
   public vignetteStrength: number = 0.16 // Subtle action-cam lens shading
+  public orbitYawRad: number = 0 // 0 to 2*PI horizontal angle rotating around flyer
+  public orbitPitchRad: number = 0 // -0.45 to +0.85 vertical elevation angle around flyer
+  public isUserOrbiting: boolean = false
+  private orbitHoldTimer: number = 0
   private baseFov: number = 1.34 // ~76.8 degrees wide forward perspective
   private smoothedTarget: Vector3
   private smoothedCamPos: Vector3
@@ -84,6 +88,7 @@ export class ActionCamera {
   private prevSpeedMps: number = 17.2
   private elasticLag: number = 0
   private shakeTimer: number = 0
+  private smoothedHorizonRoll: number = 0
 
   constructor(scene: Scene) {
     this.camera = new FreeCamera('action-camera', new Vector3(70, 2395, 5), scene)
@@ -97,6 +102,11 @@ export class ActionCamera {
     this.smoothedCamPos = new Vector3(70, 2395, 5)
     this.targetCamPos = new Vector3(70, 2395, 5)
     this.lookTarget = new Vector3(70, 2392, 65)
+
+    const canvas = scene.getEngine().getRenderingCanvas()
+    if (canvas) {
+      this.attachOrbitControls(canvas)
+    }
 
     this.postProcess = new PostProcess(
       'actionCamFisheye',
@@ -164,6 +174,8 @@ export class ActionCamera {
 
   public cycleVantage(): CameraVantage {
     if (this.vantage === 'chase-360') {
+      this.setVantage('orbit-360')
+    } else if (this.vantage === 'orbit-360') {
       this.setVantage('shoulder-chase')
     } else if (this.vantage === 'shoulder-chase') {
       this.setVantage('pilot-fpv')
@@ -182,7 +194,60 @@ export class ActionCamera {
     this.setLensMode(this.lensMode)
   }
 
+  public rotateOrbit(deltaYaw: number, deltaPitch: number) {
+    this.orbitYawRad = (this.orbitYawRad + deltaYaw) % (Math.PI * 2)
+    this.orbitPitchRad = Math.max(-0.65, Math.min(1.15, this.orbitPitchRad + deltaPitch))
+    this.isUserOrbiting = true
+    this.orbitHoldTimer = 5.0
+  }
+
+  public resetOrbit() {
+    this.orbitYawRad = 0
+    this.orbitPitchRad = 0
+    this.isUserOrbiting = false
+    this.orbitHoldTimer = 0
+  }
+
+  public attachOrbitControls(element: HTMLElement) {
+    let isDragging = false
+    let startX = 0
+    let startY = 0
+
+    element.addEventListener('pointerdown', (e) => {
+      const isUpperScreen = e.clientY < window.innerHeight * 0.45
+      const isRightClick = e.button === 2 || e.button === 1 || e.shiftKey
+      if (isRightClick || (isUpperScreen && e.pointerType === 'touch')) {
+        isDragging = true
+        startX = e.clientX
+        startY = e.clientY
+        this.isUserOrbiting = true
+      }
+    })
+
+    window.addEventListener('pointermove', (e) => {
+      if (!isDragging) return
+      const dx = e.clientX - startX
+      const dy = e.clientY - startY
+      startX = e.clientX
+      startY = e.clientY
+
+      const rotSpeedH = (Math.PI * 2.2) / Math.max(300, window.innerWidth)
+      const rotSpeedV = (Math.PI * 1.4) / Math.max(300, window.innerHeight)
+      this.rotateOrbit(dx * rotSpeedH, -dy * rotSpeedV)
+    })
+
+    const stopDrag = () => {
+      if (isDragging) {
+        isDragging = false
+        this.isUserOrbiting = false
+      }
+    }
+    window.addEventListener('pointerup', stopDrag)
+    window.addEventListener('pointercancel', stopDrag)
+  }
+
   public snap() {
+    this.smoothedHorizonRoll = 0
     this.smoothedCamPos.copyFrom(this.targetCamPos)
     this.smoothedTarget.copyFrom(this.lookTarget)
     this.camera.position.copyFrom(this.targetCamPos)
@@ -194,7 +259,7 @@ export class ActionCamera {
     dt: number,
     _parallaxRoll: number = 0,
     _parallaxPitch: number = 0,
-    _instantTwistRad: number = 0,
+    instantTwistRad: number = 0,
     snapIntensity: number = 0,
   ) {
     const pilotPos = new Vector3(sim.pilot.position.x, sim.pilot.position.y, sim.pilot.position.z)
@@ -254,34 +319,17 @@ export class ActionCamera {
     this.prevSpeedMps = speedMps
 
     // Target elastic chase lag based on forward acceleration & speed surge
-    const targetElasticLag = Math.max(-0.25, Math.min(0.60, forwardAcc * 0.07 + Math.max(0, speedKmh - trimSpeed) * 0.012))
-    this.elasticLag += (targetElasticLag - this.elasticLag) * Math.min(1.0, 8.0 * dt)
+    const targetElasticLag = Math.max(-0.25, Math.min(0.95, forwardAcc * 0.12 + Math.max(0, speedKmh - trimSpeed) * 0.016))
+    this.elasticLag += (targetElasticLag - this.elasticLag) * Math.min(1.0, 10.0 * dt)
 
-    // Continuous aerodynamic micro-vibration & high-speed wind buffeting
-    this.shakeTimer += dt
-    const shake = Vector3.Zero()
-    if (sim.isStalled || sim.isLinesSlack) {
-      shake.set(
-        (Math.random() - 0.5) * 0.24,
-        (Math.random() - 0.5) * 0.24,
-        (Math.random() - 0.5) * 0.24,
-      )
-    } else {
-      // Continuous organic airflow micro-vibration starting at 30 km/h
-      const cruiseShake = speedKmh > 30 ? Math.min(0.032, (speedKmh - 30) * 0.0009) : 0
-      const diveBuffet = speedKmh > 52 ? Math.min(0.075, (speedKmh - 52) * 0.0022) : 0
-      const totalShake = cruiseShake + diveBuffet
-      if (totalShake > 0.001) {
-        const t1 = this.shakeTimer * 58.0
-        const t2 = this.shakeTimer * 83.0
-        const t3 = this.shakeTimer * 115.0
-        shake.set(
-          (Math.sin(t1) * 0.6 + Math.cos(t3) * 0.4) * totalShake,
-          (Math.cos(t2) * 0.7 + Math.sin(t1) * 0.3) * totalShake * 0.85,
-          (Math.sin(t3) * 0.5 + (Math.random() - 0.5) * 0.5) * totalShake * 0.6,
-        )
-      }
-    }
+    // Visceral Aerodynamic Micro-Vibration & High-Speed Airframe Shake
+    this.shakeTimer += dt * 36.0
+    const buffetingIntensity = Math.min(1.0, Math.max(0, (speedKmh - 48.0) / 45.0))
+    const shake = new Vector3(
+      Math.sin(this.shakeTimer * 1.3) * 0.016 * buffetingIntensity,
+      Math.cos(this.shakeTimer * 1.7) * 0.022 * buffetingIntensity,
+      Math.sin(this.shakeTimer * 2.1) * 0.014 * buffetingIntensity,
+    )
 
     const speedSurge = Math.max(0, speedKmh - (trimSpeed - 4.0))
 
@@ -297,26 +345,65 @@ export class ActionCamera {
     const downhillDescend = Math.max(0, -verticalMps / 5.5)
     const thermalClimb = Math.max(0, verticalMps / 4.5)
 
-    // Turn apex anticipation: look target projects gently into the turn along the slope
-    const turnLookAhead = uRight.scale((sim.controls.weightShift || 0) * 2.4)
+    // Rock-steady look target: look ahead along flight path with zero control-induced camera twitching
+    const turnLookAhead = Vector3.Zero()
 
-    if (this.vantage === 'chase-360') {
-      // 1. Forward Driver & Downhill Slope Carve Perspective:
-      // Perfectly frames the glider in center and the downhill slope plunging ahead!
-      const dist = (2.65 * portraitDistMult) + this.elasticLag * 0.45 + Math.min(0.40, speedSurge * 0.012)
+    // Soft return to rear chase if not actively orbiting and in standard chase mode
+    if (!this.isUserOrbiting && this.vantage !== 'orbit-360') {
+      if (this.orbitHoldTimer > 0) {
+        this.orbitHoldTimer -= dt
+      } else {
+        const decayRate = 1.6
+        this.orbitYawRad += (0 - this.orbitYawRad) * Math.min(1.0, decayRate * dt)
+        this.orbitPitchRad += (0 - this.orbitPitchRad) * Math.min(1.0, decayRate * dt)
+      }
+    }
+
+    // Steady rear framing: orbit is user-driven only; zero control-induced camera orbit
+    const carveOrbitYaw = 0
+    const effectiveYaw = this.orbitYawRad + carveOrbitYaw
+    const effectivePitch = this.orbitPitchRad
+
+    if (this.vantage === 'chase-360' || this.vantage === 'orbit-360') {
+      // 1. Forward Driver & 360° Rotating Orbit Perspective:
+      // Perfectly frames the flyer from any angle, rotating 360° around the pilot and canopy!
+      const verticalMps = sim.canopy.verticalSpeedMps || 0
+      const diveTighten = Math.min(0.45, (Math.max(0, -verticalMps) / 25.0) * 0.45)
+      const dist = (2.65 * portraitDistMult) + this.elasticLag * 0.45 + Math.min(0.40, speedSurge * 0.012) - diveTighten
       const height = (0.95 * portraitHeightMult) + Math.min(0.20, speedSurge * 0.008) + downhillDescend * 0.22 - gHeavinessComp
+
+      const cosY = Math.cos(effectiveYaw)
+      const sinY = Math.sin(effectiveYaw)
+      const cosP = Math.cos(effectivePitch)
+      const sinP = Math.sin(effectivePitch)
+
+      // Horizontal offset direction rotated around flyer:
+      // effectiveYaw = 0: points along -vDir (trailing behind)
+      // effectiveYaw = PI/2: points along uRight (right side)
+      // effectiveYaw = PI: points along vDir (front selfie)
+      // effectiveYaw = 3*PI/2: points along -uRight (left side)
+      const uH = vDir.scale(-cosY).add(uRight.scale(sinY))
+      const upRef = (sim.isLooping || sim.isRolling) ? Vector3.Up() : uTether
+      const uOrbitDir = uH.scale(cosP).add(upRef.scale(sinP)).normalize()
+
       this.targetCamPos = pilotPos
-        .subtract(vDir.scale(dist))
-        .add(uTether.scale(height))
+        .add(uOrbitDir.scale(dist))
+        .add(upRef.scale(height * Math.max(0.2, 1.0 - Math.abs(sinP))))
         .add(shake)
 
-      // Forward flight path line-of-sight: look target projects ahead down the slope
+      // Forward flight path line-of-sight: look target projects ahead down the slope,
+      // blended smoothly towards flyer center as orbit angle rotates to side/front
       const lookDist = 55.0 + (speedKmh / trimSpeed) * 25.0
       const slopeDip = downhillDescend * 2.8 - thermalClimb * 2.2
-      this.lookTarget = this.targetCamPos
+      const forwardLook = this.targetCamPos
         .add(vDir.scale(lookDist))
         .subtract(uTether.scale(slopeDip))
         .add(turnLookAhead)
+
+      const flyerCenter = pilotPos.add(uTether.scale(0.75))
+      const rotAngleMag = Math.abs(effectiveYaw) + Math.abs(effectivePitch)
+      const lookFlyerWeight = Math.max(0, Math.min(1.0, rotAngleMag / 0.75 + (this.vantage === 'orbit-360' ? 0.6 : 0)))
+      this.lookTarget = Vector3.Lerp(forwardLook, flyerCenter, lookFlyerWeight)
     } else if (this.vantage === 'shoulder-chase') {
       // 2. Over-the-Shoulder Action Chase:
       const dist = (2.15 * portraitDistMult) + this.elasticLag * 0.45
@@ -380,19 +467,34 @@ export class ActionCamera {
     this.smoothedTarget.y += (this.lookTarget.y - this.smoothedTarget.y) * lookLerp
     this.smoothedTarget.z += (this.lookTarget.z - this.smoothedTarget.z) * lookLerp
 
-    // Natural Dynamic Banking:
-    // Blends world vertical (78%) with authentic wing bank lean (22%) for visceral carving sensation
-    const camUp = Vector3.Up().scale(0.78).add(uTether.scale(0.22)).normalize()
+    // Rock-Steady Horizon Lock:
+    // Keeps the world horizon completely steady in real physical space.
+    // As the phone is tilted or rotated in the player's hands, the camera's upVector
+    // counter-rolls by instantTwistRad so the landscape and horizon outside do not move.
+    const viewDir = this.smoothedTarget.subtract(this.smoothedCamPos).normalize()
+    let camRight = Vector3.Cross(Vector3.Up(), viewDir)
+    if (camRight.lengthSquared() < 0.001) {
+      camRight = Vector3.Right()
+    } else {
+      camRight.normalize()
+    }
+    const viewUp = Vector3.Cross(viewDir, camRight).normalize()
+    const targetRoll = instantTwistRad || 0
+    const rollLerp = Math.min(1.0, 22.0 * dt)
+    this.smoothedHorizonRoll += (targetRoll - this.smoothedHorizonRoll) * rollLerp
+
+    const camUp = viewUp.scale(Math.cos(this.smoothedHorizonRoll)).add(camRight.scale(Math.sin(this.smoothedHorizonRoll))).normalize()
     this.camera.upVector.copyFrom(camUp)
     this.camera.setTarget(this.smoothedTarget)
 
-    // Dynamic speed-tunnel FOV dilation with portrait aspect & snap punch compensation
+    // Dynamic speed-tunnel FOV dilation: expands peripheral vision and creates forward speed rush
     const effectiveBaseFov = isPortrait ? 1.25 : this.baseFov
-    const speedDelta = Math.max(0, speedKmh - 40.0)
-    const fovBoost = Math.min(0.28, (speedDelta / 45.0) * 0.25)
+    const speedDelta = Math.max(0, speedKmh - 42.0)
+    const fovBoost = Math.min(0.42, Math.pow(speedDelta / 50.0, 1.15) * 0.38)
     const snapFovBoost = snapIntensity * 0.08
-    const gTunnelFov = Math.max(0, gForce - 1.2) * 0.035
-    const targetFov = effectiveBaseFov * (1.0 + fovBoost + snapFovBoost - gTunnelFov)
+    const loopFovBoost = (sim.isLooping || sim.isRolling) ? 0.12 : 0
+    const gTunnelFov = Math.max(0, gForce - 1.2) * 0.025
+    const targetFov = Math.min(1.52, effectiveBaseFov * (1.0 + fovBoost + snapFovBoost + loopFovBoost - gTunnelFov))
     this.camera.fov += (targetFov - this.camera.fov) * Math.min(1.0, 12.0 * dt)
   }
 }

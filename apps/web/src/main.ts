@@ -176,6 +176,15 @@ function initApp() {
   inputManager.onControlModeChange = (mode) => {
     hud.setControlMode(mode)
   }
+  inputManager.onTriggerLoop = () => {
+    sim.triggerLoop()
+  }
+  inputManager.onTriggerRoll = (dir) => {
+    sim.triggerRoll(dir)
+  }
+  hud.setOnTriggerFlip(() => {
+    sim.triggerLoop()
+  })
 
   xcMission.onWaypointCompleted = (_wp, _nextWp) => {
     soundscape.playCoinSound()
@@ -259,15 +268,13 @@ function initApp() {
     actionCam.snap()
     engine.resize()
 
-    // Non-blocking gyro permission with safety timeout
+    // Gyro permission request on user tap/click
     try {
-      await Promise.race([
-        inputManager.requestGyroPermission(),
-        new Promise((resolve) => setTimeout(resolve, 800)),
-      ])
+      await inputManager.requestGyroPermission()
     } catch {}
 
     inputManager.calibrateNeutral()
+    inputManager.requestAutoCalibration()
 
     try {
       soundscape.init()
@@ -283,6 +290,7 @@ function initApp() {
     xcMission.resetTask()
     actionCam.snap()
     hud.hideRelaunch()
+    inputManager.requestAutoCalibration()
   }
 
   const switchWorld = (targetId?: WorldId) => {
@@ -355,7 +363,9 @@ function initApp() {
     const v = actionCam.cycleVantage()
     const label =
       v === 'chase-360'
-        ? '🎥 FORWARD DRIVER'
+        ? '🎥 CHASE 360'
+        : v === 'orbit-360'
+        ? '🔄 360° ORBIT CAM'
         : v === 'shoulder-chase'
         ? '🎥 OVER-SHOULDER'
         : v === 'pilot-fpv'
@@ -374,7 +384,14 @@ function initApp() {
     trackedPlayer.toggleGhost()
     trackedPlayer.toggleRibbon()
   })
-  hud.setOnCalibrateNeutral(() => {
+  hud.setOnCalibrateNeutral(async () => {
+    if (!inputManager.hasGyroPermission) {
+      const ok = await inputManager.requestGyroPermission()
+      if (ok) {
+        hud.setWeatherInfo('🧭 Tilt Controls Active')
+        return
+      }
+    }
     inputManager.calibrateNeutral()
     hud.setWeatherInfo('⚖️ Neutral Calibrated')
   })
@@ -429,22 +446,26 @@ function initApp() {
     } else if (e.code === 'KeyO') {
       const next = inputManager.cycleControlMode()
       hud.setControlMode(next)
+    } else if (e.code === 'KeyT') {
+      const shown = rig.toggleSuspensionLines()
+      hud.setWeatherInfo(shown ? '🧵 Suspension Lines: Visible' : '✨ Clean Screen: Lines Hidden')
     } else if (e.code === 'KeyR' || (e.code === 'Space' && sim.isCrashed)) {
       relaunchFlight()
     }
   })
 
-  // Global click / tap / pointer to start
-  const handleGlobalStart = (e: Event) => {
+  // Global click to start flight & ensure motion permission
+  const handleGlobalStart = async (e: Event) => {
+    const target = e.target as HTMLElement
+    if (target?.closest('#btn-world, #btn-camera, #btn-ghost, #btn-gyro, #btn-ln-style, #btn-ir-goggles, #btn-risers-guide, #btn-wing, #btn-ctrl-mode')) return
+    if (!inputManager.hasGyroPermission && typeof (window as any).DeviceOrientationEvent?.requestPermission === 'function') {
+      await inputManager.requestGyroPermission()
+    }
     if (!hasStarted) {
-      const target = e.target as HTMLElement
-      if (target?.closest('#btn-world, #btn-camera, #btn-ghost, #btn-gyro, #btn-ln-style, #btn-ir-goggles, #btn-risers-guide, #btn-wing, #btn-ctrl-mode')) return
-      startFlight()
+      await startFlight()
     }
   }
 
-  window.addEventListener('pointerdown', handleGlobalStart)
-  window.addEventListener('touchstart', handleGlobalStart, { passive: true })
   window.addEventListener('click', handleGlobalStart)
 
   window.addEventListener('orientationchange', () => {
@@ -533,6 +554,8 @@ function initApp() {
         sim.telemetry.engineRpm ?? 0,
         sim.telemetry.throttlePercent ?? 0,
         sim.currentWingType,
+        sim.telemetry.isCollapsed ?? false,
+        sim.telemetry.collapseFrac ?? 0,
       )
 
       // Step G: Update Visual Rig & Action Camera with AR Viewport Twist & Snap Dynamics
@@ -570,6 +593,15 @@ function initApp() {
         inputManager.rightThumbYFrac,
         inputManager.activeTouchVisuals,
         inputManager.controlMode,
+        inputManager.pitchDemand,
+      )
+      hud.setGyroStatus(
+        inputManager.hasGyroPermission,
+        inputManager.tiltWeightShift * 20,
+        inputManager.phoneElevationDeg,
+        sim.telemetry.isCollapsed ?? false,
+        inputManager.diveDemand,
+        inputManager.flareDemand,
       )
 
       // Step J: Radiometric Infrared Spot Temperature (FLIR thermal vision)

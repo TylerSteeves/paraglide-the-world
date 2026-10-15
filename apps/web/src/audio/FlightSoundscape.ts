@@ -30,6 +30,7 @@ export class FlightSoundscape {
   private propWashGain: GainNode | null = null
   private propWashFilter: BiquadFilterNode | null = null
 
+  private wasCollapsedLastFrame: boolean = false
   private initialized: boolean = false
 
   public init() {
@@ -196,6 +197,8 @@ export class FlightSoundscape {
     engineRpm: number = 0,
     throttlePercent: number = 0,
     wingType: string = 'paraglider',
+    isCollapsed: boolean = false,
+    collapseFrac: number = 0,
   ) {
     if (
       !this.initialized ||
@@ -216,25 +219,35 @@ export class FlightSoundscape {
       this.ctx.resume()
     }
 
-    // 1. Modulate Wind Noise: Clean laminar rush; exhilarating roar on surges & G-turns; quiet float on zero-G
+    // 0. Canopy Re-inflation Audio: Snap open on recovery from collapse
+    if (this.wasCollapsedLastFrame && !isCollapsed) {
+      this.playReinflationPop()
+    }
+    this.wasCollapsedLastFrame = isCollapsed
+
+    // 1. Modulate Wind Noise: Clean laminar rush; exhilarating roar on surges & G-turns; quiet float on zero-G; screaming roar on freefall
     const speedRatio = Math.max(0.1, Math.min(3.5, airspeedKmh / 58.0))
     const gHeaviness = Math.max(0, gForce - 1.0)
     const zeroGFloat = Math.max(0, 1.0 - gForce)
     let targetGain = (0.08 + Math.pow(speedRatio, 1.4) * 0.16 + gHeaviness * 0.18) * (1.0 - zeroGFloat * 0.35)
     let targetFreq = (340 + Math.pow(speedRatio, 1.5) * 920 + gHeaviness * 550) * (1.0 - zeroGFloat * 0.25)
 
-    if (isStalled) {
+    if (isCollapsed || collapseFrac > 0.05) {
+      // Freefall plunge: screaming wind roar as pilot plummets downward!
+      targetGain = 0.52 + collapseFrac * 0.22
+      targetFreq = 850 + collapseFrac * 850
+    } else if (isStalled) {
       // Stall breakaway: laminar airflow detaches! Highs vanish, dull turbulence remains
       targetGain *= 0.35
       targetFreq = 220
     }
 
-    this.windGain.gain.setTargetAtTime(Math.min(0.68, targetGain), this.ctx.currentTime, 0.06)
+    this.windGain.gain.setTargetAtTime(Math.min(0.75, targetGain), this.ctx.currentTime, 0.06)
     this.windFilter.frequency.setTargetAtTime(Math.min(2700, targetFreq), this.ctx.currentTime, 0.06)
 
     // 2. Aeolian Line Whistle (Singing Lines)
-    // Resonates when lines are taut and fast; cuts out when lines go slack
-    const isSlack = lineTensionN < 250 || isStalled
+    // Resonates when lines are taut and fast; cuts out when lines go slack or wing collapses
+    const isSlack = lineTensionN < 250 || isStalled || isCollapsed || collapseFrac > 0.05
     if (isSlack || airspeedKmh < 34) {
       this.lineWhistleGain.gain.setTargetAtTime(0, this.ctx.currentTime, 0.05)
     } else {
@@ -245,11 +258,17 @@ export class FlightSoundscape {
       this.lineWhistleGain.gain.setTargetAtTime(whistleGain, this.ctx.currentTime, 0.06)
     }
 
-    // 3. Trailing Edge Flutter & High-G Line Tension Groan (Physical Sub-Bass Chassis Vibration)
-    // Resonates deeply under heavy carving G-forces (G > 1.2) or deep brake pull
+    // 3. Trailing Edge Flutter & High-G Line Tension Groan & Deflated Canopy Buffeting
     const totalBrakeForce = leftForceN + rightForceN
     const gTensionLoad = Math.max(0, gForce - 1.2) * 0.20
-    if ((totalBrakeForce > 8 || gTensionLoad > 0.01) && !isStalled) {
+    if (isCollapsed || collapseFrac > 0.05) {
+      // Deflated canopy cloth flutters and snaps violently in freefall airstream!
+      const clothFlutter = 0.30 * collapseFrac
+      this.brakeFlutterGain.gain.setTargetAtTime(clothFlutter, this.ctx.currentTime, 0.04)
+      if (this.brakeFlutterFilter) {
+        this.brakeFlutterFilter.frequency.setTargetAtTime(82, this.ctx.currentTime, 0.04)
+      }
+    } else if ((totalBrakeForce > 8 || gTensionLoad > 0.01) && !isStalled) {
       const flutterGain = Math.min(0.28, (totalBrakeForce / 120.0) * 0.18 + gTensionLoad)
       this.brakeFlutterGain.gain.setTargetAtTime(flutterGain, this.ctx.currentTime, 0.04)
       if (this.brakeFlutterFilter) {
@@ -365,6 +384,44 @@ export class FlightSoundscape {
       gain.connect(this.ctx.destination)
       osc.start()
       osc.stop(this.ctx.currentTime + 0.25)
+    } catch {
+      // Ignore audio glitches
+    }
+  }
+
+  public playReinflationPop() {
+    if (!this.initialized || !this.ctx) return
+    try {
+      const t0 = this.ctx.currentTime
+      // 1. Low-mid canvas thump (punchy pressurization)
+      const subOsc = this.ctx.createOscillator()
+      const subGain = this.ctx.createGain()
+      subOsc.type = 'sine'
+      subOsc.frequency.setValueAtTime(140, t0)
+      subOsc.frequency.exponentialRampToValueAtTime(45, t0 + 0.18)
+
+      subGain.gain.setValueAtTime(0.38, t0)
+      subGain.gain.exponentialRampToValueAtTime(0.001, t0 + 0.22)
+
+      subOsc.connect(subGain)
+      subGain.connect(this.ctx.destination)
+      subOsc.start(t0)
+      subOsc.stop(t0 + 0.22)
+
+      // 2. High-frequency line-snap / cloth snap
+      const snapOsc = this.ctx.createOscillator()
+      const snapGain = this.ctx.createGain()
+      snapOsc.type = 'triangle'
+      snapOsc.frequency.setValueAtTime(1200, t0)
+      snapOsc.frequency.exponentialRampToValueAtTime(350, t0 + 0.08)
+
+      snapGain.gain.setValueAtTime(0.24, t0)
+      snapGain.gain.exponentialRampToValueAtTime(0.001, t0 + 0.09)
+
+      snapOsc.connect(snapGain)
+      snapGain.connect(this.ctx.destination)
+      snapOsc.start(t0)
+      snapOsc.stop(t0 + 0.09)
     } catch {
       // Ignore audio glitches
     }

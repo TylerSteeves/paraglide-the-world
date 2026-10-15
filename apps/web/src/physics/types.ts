@@ -16,6 +16,8 @@ export type FlightControls = {
   throttle?: number // 0 (idle) to 1 (full power) for Paramotor / PPG
   trimmers?: number // 0 (slow trim) to 1 (fast reflex) for Paramotor / Slalom
   reverseStance: boolean // Pilot flipped 180° in harness facing wing for ground-handling / kiting
+  isCollapsed?: boolean // Full wing collapse triggered by looking straight up
+  collapseFrac?: number // 0 (fully inflated) to 1.0 (fully deflated & crumpled)
 }
 
 export type CanopyState = {
@@ -32,6 +34,8 @@ export type CanopyState = {
   rightTrailingEdgeFlex: number
   leftWingCollapse: number // 0 (inflated) to 1 (collapsed / tucked)
   rightWingCollapse: number
+  isCollapsed?: boolean
+  collapseFrac?: number
   asymmetricStallSide: 'none' | 'left' | 'right'
   isNegativeSpin: boolean
   isBStall: boolean
@@ -120,6 +124,8 @@ export type FlightTelemetry = {
   leftStalled: boolean
   rightStalled: boolean
   isBStall: boolean
+  isCollapsed?: boolean
+  collapseFrac?: number
   pullingA: number
   pullingB: number
   throttlePercent?: number

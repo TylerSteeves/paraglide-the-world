@@ -64,7 +64,7 @@ export const SPEEDWING_13M: WingGeometry = {
   arcAngleDeg: 22.0,
   tetherLengthMeters: 5.3,
   riggingAngleDeg: -3.3,
-  speedBarAngleDeg: 3.5,
+  speedBarAngleDeg: 8.5,
   weightShiftMeters: 0.14,
   canopyMassKg: 4.5,
   enclosedAirKg: 5.5,
@@ -87,7 +87,7 @@ export const PARAGLIDER_XC_24M: WingGeometry = {
   arcAngleDeg: 18.0,
   tetherLengthMeters: 7.2,
   riggingAngleDeg: -2.2,
-  speedBarAngleDeg: 4.5,
+  speedBarAngleDeg: 9.5,
   weightShiftMeters: 0.12,
   canopyMassKg: 5.6,
   enclosedAirKg: 9.8,
@@ -110,7 +110,7 @@ export const PARAMOTOR_FREERIDE_18M: WingGeometry = {
   arcAngleDeg: 20.0,
   tetherLengthMeters: 5.8,
   riggingAngleDeg: -2.8,
-  speedBarAngleDeg: 4.5,
+  speedBarAngleDeg: 8.5,
   weightShiftMeters: 0.16,
   canopyMassKg: 4.8,
   enclosedAirKg: 7.2,
@@ -220,6 +220,7 @@ export function evaluateAirfoil(
   symmetricBrake: number = brakeDeflection,
   pullingB: number = 0,
   isReflex: boolean = false,
+  collapseFrac: number = 0,
 ): { cl: number; cd: number; cm: number; separation: number; isStalled: boolean } {
   const alphaClamped = wrapDeg180(alphaDeg)
 
@@ -243,39 +244,26 @@ export function evaluateAirfoil(
   let separation: number
   let isStalled = false
 
-  if (alphaClamped <= stallAlpha && alphaClamped >= -10.0) {
-    // Symmetrical flare lift boost + local flap camber boost:
-    // Converting high-speed dynamic pressure into a dramatic swoop climb!
-    const camberBoost =
-      (symmetricBrake < 0.65 ? symmetricBrake * 0.42 : 0.27 + (symmetricBrake - 0.65) * 0.35) +
-      brakeDeflection * 0.18
-    cl = clamp(attachedCl + camberBoost, -0.6, clMax + 0.35 * symmetricBrake) * groundEffectFactor
+  // Pure flyable aerodynamics - Stalls completely eliminated for responsive fun flight!
+  const effectiveAlpha = Math.min(alphaClamped, stallAlpha)
+  const camberBoost =
+    (symmetricBrake < 0.65 ? symmetricBrake * 0.52 : 0.34 + (symmetricBrake - 0.65) * 0.45) +
+    brakeDeflection * 0.20
+  cl = clamp(attachedCl + camberBoost, -0.6, clMax + 0.50 * symmetricBrake) * groundEffectFactor
 
-    // Profile & parasitic drag + authentic trailing-edge flap drag
-    const baseCd = (isHighAspect ? 0.024 : 0.042) + 0.00030 * Math.pow(alphaClamped - 2.0, 2)
-    const brakeCd = 0.030 * brakeDeflection + 0.14 * Math.pow(brakeDeflection, 2.0)
-    cd = baseCd + brakeCd
+  // Profile & parasitic drag + progressive trailing-edge flap drag (retains kinetic energy for dynamic flare climb)
+  const baseCd = (isHighAspect ? 0.022 : 0.038) + 0.00025 * Math.pow(effectiveAlpha - 2.8, 2)
+  const brakeCd = (isHighAspect ? 0.014 : 0.020) * brakeDeflection + 0.028 * Math.pow(brakeDeflection, 2.0)
+  cd = baseCd + brakeCd
 
-    // Reflexed ram-air section pitching moment (body +X torque convention: + nose down, - nose up/flare):
-    // Naturally pitch-stable around trim alpha. Symmetrical dual brake application produces authentic nose-up flare.
-    // For reflex slalom airfoils (Ozone OZRP profile), positive reflex pitching moment acts at high speed/low AoA to resist collapses
-    const reflexMoment = isReflex ? 0.035 * (1.0 - clamp(alphaClamped / 12.0, 0, 1)) : 0
-    const cmAlpha = 0.008 * (alphaClamped - (isHighAspect ? 4.2 : 3.5)) - reflexMoment
-    const cmBrake = -0.16 * symmetricBrake
-    cm = cmAlpha + cmBrake
-    separation = brakeDeflection * 0.45
-  } else {
-    // Separated post-stall regime
-    isStalled = true
-    const aRad = alphaClamped * DEG
-    separation = 1.0
-
-    // Flat-plate separated crossflow
-    cl = 1.15 * Math.sin(2 * aRad) * 0.65
-    cd = 0.35 + 1.25 * Math.pow(Math.sin(aRad), 2) + brakeDeflection * 0.45
-    // Post-stall recovery moment: pitches nose down if stalled at high positive alpha
-    cm = 0.12 * Math.sin(aRad)
-  }
+  // Reflexed ram-air section pitching moment
+  const reflexMoment = isReflex ? 0.035 * (1.0 - clamp(effectiveAlpha / 12.0, 0, 1)) : 0
+  const cmAlpha = 0.008 * (effectiveAlpha - (isHighAspect ? 4.2 : 3.5)) - reflexMoment
+  const cmBrake = -0.22 * symmetricBrake
+  const cmSpeedBar = 0.14 * speedBar
+  cm = cmAlpha + cmBrake + cmSpeedBar
+  separation = 0
+  isStalled = false
 
   // B-Line Stall: Mid-chord camber collapse across the span (Rapid 8.5 to 10 m/s descent)
   if (pullingB > 0.05) {
@@ -284,6 +272,16 @@ export function evaluateAirfoil(
     cd = cd + 0.95 * bFrac
     cm = cm * (1.0 - bFrac) + 0.04 * bFrac
     separation = Math.max(separation, bFrac)
+  }
+
+  // Wing Collapse: Looking straight up collapses ram-air pressure into freefall descent
+  if (collapseFrac > 0.05) {
+    const cFrac = clamp(collapseFrac, 0, 1)
+    cl = cl * (1.0 - 0.95 * cFrac)
+    cd = cd + 1.25 * cFrac
+    cm = cm * (1.0 - cFrac)
+    separation = Math.max(separation, cFrac)
+    isStalled = cFrac > 0.4
   }
 
   // Dynamic transient circulation & drag surge: crisp responsiveness to violent control inputs
@@ -313,6 +311,7 @@ export function evaluateWingAerodynamics(
   rho: number,
   wing: WingGeometry = STANDARD_WING,
   stationAirVelocitiesBody?: V3[],
+  collapseFrac: number = controls.collapseFrac ?? (controls.isCollapsed ? 1.0 : 0.0),
 ): {
   totalForceBody: V3
   totalMomentBody: V3
@@ -329,6 +328,8 @@ export function evaluateWingAerodynamics(
   leftStalled: boolean
   rightStalled: boolean
   isBStall: boolean
+  isCollapsed: boolean
+  collapseFrac: number
 } {
   let totalForceBody = v3()
   let totalMomentBody = v3()
@@ -396,6 +397,7 @@ export function evaluateWingAerodynamics(
       symmetricBrake,
       controls.pullingB,
       wing.isReflex ?? false,
+      collapseFrac,
     )
 
     // Induced drag from finite aspect ratio and tip vortices
@@ -450,18 +452,11 @@ export function evaluateWingAerodynamics(
     }
   }
 
-  const isFullStall = leftStalledCount >= 2 && rightStalledCount >= 2
-  const leftStalled = leftStalledCount >= 1
-  const rightStalled = rightStalledCount >= 1
-
-  let asymmetricStallSide: 'none' | 'left' | 'right' = 'none'
-  if (!isFullStall) {
-    if (leftStalled && !rightStalled) asymmetricStallSide = 'left'
-    else if (rightStalled && !leftStalled) asymmetricStallSide = 'right'
-  }
-
-  // Stall warning: boundary layer buffeting starts at 11.0° AoA up to full breakaway at 15.0°
-  const stallWarning = clamp((maxAlphaDeg - 11.0) / 4.0, 0, 1)
+  const isFullStall = false
+  const leftStalled = false
+  const rightStalled = false
+  const asymmetricStallSide: 'none' | 'left' | 'right' = 'none'
+  const stallWarning = 0
 
   // Physical brake tension force (Newtons) communicated to the pilot's hands:
   // F = mechanical line spring return + dynamic pressure against the deflected trailing edge flap
@@ -488,13 +483,12 @@ export function evaluateWingAerodynamics(
   const weathercockYawMoment = 0.045 * qDynamic * wing.projectedAreaSquareMeters * wing.projectedSpanMeters * sideslipBeta
 
   // Authentic asymmetric brake yaw moment:
-  // Left brake (left > right) slows left wingtip -> yaws nose LEFT (-Y)
-  // Right brake (right > left) slows right wingtip -> yaws nose RIGHT (+Y)
-  const brakeYawMoment = (controls.rightBrake - controls.leftBrake) * (0.078 * qDynamic * wing.projectedAreaSquareMeters * wing.projectedSpanMeters)
+  // Left brake slows left wingtip -> yaws nose left
+  const brakeYawMoment = (controls.rightBrake - controls.leftBrake) * (0.018 * qDynamic * wing.projectedAreaSquareMeters * wing.projectedSpanMeters)
 
   // Authentic roll-into-turn coupling from asymmetric brake deflection:
-  // Deflecting the inside trailing edge rolls canopy immediately into the carve (+Z is roll left)
-  const brakeRollMoment = (controls.leftBrake - controls.rightBrake) * (0.086 * qDynamic * wing.projectedAreaSquareMeters * wing.projectedSpanMeters)
+  // Deflecting the inside trailing edge rolls canopy smoothly into the carve (+Z is roll left)
+  const brakeRollMoment = (controls.leftBrake - controls.rightBrake) * (0.024 * qDynamic * wing.projectedAreaSquareMeters * wing.projectedSpanMeters)
   totalMomentBody = vAdd(totalMomentBody, v3(0, weathercockYawMoment + brakeYawMoment, brakeRollMoment))
 
   // Lateral crossflow drag & keel side force on arched ram-air canopy (CY_beta):
@@ -518,6 +512,8 @@ export function evaluateWingAerodynamics(
     leftStalled,
     rightStalled,
     isBStall: (controls.pullingB ?? 0) > 0.35,
+    isCollapsed: collapseFrac > 0.35,
+    collapseFrac,
   }
 }
 

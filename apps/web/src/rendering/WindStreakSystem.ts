@@ -82,8 +82,8 @@ export class WindStreakSystem {
     // Airspeed in m/s
     const airspeedMps = airspeedKmh / 3.6
 
-    // Global intensity: subtle and crisp, keeping the central visual field clear
-    const baseAlpha = Math.min(0.65, 0.22 + Math.max(0, (airspeedKmh - 30) / 38.0) * 0.40)
+    // Global intensity: bold and luminous, providing unmistakable visual speed
+    const baseAlpha = Math.min(0.95, 0.40 + Math.max(0, (airspeedKmh - 30.0) / 50.0) * 0.55)
 
     // Glider forward and right axes in world space
     const yawRad = (sim.canopy.yawDeg * Math.PI) / 180
@@ -110,8 +110,8 @@ export class WindStreakSystem {
       sim.canopy.position.z,
     )
 
-    // Tail streak length: scales dynamically with forward airspeed (up to 4.8m on bar/dive)
-    const streakDuration = 0.08 + Math.max(0, (airspeedKmh - trimSpeed) / 30.0) * 0.08
+    // Tail streak length: scales dynamically with forward airspeed (up to 7.5m on bar/dive)
+    const streakDuration = 0.12 + Math.max(0, (airspeedKmh - trimSpeed) / 40.0) * 0.14
 
     for (let i = 0; i < this.streakCount; i++) {
       const s = this.streaks[i]
@@ -121,14 +121,14 @@ export class WindStreakSystem {
 
       // Wrap around forward when passed behind
       if (s.relPos.z < -8.0) {
-        s.relPos.z = 18.0 + Math.random() * 5.0
-        const isPilotStream = i < 132
+        s.relPos.z = 20.0 + Math.random() * 6.0
+        const isPilotStream = i < 140
         s.relPos.x = isPilotStream
-          ? (Math.random() - 0.5) * 5.0
-          : (Math.random() - 0.5) * 13.0
+          ? (Math.random() - 0.5) * 4.2
+          : (Math.random() - 0.5) * 9.0
         s.relPos.y = isPilotStream
-          ? -7.2 + Math.random() * 4.2
-          : -2.5 + Math.random() * 4.5
+          ? -6.2 + Math.random() * 3.5
+          : -2.0 + Math.random() * 3.5
       }
 
       // Convert local coordinate to world space

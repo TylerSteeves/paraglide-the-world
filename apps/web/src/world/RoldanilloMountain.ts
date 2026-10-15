@@ -36,8 +36,8 @@ export class RoldanilloMountain implements FlightWorld {
   private spawnedMeshes: Mesh[] = []
   private scene: Scene
 
-  // Launch coordinates: On the windward western slope crest at 2,395m, facing SSW (195°) with 50m+ slope clearance
-  public readonly launchPosition = new Vector3(70, 2395, 10)
+  // Launch coordinates: On the windward western slope crest at 2,445m, facing SSW (195°) with 70m+ slope clearance
+  public readonly launchPosition = new Vector3(70, 2445, 15)
   public readonly launchHeadingDeg = 195.0 // SSW down the windward lift face toward Lago Calima
 
   constructor(scene: Scene) {

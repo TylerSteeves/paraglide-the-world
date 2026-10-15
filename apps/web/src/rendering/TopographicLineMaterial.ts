@@ -112,11 +112,24 @@ void main(void) {
         vec3 halfDir = normalize(light + viewDir);
         float NdotH = max(0.0, dot(vNormalW, halfDir));
         float snowGlint = pow(NdotH, 20.0) * 0.30 * step(0.80, vColor.r);
-        
-        vec3 col = vColor.rgb * lighting + vec3(snowGlint);
+
+        // High-frequency procedural ski track corduroy & snow grain (critical for ground optic flow)
+        float dist = length(vPositionW - uCameraPos);
+        float proximity = clamp(1.0 - dist / 140.0, 0.0, 1.0); // Prominent within 140m of camera
+
+        // Groomed corduroy ski grooves (1.2m frequency parallel to the ski run)
+        float corduroy = sin(vPositionW.x * 5.2) * 0.045 * proximity;
+
+        // Multi-frequency wind sastrugi & snow crust speckle
+        float sastrugi = (sin(vPositionW.x * 1.8 + vPositionW.z * 1.2) * cos(vPositionW.x * 0.9 - vPositionW.z * 1.6)) * 0.04 * proximity;
+        float snowNoise = (fract(sin(dot(floor(vPositionW.xz * 1.8), vec2(12.9898, 78.233))) * 43758.5453) - 0.5) * 0.06 * proximity;
+
+        // Transverse speed ridges (subtle terrain contours every 12m down the slope for longitudinal optic flow)
+        float speedRidge = (1.0 - smoothstep(0.0, 0.35, abs(fract(vPositionW.z * 0.0833) - 0.5))) * 0.07 * proximity;
+
+        vec3 col = vColor.rgb * (lighting + corduroy + sastrugi + snowNoise - speedRidge) + vec3(snowGlint);
 
         // Distance fog
-        float dist = length(vPositionW - uCameraPos);
         float fogFactor = clamp(exp(-dist * uFogDensity), 0.0, 1.0);
         gl_FragColor = vec4(mix(uBackgroundColor, col, fogFactor), 1.0);
         return;

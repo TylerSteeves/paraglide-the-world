@@ -24,6 +24,7 @@ export class FlightHUD {
   private relaunchOverlayEl!: HTMLElement
   private relaunchTitleEl!: HTMLElement
   private relaunchSubEl!: HTMLElement
+  private descentBadgeEl: HTMLElement | null = null
   private portraitGuardEl: HTMLElement | null = null
   private varioEl!: HTMLElement
   private worldBtnEl!: HTMLElement
@@ -31,6 +32,7 @@ export class FlightHUD {
   private weatherTextEl!: HTMLElement
   private ghostBtnEl!: HTMLElement
   private gyroBtnEl!: HTMLElement
+  private gyroLabelEl: HTMLElement | null = null
   private risersGuideBtn: HTMLElement | null = null
   private risersGuideModal: HTMLElement | null = null
   private dockBtnA: HTMLElement | null = null
@@ -83,6 +85,11 @@ export class FlightHUD {
   private onPullBCallback: (active: boolean) => void = () => {}
   private onCycleLnStyleCallback: () => void = () => {}
   private onToggleIrGogglesCallback: () => void = () => {}
+  private onTriggerFlipCallback: () => void = () => {}
+
+  public setOnTriggerFlip(cb: () => void) {
+    this.onTriggerFlipCallback = cb
+  }
 
   constructor(containerId: string) {
     const el = document.getElementById(containerId)
@@ -256,7 +263,7 @@ export class FlightHUD {
     }
   }
 
-  public showRelaunch(title: string = 'PARAGLIDE THE WORLD', subtitle: string = 'Tilt phone to steer • Lean forward to dive • One-handed vertical play') {
+  public showRelaunch(title: string = 'PARAGLIDE THE WORLD', subtitle: string = 'Tilt Left/Right to Steer • Tilt Forward to Dive • Tilt Back to Float • Rock-steady horizon') {
     if (this.relaunchTitleEl) this.relaunchTitleEl.innerText = title
     if (this.relaunchSubEl) this.relaunchSubEl.innerText = subtitle
     if (this.relaunchOverlayEl) this.relaunchOverlayEl.style.display = 'flex'
@@ -302,6 +309,10 @@ export class FlightHUD {
               <small>VARIO</small>
               <span id="hud-vario" style="color: #34d399;">+0.0</span><small>M/S</small>
             </div>
+            <span class="hud-sep">•</span>
+            <div class="hud-metric hud-descent-metric">
+              <span class="hud-descent-badge descent-glide" id="hud-descent-badge">— GLIDE</span>
+            </div>
             <div class="hud-g-badge" id="hud-g">1.0G</div>
           </div>
 
@@ -323,6 +334,16 @@ export class FlightHUD {
             <span>🎥</span>
           </button>
 
+          <button class="hud-icon-btn" id="btn-acro-flip" title="Acro Flip / Loop [Space / Double-Tap]" style="padding: 0 10px; font-size: 13px; font-weight: 700; width: auto; gap: 4px; background: rgba(239, 68, 68, 0.28); border-color: rgba(239, 68, 68, 0.55); color: #fee2e2;">
+            <span>🔥</span>
+            <span>FLIP</span>
+          </button>
+
+          <button class="hud-icon-btn" id="btn-gyro" title="Tilt Steering & Calibrate [Z]" style="padding: 0 10px; font-size: 13px; font-weight: 700; width: auto; gap: 4px;">
+            <span>🧭</span>
+            <span id="hud-gyro-label">TILT</span>
+          </button>
+
           <button class="hud-icon-btn" id="btn-risers-guide" title="Controls Guide [H]">
             <span>ℹ️</span>
           </button>
@@ -338,7 +359,6 @@ export class FlightHUD {
         <button id="btn-ctrl-mode"><span id="hud-ctrl-icon"></span><span id="hud-ctrl-label"></span></button>
         <button id="btn-ir-goggles"><span id="hud-ir-label"></span></button>
         <button id="btn-ghost"></button>
-        <button id="btn-gyro"></button>
         <div id="hud-xc-task-bar">
           <span id="xc-task-name"></span><span id="xc-task-dist"></span>
           <span id="xc-glide-ratio"></span><span id="xc-glide-badge"></span>
@@ -422,15 +442,29 @@ export class FlightHUD {
       <!-- Minimal Start / Relaunch Overlay -->
       <div class="relaunch-overlay" id="hud-relaunch">
         <div class="relaunch-card">
-          <h2 id="relaunch-title">PARAGLIDE THE WORLD</h2>
-          <p id="relaunch-sub">Tilt phone to steer • Lean forward to dive • One-handed vertical play</p>
+          <div style="font-size: 11px; font-weight: 800; color: #38bdf8; letter-spacing: 1.5px; margin-bottom: 8px;">🪂 PARAGLIDE THE WORLD</div>
+          <h2 id="relaunch-title">1:1 TILT & DESCENT CONTROL</h2>
+          <p id="relaunch-sub" style="margin-bottom: 16px;">Tilt Left/Right to Steer • Tilt Forward to Dive • Tilt Back to Float • Rock-steady horizon</p>
+          <button id="btn-play-portrait" style="background: linear-gradient(135deg, #0284c7, #0369a1); color: #fff; border: 1px solid rgba(255,255,255,0.3); border-radius: 9999px; padding: 14px 32px; font-size: 16px; font-weight: 800; box-shadow: 0 4px 24px rgba(2,132,199,0.6); pointer-events: auto; cursor: pointer; display: inline-block;">
+            TAP TO FLY (ENABLE TILT)
+          </button>
+          <div style="margin-top: 16px; font-size: 12px; color: #94a3b8; line-height: 1.4; max-width: 320px; margin-left: auto; margin-right: auto;">
+            🔒 <b>Tip:</b> Turn on <b>Portrait Orientation Lock</b> in iPhone Control Center so your phone stays vertical when tilting!
+          </div>
         </div>
+      </div>
+
+      <!-- Landscape Guidance Alert -->
+      <div class="landscape-lock-alert">
+        <span>🔒</span>
+        <span>Turn on <b>Portrait Orientation Lock</b> in Control Center to lock screen vertical!</span>
       </div>
     `
 
     this.speedEl = document.getElementById('hud-speed')!
     this.altEl = document.getElementById('hud-alt')!
     this.varioEl = document.getElementById('hud-vario')!
+    this.descentBadgeEl = document.getElementById('hud-descent-badge')
     this.worldBtnEl = document.getElementById('btn-world')!
     this.worldLabelEl = document.getElementById('hud-world-label')!
     this.gEl = document.getElementById('hud-g')!
@@ -452,6 +486,7 @@ export class FlightHUD {
     this.relaunchOverlayEl = document.getElementById('hud-relaunch')!
     this.relaunchTitleEl = document.getElementById('relaunch-title')!
     this.relaunchSubEl = document.getElementById('relaunch-sub')!
+    this.gyroLabelEl = document.getElementById('hud-gyro-label')
 
     this.weatherTextEl = document.getElementById('hud-weather-text')!
     this.ghostBtnEl = document.getElementById('btn-ghost')!
@@ -625,6 +660,14 @@ export class FlightHUD {
       })
     }
 
+    const flipBtn = document.getElementById('btn-acro-flip')
+    if (flipBtn) {
+      flipBtn.addEventListener('click', (e) => {
+        e.stopPropagation()
+        this.onTriggerFlipCallback()
+      })
+    }
+
     const triggerStart = (e: Event) => {
       e.stopPropagation()
       this.hidePortraitGuard()
@@ -636,19 +679,13 @@ export class FlightHUD {
     const playPortraitBtn = document.getElementById('btn-play-portrait')
     if (playPortraitBtn) {
       playPortraitBtn.addEventListener('click', triggerStart)
-      playPortraitBtn.addEventListener('pointerdown', triggerStart)
-      playPortraitBtn.addEventListener('touchstart', triggerStart, { passive: true })
     }
 
     if (this.portraitGuardEl) {
       this.portraitGuardEl.addEventListener('click', triggerStart)
-      this.portraitGuardEl.addEventListener('pointerdown', triggerStart)
-      this.portraitGuardEl.addEventListener('touchstart', triggerStart, { passive: true })
     }
 
     this.relaunchOverlayEl.addEventListener('click', triggerStart)
-    this.relaunchOverlayEl.addEventListener('pointerdown', triggerStart)
-    this.relaunchOverlayEl.addEventListener('touchstart', triggerStart, { passive: true })
   }
 
   public updateTouchVisuals(visuals: ActiveTouchVisual[] = [], controlMode: ControlMode = 'dual_toggle') {
@@ -712,6 +749,7 @@ export class FlightHUD {
     rightThumbYFrac: number | null = null,
     activeTouches: ActiveTouchVisual[] = [],
     controlMode: ControlMode = 'dual_toggle',
+    pitchDemand: number = 0,
   ) {
     if (this.speedEl) this.speedEl.innerText = `${Math.round(telemetry.airspeedKmh)}`
     if (this.altEl) this.altEl.innerText = `${Math.round(telemetry.altitudeMeters)}`
@@ -721,6 +759,34 @@ export class FlightHUD {
       this.varioEl.innerText = `${sign}${vs.toFixed(1)}`
       this.varioEl.style.color = vs > 0.5 ? '#34d399' : vs < -1.5 ? '#f87171' : '#e2e8f0'
     }
+
+    if (this.descentBadgeEl) {
+      const speedBar = controls.speedBar ?? 0
+      const symBrake = Math.min(controls.leftBrake, controls.rightBrake)
+      const isDiving = pitchDemand > 0.15 || speedBar > 0.15 || telemetry.airspeedKmh > 72
+      const isFlaring = pitchDemand < -0.15 || symBrake > 0.35
+      const isSpiral = (isDiving || speedBar > 0.10) && Math.abs(telemetry.bankDeg) > 35
+
+      if (telemetry.isCollapsed) {
+        this.descentBadgeEl.innerText = '⚡ FREEFALL'
+        this.descentBadgeEl.className = 'hud-descent-badge descent-dive'
+      } else if (isSpiral) {
+        this.descentBadgeEl.innerText = '🌀 SPIRAL DIVE'
+        this.descentBadgeEl.className = 'hud-descent-badge descent-dive'
+      } else if (isDiving) {
+        const isFastDive = telemetry.airspeedKmh > 110 || speedBar > 0.65
+        this.descentBadgeEl.innerText = isFastDive ? '⚡ FAST DIVE' : '▲ DIVE'
+        this.descentBadgeEl.className = 'hud-descent-badge descent-dive'
+      } else if (isFlaring) {
+        const isHighSpeedSwoop = telemetry.airspeedKmh > 52
+        this.descentBadgeEl.innerText = isHighSpeedSwoop ? '▼ FLARE' : '▼ HOVER / FLOAT'
+        this.descentBadgeEl.className = 'hud-descent-badge descent-flare'
+      } else {
+        this.descentBadgeEl.innerText = '— GLIDE'
+        this.descentBadgeEl.className = 'hud-descent-badge descent-glide'
+      }
+    }
+
     if (this.scoreEl) this.scoreEl.innerText = `${Math.round(telemetry.score)}`
     if (this.ringsEl) this.ringsEl.innerText = `${telemetry.ringsCollected}`
 
@@ -907,24 +973,77 @@ export class FlightHUD {
     // Render floating on-screen touches
     this.updateTouchVisuals(activeTouches, controlMode)
 
-    // Acro trick banner or B-Line Stall callout
+    // Acro trick banner, Wing Collapse banner, or B-Line Stall callout
     if (this.trickBannerEl) {
-      if (telemetry.isBStall) {
+      if (telemetry.isCollapsed) {
         this.trickBannerEl.style.display = 'flex'
-        this.trickBannerEl.classList.add('b-stall-banner')
+        this.trickBannerEl.className = 'acro-banner collapse-banner'
+        if (this.trickTitleEl) this.trickTitleEl.innerText = '⚠️ WING COLLAPSED • LOWER PHONE TO RECOVER'
+      } else if ((controls.speedBar ?? 0) > 0.65 && pitchDemand > 0.35) {
+        this.trickBannerEl.style.display = 'flex'
+        this.trickBannerEl.className = 'acro-banner dive-banner'
+        if (this.trickTitleEl) this.trickTitleEl.innerText = '⚡ SPEED DIVE • 85+ KM/H'
+      } else if (telemetry.isBStall) {
+        this.trickBannerEl.style.display = 'flex'
+        this.trickBannerEl.className = 'acro-banner b-stall-banner'
         if (this.trickTitleEl) this.trickTitleEl.innerText = '⚡ B-LINE STALL (-8.8 M/S DESCENT)'
       } else if (trick && trick.announcementText && trick.announcementTimer > 0) {
         this.trickBannerEl.style.display = 'flex'
-        this.trickBannerEl.classList.remove('b-stall-banner')
+        this.trickBannerEl.className = 'acro-banner'
         if (this.trickTitleEl) this.trickTitleEl.innerText = trick.announcementText
       } else if (telemetry.tumbleStreak > 0) {
         this.trickBannerEl.style.display = 'flex'
-        this.trickBannerEl.classList.remove('b-stall-banner')
+        this.trickBannerEl.className = 'acro-banner'
         if (this.trickTitleEl) this.trickTitleEl.innerText = `TUMBLE x${telemetry.tumbleStreak}!`
       } else {
         this.trickBannerEl.style.display = 'none'
-        this.trickBannerEl.classList.remove('b-stall-banner')
+        this.trickBannerEl.className = 'acro-banner'
       }
+    }
+  }
+
+  public setGyroStatus(
+    active: boolean,
+    steerDeg: number = 0,
+    elevationDeg: number = 40,
+    isCollapsed: boolean = false,
+    diveInput: number | boolean = 0,
+    flareFrac: number = 0,
+  ) {
+    if (!this.gyroLabelEl) return
+    if (active) {
+      const rounded = Math.round(steerDeg)
+      const turnStr = Math.abs(rounded) >= 1 ? (rounded > 0 ? `TURN R ${rounded}°` : `TURN L ${Math.abs(rounded)}°`) : 'STEER 0°'
+      const elevStr = `${Math.round(elevationDeg)}°`
+
+      const isDivingBool = typeof diveInput === 'boolean' ? diveInput : diveInput > 0.05
+      const divePct = typeof diveInput === 'number' ? Math.round(diveInput * 100) : 100
+
+      let stateBadge = 'GLIDE'
+      if (isCollapsed) {
+        stateBadge = 'COLLAPSE'
+      } else if (isDivingBool) {
+        stateBadge = divePct > 0 && divePct < 100 ? `DIVE ${divePct}%` : 'DIVE'
+      } else if (flareFrac > 0.05) {
+        const soarPct = Math.round(flareFrac * 100)
+        stateBadge = `SOAR ${soarPct}%`
+      }
+
+      this.gyroLabelEl.textContent = `${turnStr} • ELEV ${elevStr} [${stateBadge}]`
+      this.gyroBtnEl?.classList.add('hud-btn-active')
+      if (isCollapsed) {
+        this.gyroBtnEl?.style.setProperty('color', '#ef4444')
+      } else if (isDivingBool) {
+        this.gyroBtnEl?.style.setProperty('color', '#38bdf8')
+      } else if (flareFrac > 0.05) {
+        this.gyroBtnEl?.style.setProperty('color', '#fbbf24')
+      } else {
+        this.gyroBtnEl?.style.setProperty('color', '#34d399')
+      }
+    } else {
+      this.gyroLabelEl.textContent = 'ENABLE TILT'
+      this.gyroBtnEl?.classList.remove('hud-btn-active')
+      this.gyroBtnEl?.style.setProperty('color', '#fbbf24')
     }
   }
 }

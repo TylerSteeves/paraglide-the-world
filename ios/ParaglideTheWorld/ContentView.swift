@@ -3,7 +3,11 @@ import WebKit
 import CoreMotion
 
 struct ContentView: View {
-    @State private var serverUrlString: String = "http://192.168.40.141:5173/"
+    #if targetEnvironment(simulator)
+    @State private var serverUrlString: String = "http://127.0.0.1:5173/"
+    #else
+    @State private var serverUrlString: String = "bundled"
+    #endif
     @State private var showingSettings: Bool = false
     @State private var webView = WKWebView()
 
@@ -77,8 +81,12 @@ struct ParaglideWebView: UIViewRepresentable {
     }
 
     private func loadTarget(in view: WKWebView) {
-        if let url = URL(string: urlString) {
-            var request = URLRequest(url: url, timeoutInterval: 4.0)
+        if urlString == "bundled" {
+            loadBundledDist(in: view)
+            return
+        }
+        if let url = URL(string: urlString), url.scheme != nil {
+            var request = URLRequest(url: url, timeoutInterval: 1.5)
             request.cachePolicy = .reloadIgnoringLocalCacheData
             view.load(request)
         } else {

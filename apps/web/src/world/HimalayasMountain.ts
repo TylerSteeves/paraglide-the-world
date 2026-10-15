@@ -14,7 +14,7 @@ export class HimalayasMountain implements FlightWorld {
   public terrainMesh: Mesh
   public riverMesh: Mesh | null = null
   public thermals: ThermalZone[] = []
-  public readonly launchPosition = new Vector3(0, 4200, 10)
+  public readonly launchPosition = new Vector3(0, 5280, 20)
   public readonly launchHeadingDeg = 25.0
   private spawnedMeshes: Mesh[] = []
   private scene: Scene

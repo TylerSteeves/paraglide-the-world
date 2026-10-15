@@ -14,9 +14,9 @@ export class WhistlerMountain implements FlightWorld {
   public terrainMesh: Mesh
   public waterMesh: Mesh | null = null
   public thermals: ThermalZone[] = []
-  // Launch at Whistler Summit headwall lip (ground is at ~1770m, pilot launches at 1778m facing down the piste!)
-  public readonly launchPosition = new Vector3(0, 1778, 5)
-  public readonly launchHeadingDeg = 5.0 // Aim straight down the ski piste (Z+)
+  // Launch right at the lip of the Whistler Summit alpine ski piste (ground is at ~1759m, launching ~9m over the snow!)
+  public readonly launchPosition = new Vector3(0, 1774, 20)
+  public readonly launchHeadingDeg = 5.0 // Aim straight down the ski piste fall-line (Z+)
   private spawnedMeshes: (Mesh | any)[] = []
   private scene: Scene
 
@@ -279,20 +279,33 @@ export class WhistlerMountain implements FlightWorld {
       return seed / 233280
     }
 
-    // Line the ski piste with 180 dense pine trees flanking left and right
-    for (let i = 0; i < 180; i++) {
-      const z = 80 + (i / 180) * 2320 + (random() - 0.5) * 20
+    // Proto Slalom Gate Flag Poles (Red and Blue racing slalom markers every 40m)
+    const redPole = MeshBuilder.CreateCylinder('proto-slalom-red', { height: 3.2, diameter: 0.12 }, this.scene)
+    const redMat = new StandardMaterial('slalom-red-mat', this.scene)
+    redMat.diffuseColor = new Color3(0.96, 0.12, 0.12)
+    redPole.material = redMat
+
+    const bluePole = MeshBuilder.CreateCylinder('proto-slalom-blue', { height: 3.2, diameter: 0.12 }, this.scene)
+    const blueMat = new StandardMaterial('slalom-blue-mat', this.scene)
+    blueMat.diffuseColor = new Color3(0.12, 0.45, 0.96)
+    bluePole.material = blueMat
+
+    this.spawnedMeshes.push(redPole, redMat, bluePole, blueMat)
+
+    // Line the ski piste with 220 dense pine trees flanking close to the run edge for intense speed parallax
+    for (let i = 0; i < 220; i++) {
+      const z = 40 + (i / 220) * 2360 + (random() - 0.5) * 15
       const pisteCenter = Math.sin(z * 0.0028) * 32.0
 
-      // Alternate left and right flanks
+      // Alternate left and right flanks - tightly hug the groomed run (16m to 42m away)
       const isLeft = i % 2 === 0
       const flankOffset = isLeft
-        ? -(34.0 + random() * 85.0)
-        : +(34.0 + random() * 85.0)
+        ? -(16.0 + random() * 26.0)
+        : +(16.0 + random() * 26.0)
       const x = pisteCenter + flankOffset
       const y = this.sampleHeight(x, z)
 
-      const scale = 0.95 + random() * 0.75
+      const scale = 0.95 + random() * 0.85
 
       if (pineCanopy) {
         const cInst = pineCanopy.createInstance(`pine-canopy-${i}`)
@@ -305,10 +318,23 @@ export class WhistlerMountain implements FlightWorld {
         tInst.scaling.set(scale, scale, scale)
         this.spawnedMeshes.push(tInst)
       }
+
+      // Add racing slalom flags every ~45m down the piste
+      if (i % 3 === 0) {
+        const pole = isLeft ? redPole : bluePole
+        const pInst = pole.createInstance(`slalom-pole-${i}`)
+        const poleOffset = isLeft ? -13.0 : 13.0
+        const poleX = pisteCenter + poleOffset
+        const poleY = this.sampleHeight(poleX, z)
+        pInst.position.set(poleX, poleY + 1.6, z)
+        this.spawnedMeshes.push(pInst)
+      }
     }
 
     if (pineCanopy) pineCanopy.isVisible = false
     trunk.isVisible = false
+    redPole.isVisible = false
+    bluePole.isVisible = false
   }
 
   private scatterSpherePackedClouds() {
