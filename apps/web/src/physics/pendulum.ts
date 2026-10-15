@@ -102,6 +102,7 @@ export class ParagliderSimulation {
   public headingDeg: number = 5.0
   public pitchDeg: number = 1.2
   public bankDeg: number = 0.0
+  public rollRateDegPerSec: number = 0.0
   public airspeedKmh: number = 45.0
   private currentSinkMps: number = -1.2
 
@@ -303,6 +304,7 @@ export class ParagliderSimulation {
     this.headingDeg = initialHeadingDeg
     this.pitchDeg = 1.0
     this.bankDeg = 0
+    this.rollRateDegPerSec = 0
     this.airspeedKmh = this.wing.trimSpeedKmh || 82.0
     this.currentSinkMps = -6.2
 
@@ -362,25 +364,35 @@ export class ParagliderSimulation {
     const progressiveSteer = steerSign * Math.pow(absSteer, 1.25)
     const targetBankDeg = progressiveSteer * maxBankDeg
 
-    // Aerodynamic Roll Damping & Stability in Neutrality:
-    // When returning to center, fast recovery (14.0) firmly locks wings-level.
-    // When rolling into a turn, roll rate is a progressive 7.5 (or +spiralFrac*4.5 in dynamic maneuvers).
+    // 2nd-Order Rotational Roll Inertia (Inertial Lag -> Accelerating Bite):
+    // In real aerodynamics, a paraglider has angular inertia (I_xx) and roll damping.
+    // At t=0: rollRate starts at 0, giving that authentic "slight lag" when initiating a turn.
+    // Over 0.2-0.5s: roll rate builds smoothly and bites with power into the carve!
+    const rollError = targetBankDeg - this.bankDeg
     const isReturningRoll = Math.abs(targetBankDeg) < Math.abs(this.bankDeg)
-    const bankLerpSpeed = isReturningRoll ? 14.0 : (7.5 + spiralFrac * 4.5)
-    this.bankDeg += (targetBankDeg - this.bankDeg) * Math.min(1.0, bankLerpSpeed * frameDt)
 
-    // Coordinated Turn Rate with Positive Neutral Stability:
-    // Real paragliders track dead straight in trim flight with positive directional damping.
-    // Below 3.0° bank, turn rate is locked to 0 (zero squirrely heading creep!).
-    // Above 3.0° bank, turn rate builds smoothly with bank angle.
+    // Critically damped spring-damper constants:
+    // Entry: spring 28.0, damping 10.5 gives authentic ~0.25s inertial build-up
+    // Recovery: spring 42.0, damping 13.0 restores wings-level with crisp authority
+    const springK = isReturningRoll ? 42.0 : (28.0 + spiralFrac * 14.0)
+    const dampC = isReturningRoll ? 13.0 : (10.5 + spiralFrac * 3.5)
+
+    const rollAccel = rollError * springK - this.rollRateDegPerSec * dampC
+    this.rollRateDegPerSec += rollAccel * frameDt
+    this.bankDeg += this.rollRateDegPerSec * frameDt
+
+    // Coordinated Turn Rate with Aerodynamic Tangent Bite:
+    // Turns start off slow at low bank, then accelerate exponentially into a fast, powerful carve!
     const absBank = Math.abs(this.bankDeg)
     let turnRateDegPerSec = 0
     if (absBank > 3.0) {
-      const bankExcess = absBank - 3.0
-      const bankNorm = bankExcess / 27.0
-      const bankCurve = Math.pow(Math.min(2.0, bankNorm), 1.20)
-      const baseTurnFactor = 38.0 + spiralFrac * 48.0
-      turnRateDegPerSec = Math.sign(this.bankDeg) * bankCurve * baseTurnFactor
+      const bankRad = absBank * DEG
+      // Aerodynamic tangent factor: tan(bank) / tan(30°)
+      const tanFactor = Math.tan(Math.min(1.35, bankRad)) / Math.tan(30 * DEG)
+      // Compounding power curve: starts very gentle at low bank, surges dramatically in deep bank
+      const bitePower = Math.pow(Math.min(2.5, tanFactor), 1.65)
+      const baseTurnFactor = 36.0 + spiralFrac * 50.0
+      turnRateDegPerSec = Math.sign(this.bankDeg) * (baseTurnFactor * bitePower)
     }
     this.headingDeg = (this.headingDeg + turnRateDegPerSec * frameDt + 360) % 360
 
@@ -451,15 +463,34 @@ export class ParagliderSimulation {
     const wind = this.getAtmosphericWindAt(this.cPos, sampleTerrainHeight)
     targetSinkMps += (this.atmosphere.ridgeLiftMps || 0) + (this.atmosphere.thermalUpdraftMps || 0) * 0.85
 
-    // Punchy gravity acceleration when diving or in freefall:
+    // Forward Dive & Gravity Acceleration Dynamics:
+    // When first dipping the nose, acceleration begins with an authentic aerodynamic lag (~0.25s).
+    // As pitch steepens down the mountain slope, gravity compounds the acceleration along the fall-line,
+    // producing an intense surge and kinetic rush of speed down the mountain!
     const isCollapsing = this.collapseFrac > 0.05
-    const diveAccelMult = speedBar > 0.05 ? (1.0 + speedBar * 1.35) : 1.0
-    const speedLerp = isCollapsing ? 16.0 : (10.0 * diveAccelMult)
-    const sinkLerp = isCollapsing ? 14.0 : 10.0
-    const pitchLerp = isCollapsing ? 16.0 : 18.0
-    this.airspeedKmh += (targetAirspeedKmh - this.airspeedKmh) * Math.min(1.0, speedLerp * frameDt)
-    this.currentSinkMps += (targetSinkMps - this.currentSinkMps) * Math.min(1.0, sinkLerp * frameDt)
+    const curPitchRad = Math.max(0, this.pitchDeg) * DEG
+    const gravityComponent = Math.sin(curPitchRad) // 0 at level, ~0.75 at 49° dive
+
+    // Pitch follows aerodynamic pendulum inertia (canopy nose dips forward progressively)
+    const pitchLerp = isCollapsing ? 16.0 : (speedBar > 0.05 ? 6.5 : 12.0)
     this.pitchDeg += (targetPitchDeg - this.pitchDeg) * Math.min(1.0, pitchLerp * frameDt)
+
+    // Airspeed acceleration:
+    // When diving, starts with gentle aerodynamic lag, then surges as gravity takes over
+    let speedRate = 5.0
+    if (isCollapsing) {
+      speedRate = 16.0
+    } else if (speedBar > 0.05 && targetAirspeedKmh > this.airspeedKmh) {
+      // Compounding gravity acceleration: builds from 1.2 up to 9.2 as dive steepens
+      speedRate = 1.2 + Math.pow(gravityComponent, 1.35) * 9.2
+    } else if (dualBrake > 0.05) {
+      speedRate = 7.0
+    }
+    this.airspeedKmh += (targetAirspeedKmh - this.airspeedKmh) * Math.min(1.0, speedRate * frameDt)
+
+    // Sink rate steepens in sync with dive plunge
+    const sinkRate = isCollapsing ? 14.0 : (speedBar > 0.05 ? (3.5 + Math.pow(gravityComponent, 1.2) * 7.5) : 8.0)
+    this.currentSinkMps += (targetSinkMps - this.currentSinkMps) * Math.min(1.0, sinkRate * frameDt)
 
     // Aerobatics execution:
     let renderPitchDeg = this.pitchDeg

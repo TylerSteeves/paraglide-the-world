@@ -391,8 +391,14 @@ export class ActionCamera {
       const upRef = (sim.isLooping || sim.isRolling) ? Vector3.Up() : uTether
       const uOrbitDir = uH.scale(cosP).add(upRef.scale(sinP)).normalize()
 
+      // Centrifugal lateral camera swing during high-G turns:
+      // When carving hard, centrifugal force pushes the chase camera slightly outward on the turn radius,
+      // giving an authentic physical sensation of speed and power as the turn bites!
+      const centLag = Math.max(-0.42, Math.min(0.42, (sim.bankDeg / 45.0) * (gForce - 1.0) * 0.18))
+
       this.targetCamPos = pilotPos
         .add(uOrbitDir.scale(dist))
+        .subtract(uRight.scale(centLag))
         .add(upRef.scale(height * Math.max(0.2, 1.0 - Math.abs(sinP))))
         .add(shake)
 
