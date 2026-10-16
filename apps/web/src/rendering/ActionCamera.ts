@@ -382,7 +382,7 @@ export class ActionCamera {
       // 1. Forward Driver & 360° Rotating Orbit Perspective:
       // Perfectly frames the flyer from any angle, rotating 360° around the pilot and canopy!
       const verticalMps = sim.canopy.verticalSpeedMps || 0
-      const diveTighten = Math.min(0.45, (Math.max(0, -verticalMps) / 25.0) * 0.45)
+      const diveTighten = Math.min(0.75, (Math.max(0, -verticalMps) / 25.0) * (isSpeedwing ? 0.70 : 0.55))
       const dist = (2.35 * portraitDistMult) + this.elasticLag * 0.40 + Math.min(0.35, speedSurge * 0.012) - diveTighten
       const height = (0.78 * portraitHeightMult) + Math.min(0.18, speedSurge * 0.008) + downhillDescend * 0.20 - gHeavinessComp
 
@@ -512,13 +512,15 @@ export class ActionCamera {
 
     // Dynamic speed-tunnel FOV dilation: expands peripheral vision and creates forward speed rush
     const effectiveBaseFov = isPortrait ? 1.25 : this.baseFov
+    // Plunge boost: in steep dives, FOV immediately flares open to give the stomach-dropping speed sensation!
+    const plungeBoost = Math.min(0.28, (Math.max(0, -sim.telemetry.verticalSpeedMps - 2.5) / 20.0) * 0.28)
     const fovBoost = isSpeedwing
-      ? Math.min(0.55, Math.pow(Math.max(0, speedKmh - 65.0) / 60.0, 1.1) * 0.48)
-      : Math.min(0.32, Math.pow(Math.max(0, speedKmh - 38.0) / 45.0, 1.15) * 0.26)
+      ? Math.min(0.65, Math.pow(Math.max(0, speedKmh - 65.0) / 50.0, 1.1) * 0.50 + plungeBoost)
+      : Math.min(0.45, Math.pow(Math.max(0, speedKmh - 38.0) / 35.0, 1.15) * 0.35 + plungeBoost)
     const snapFovBoost = snapIntensity * 0.08
     const loopFovBoost = (sim.isLooping || sim.isRolling) ? 0.12 : 0
     const gTunnelFov = Math.max(0, gForce - 1.2) * 0.025
-    const targetFov = Math.min(1.65, effectiveBaseFov * (1.0 + fovBoost + snapFovBoost + loopFovBoost - gTunnelFov))
-    this.camera.fov += (targetFov - this.camera.fov) * Math.min(1.0, 12.0 * dt)
+    const targetFov = Math.min(1.72, effectiveBaseFov * (1.0 + fovBoost + snapFovBoost + loopFovBoost - gTunnelFov))
+    this.camera.fov += (targetFov - this.camera.fov) * Math.min(1.0, 14.0 * dt)
   }
 }

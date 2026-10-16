@@ -329,6 +329,7 @@ export class MobileInputManager {
     let maxSpeedBar = 0
     const h = window.innerHeight || 800
     const dragTravel = Math.max(90.0, Math.min(180.0, h * 0.18))
+    const speedBarTravel = Math.max(65.0, Math.min(115.0, h * 0.12))
 
     for (const ptr of this.activePointers.values()) {
       const dy = ptr.curY - ptr.startY
@@ -341,9 +342,9 @@ export class MobileInputManager {
         } else {
           rightBrake = Math.max(rightBrake, pull)
         }
-      } else if (dy < -14.0) {
-        // Dragging up: pushes speed bar accelerator!
-        const barPull = clamp((-dy - 14.0) / dragTravel, 0.0, 1.0)
+      } else if (dy < -8.0) {
+        // Dragging up: pushes speed bar / deep dive accelerator!
+        const barPull = clamp((-dy - 8.0) / speedBarTravel, 0.0, 1.0)
         maxSpeedBar = Math.max(maxSpeedBar, barPull)
       }
     }
@@ -414,7 +415,7 @@ export class MobileInputManager {
     // Leaning forwards reaching down to 18° (held flat in hands) gives full 100% screaming dive.
     // Tilting back gives buoyant flare hover.
     const neutral = clamp(this.neutralElevationDeg, 42.0, 72.0)
-    const deadband = 5.5
+    const deadband = 3.5
 
     if (this.smoothedElevationDeg >= 90.0) {
       this.isWingCollapsed = true
@@ -427,11 +428,12 @@ export class MobileInputManager {
       this.flareDemand = 0
       this.pitchDemand = 0
     } else if (this.smoothedElevationDeg < neutral - deadband) {
-      // Natural forward tilt travel: 100% dive reached at ~18° (comfortable hand angle)
-      const maxDownAngle = 18.0
-      const diveTravel = (neutral - deadband) - maxDownAngle
-      const norm = clamp((neutral - deadband - this.smoothedElevationDeg) / Math.max(12.0, diveTravel), 0, 1)
-      this.diveDemand = Math.pow(norm, 1.15)
+      // Natural, ergonomic forward tilt travel:
+      // A comfortable 15° forward tilt from neutral reaches 100% full deep dive!
+      const forwardLean = (neutral - deadband) - this.smoothedElevationDeg
+      const fullDiveTravel = 15.0 // 15° forward tilt reaches max dive
+      const norm = clamp(forwardLean / fullDiveTravel, 0, 1)
+      this.diveDemand = Math.pow(norm, 1.1)
       this.flareDemand = 0
       this.pitchDemand = this.diveDemand
     } else if (this.smoothedElevationDeg > neutral + deadband) {

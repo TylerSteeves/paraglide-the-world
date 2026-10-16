@@ -227,11 +227,13 @@ export class FlightSoundscape {
 
     // 1. Modulate Wind Noise: Clean laminar rush; exhilarating roar on surges & G-turns; quiet float on zero-G; screaming roar on freefall
     const isSpeedwing = wingType === 'speedwing'
-    const speedRatio = Math.max(0.1, Math.min(4.5, airspeedKmh / (isSpeedwing ? 70.0 : 45.0)))
+    const speedRatio = Math.max(0.1, Math.min(4.8, airspeedKmh / (isSpeedwing ? 70.0 : 42.0)))
     const gHeaviness = Math.max(0, gForce - 1.0)
     const zeroGFloat = Math.max(0, 1.0 - gForce)
-    let targetGain = (0.08 + Math.pow(speedRatio, 1.45) * (isSpeedwing ? 0.28 : 0.16) + gHeaviness * 0.22) * (1.0 - zeroGFloat * 0.35)
-    let targetFreq = (340 + Math.pow(speedRatio, 1.55) * (isSpeedwing ? 1450 : 920) + gHeaviness * 650) * (1.0 - zeroGFloat * 0.25)
+    // Plunge rush: in steep dives, wind screams with roaring airframe pressure!
+    const plungeNoise = Math.max(0, -verticalSpeedMps - 3.0) / 20.0
+    let targetGain = (0.08 + Math.pow(speedRatio, 1.45) * (isSpeedwing ? 0.32 : 0.18) + gHeaviness * 0.22 + plungeNoise * 0.35) * (1.0 - zeroGFloat * 0.35)
+    let targetFreq = (340 + Math.pow(speedRatio, 1.55) * (isSpeedwing ? 1650 : 1050) + gHeaviness * 650 + plungeNoise * 1800) * (1.0 - zeroGFloat * 0.25)
 
     if (isCollapsed || collapseFrac > 0.05) {
       // Freefall plunge: screaming wind roar as pilot plummets downward!
@@ -243,8 +245,8 @@ export class FlightSoundscape {
       targetFreq = 220
     }
 
-    this.windGain.gain.setTargetAtTime(Math.min(0.88, targetGain), this.ctx.currentTime, 0.05)
-    this.windFilter.frequency.setTargetAtTime(Math.min(4200, targetFreq), this.ctx.currentTime, 0.05)
+    this.windGain.gain.setTargetAtTime(Math.min(0.96, targetGain), this.ctx.currentTime, 0.04)
+    this.windFilter.frequency.setTargetAtTime(Math.min(5500, targetFreq), this.ctx.currentTime, 0.04)
 
     // 2. Aeolian Line Whistle (Singing Lines)
     // Resonates when lines are taut and fast; cuts out when lines go slack or wing collapses
@@ -252,12 +254,12 @@ export class FlightSoundscape {
     if (isSlack || airspeedKmh < 28) {
       this.lineWhistleGain.gain.setTargetAtTime(0, this.ctx.currentTime, 0.05)
     } else {
-      const tensionFrac = Math.min(3.0, lineTensionN / 860.0)
-      const baseWhistle = isSpeedwing ? 2100 : 1500
-      const whistleFreq = baseWhistle + (airspeedKmh / 50.0) * (isSpeedwing ? 1400 : 850) + (tensionFrac - 1.0) * 950
-      const whistleGain = Math.min(isSpeedwing ? 0.22 : 0.10, 0.022 * speedRatio * Math.min(2.0, tensionFrac))
-      this.lineWhistleOsc.frequency.setTargetAtTime(whistleFreq, this.ctx.currentTime, 0.04)
-      this.lineWhistleGain.gain.setTargetAtTime(whistleGain, this.ctx.currentTime, 0.05)
+      const tensionFrac = Math.min(3.5, lineTensionN / 860.0)
+      const baseWhistle = isSpeedwing ? 2200 : 1600
+      const whistleFreq = baseWhistle + (airspeedKmh / 45.0) * (isSpeedwing ? 1650 : 950) + (tensionFrac - 1.0) * 1100 + plungeNoise * 850
+      const whistleGain = Math.min(isSpeedwing ? 0.26 : 0.14, (0.024 * speedRatio + plungeNoise * 0.08) * Math.min(2.5, tensionFrac))
+      this.lineWhistleOsc.frequency.setTargetAtTime(whistleFreq, this.ctx.currentTime, 0.035)
+      this.lineWhistleGain.gain.setTargetAtTime(whistleGain, this.ctx.currentTime, 0.04)
     }
 
     // 3. Trailing Edge Flutter & High-G Line Tension Groan & Deflated Canopy Buffeting

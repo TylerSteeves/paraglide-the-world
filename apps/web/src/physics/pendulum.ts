@@ -378,9 +378,9 @@ export class ParagliderSimulation {
     // Speedwing: 74 km/h trim, -2.45 m/s sink. Uncapped Dive: 195 km/h, -42.0 m/s sink, pitch up to 78°!
     const baseTrimSpeed = isSpeedwing ? 74.0 : (isParamotor ? 48.0 : 38.0)
     const baseTrimSink = isSpeedwing ? -2.45 : (isParamotor ? -1.40 : -1.05)
-    const maxDiveSpeed = isSpeedwing ? 195.0 : (isParamotor ? 86.0 : 58.0)
-    const maxDiveSink = isSpeedwing ? -42.0 : (isParamotor ? -12.0 : -5.2)
-    const maxDivePitch = isSpeedwing ? 78.0 : 36.0
+    const maxDiveSpeed = isSpeedwing ? 210.0 : (isParamotor ? 95.0 : 115.0)
+    const maxDiveSink = isSpeedwing ? -52.0 : (isParamotor ? -16.0 : -24.0)
+    const maxDivePitch = isSpeedwing ? 82.0 : 58.0
     const minFlareSpeed = isSpeedwing ? 36.0 : (isParamotor ? 24.0 : 18.0)
 
     const spiralFrac = isSpeedwing ? clamp(Math.min(absSteer * 1.25, speedBar * 1.25), 0, 1) : 0
@@ -445,10 +445,12 @@ export class ParagliderSimulation {
       targetSinkMps = -38.0 * Math.pow(this.collapseFrac, 0.75)
       targetPitchDeg = 65.0 * this.collapseFrac
     } else if (speedBar > 0.01) {
-      // Speed Bar (accelerator system pulls A-risers, lower AoA, higher speed):
-      targetAirspeedKmh = baseTrimSpeed + speedBar * (maxDiveSpeed - baseTrimSpeed)
-      targetSinkMps = baseTrimSink + speedBar * (maxDiveSink - baseTrimSink) - spiralFrac * 8.0
-      targetPitchDeg = 1.0 + speedBar * (maxDivePitch - 1.0)
+      // Speed Bar & Deep Dive Accelerator:
+      // Snappy progressive curve: small bar nudges trim; deep push drops nose into high-speed gravity fall-line!
+      const diveCurve = Math.pow(speedBar, 1.15)
+      targetAirspeedKmh = baseTrimSpeed + diveCurve * (maxDiveSpeed - baseTrimSpeed)
+      targetSinkMps = baseTrimSink + diveCurve * (maxDiveSink - baseTrimSink) - spiralFrac * 12.0
+      targetPitchDeg = 1.0 + diveCurve * (maxDivePitch - 1.0)
     } else if (dualBrake > 0.02) {
       // Symmetrical Dual Brake:
       if (dualBrake <= 0.35) {
@@ -509,36 +511,38 @@ export class ParagliderSimulation {
     const curPitchRad = Math.max(0, this.pitchDeg) * DEG
     const gravityComponent = Math.sin(curPitchRad) // 0 at level, ~0.75 at 49° dive
 
-    // Pitch follows aerodynamic pendulum inertia (canopy nose dips forward progressively)
-    const pitchLerp = isCollapsing ? 16.0 : (speedBar > 0.05 ? 8.5 : 12.0)
+    // Pitch follows aerodynamic pendulum inertia:
+    // In deep dives, canopy bites immediately (26.0 rate), dropping nose into the plunge in <200ms!
+    const pitchLerp = isCollapsing ? 16.0 : (speedBar > 0.05 ? 26.0 : 12.0)
     this.pitchDeg += (targetPitchDeg - this.pitchDeg) * Math.min(1.0, pitchLerp * frameDt)
 
     // Airspeed acceleration & momentum retention:
-    // When whipping into a turn or diving, gravity compounds acceleration down the fall-line.
-    // When leveling out, aerodynamic parasite drag decelerates slowly (0.25), sustaining tremendous swoop speed!
+    // In a deep dive, gravitational force a = g * sin(pitch) accelerates the wing instantly down the fall-line!
+    // As pitch angle steepens and forward speed increases, acceleration compounds aggressively!
     let speedRate = 0.25
     if (isCollapsing) {
       speedRate = 16.0
     } else if (targetAirspeedKmh > this.airspeedKmh) {
+      const gravityPull = Math.max(0.18, gravityComponent)
       if (isSpeedwing) {
-        // Explosive dive acceleration: reaches up to 26.0 as dive steepens to 78°!
-        speedRate = 4.0 + Math.pow(gravityComponent, 1.05) * 22.0
+        // Speedwing rocket acceleration: starts at 10.0 and ramps up to 38.0!
+        speedRate = 10.0 + gravityPull * 28.0
       } else {
-        speedRate = 1.6 + Math.pow(gravityComponent, 1.15) * 11.5
+        // Paraglider deep dive: snappy, energetic ramp-up starting at 6.5 up to 24.0!
+        speedRate = 6.5 + gravityPull * 17.5
       }
     } else if (dualBrake > 0.05) {
-      speedRate = isSpeedwing ? 12.0 : 7.5
+      speedRate = isSpeedwing ? 14.0 : 8.5
     }
     this.airspeedKmh += (targetAirspeedKmh - this.airspeedKmh) * Math.min(1.0, speedRate * frameDt)
 
     // Sink rate dynamics:
-    // In speedwing dive: plunges instantly down the mountain face up to -42 m/s!
-    // In paraglider thermalling: snappy buoyant loft (sinkRate 12.5) into the lift column!
+    // In deep dives, vertical descent plunges aggressively with pitch:
     const sinkRate = isCollapsing
-      ? 14.0
+      ? 16.0
       : isSpeedwing
-      ? (speedBar > 0.05 ? (9.5 + Math.pow(gravityComponent, 1.05) * 18.5) : 10.0)
-      : (rawUpdraft > 0.15 ? 12.5 : 8.0)
+      ? (speedBar > 0.05 ? (15.0 + Math.max(0.15, gravityComponent) * 24.0) : 10.0)
+      : (speedBar > 0.05 ? (12.0 + Math.max(0.15, gravityComponent) * 18.0) : (rawUpdraft > 0.15 ? 12.5 : 8.0))
     this.currentSinkMps += (targetSinkMps - this.currentSinkMps) * Math.min(1.0, sinkRate * frameDt)
 
     // Aerobatics execution:
