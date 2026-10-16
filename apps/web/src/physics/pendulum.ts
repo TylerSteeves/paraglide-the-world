@@ -355,42 +355,47 @@ export class ParagliderSimulation {
     if (this.isCrashed) return
     const frameDt = clamp(dt, 0.001, MAX_FRAME_DT)
 
-    // 1. Roll & Coordinated Bank Steering (with Spiral Coupling):
-    // Controls: weightShift is normalized [-1.0, 1.0]
-    // Brake steering asymmetry: (rightBrake - leftBrake) also contributes to turn
-    const brakeDiff = (this.controls.rightBrake || 0) - (this.controls.leftBrake || 0)
-    const steerInput = this.controls.weightShift || 0
-    // Coordinated steering: weightShift provides the smooth roll command;
-    // inside brake adds progressive carve authority in deep turns without deadband thresholding
-    const combinedSteer = clamp(
-      steerInput + (1.0 - Math.abs(steerInput) * 0.4) * brakeDiff,
-      -1.0,
-      1.0,
-    )
+    // 1. First-Principles Independent Dual-Brake Line Aerodynamics & Finite Motor Control:
+    const leftBrake = clamp(this.controls.leftBrake || 0, 0, 1)
+    const rightBrake = clamp(this.controls.rightBrake || 0, 0, 1)
+    const brakeDiff = rightBrake - leftBrake // [-1.0, 1.0]: Asymmetric trailing edge deflection
+    const dualBrake = Math.min(leftBrake, rightBrake) // Symmetric brake [0, 1] for polar modulation & flare
+    const weightShift = clamp(this.controls.weightShift || 0, -1, 1) // Harness hip shift [-1.0, 1.0]
     const speedBar = clamp((this.controls.speedBar ?? 0) + (this.controls.pullingA ?? 0), 0, 1)
-    const dualBrake = clamp(Math.min(this.controls.leftBrake ?? 0, this.controls.rightBrake ?? 0), 0, 1)
 
-    // Progressive Carve Law (Cool Boarders edge carving & fine motor precision):
-    // - Micro-trim region (absSteer < 0.20): gentle polynomial curve maps 0-20% input to 0-7.5° bank.
-    //   Allows ultra-precise, smooth micro-adjustments to thread hoops without overshooting!
-    // - Deep carve region (absSteer >= 0.20): linear progression up to 48° (or 66° in high-G spiral).
-    const absSteer = Math.abs(combinedSteer)
-    const spiralFrac = clamp(Math.min(absSteer * 1.25, speedBar * 1.25), 0, 1)
-    const maxBankDeg = 48.0 + spiralFrac * 18.0
+    // Coordinated steering demand:
+    // Trailing edge asymmetric brake drag gives immediate, finite yaw authority.
+    // Harness weight shift tilts the pilot's weight in the carabiners, smoothly rolling the wing.
+    // Together, they allow millimetric, finite control over heading and bank for flocking and thermal coring!
+    const steerDemand = clamp(brakeDiff + weightShift * (0.65 + 0.35 * (1.0 - Math.abs(brakeDiff))), -1.0, 1.0)
+    const absSteer = Math.abs(steerDemand)
 
-    const steerMag = Math.sign(combinedSteer) * (
-      absSteer < 0.20
-        ? Math.pow(absSteer / 0.20, 1.35) * 0.16
-        : 0.16 + ((absSteer - 0.20) / 0.80) * 0.84
-    )
-    const targetBankDeg = steerMag * maxBankDeg
+    const isSpeedwing = this.currentWingType === 'speedwing'
+    const isParamotor = this.currentWingType === 'paramotor'
 
-    // Direct, Tight Rotational Roll Dynamics:
+    // Authentic Aerodynamic Flight Performance Profiles:
+    // Paraglider: 38 km/h trim, -1.05 m/s sink. Minimum sink: 32 km/h, -0.92 m/s sink! Floats in any thermal!
+    // Speedwing: 65 km/h trim, -1.85 m/s sink. Uncapped Dive: 188 km/h, -35.0 m/s sink, pitch up to 72°!
+    const baseTrimSpeed = isSpeedwing ? 65.0 : (isParamotor ? 48.0 : 38.0)
+    const baseTrimSink = isSpeedwing ? -1.85 : (isParamotor ? -1.40 : -1.05)
+    const maxDiveSpeed = isSpeedwing ? 188.0 : (isParamotor ? 86.0 : 58.0)
+    const maxDiveSink = isSpeedwing ? -35.0 : (isParamotor ? -12.0 : -5.2)
+    const maxDivePitch = isSpeedwing ? 72.0 : 36.0
+    const minFlareSpeed = isSpeedwing ? 32.0 : (isParamotor ? 24.0 : 18.0)
+
+    const spiralFrac = isSpeedwing ? clamp(Math.min(absSteer * 1.25, speedBar * 1.25), 0, 1) : 0
+    const maxBankDeg = isSpeedwing ? (48.0 + spiralFrac * 18.0) : 38.0
+
+    // Continuous, finite bank angle:
+    // Small inputs (e.g. 5% brake) smoothly command ~1.9° bank for sub-degree flocking trims.
+    // Deep inputs (> 50%) command full carving banks up to 38° (or 66° in high-G speedwing spiral).
+    const targetBankDeg = steerDemand * maxBankDeg + (this.thermalRollTorqueDeg || 0)
+
+    // Dynamic Roll Response (first-principles roll damping):
     const rollError = targetBankDeg - this.bankDeg
     const isReturningRoll = Math.abs(targetBankDeg) < Math.abs(this.bankDeg) || absSteer < 0.005
-
-    const springK = isReturningRoll ? (absSteer < 0.005 ? 45.0 : 36.0) : 28.0
-    const dampC = isReturningRoll ? (absSteer < 0.005 ? 15.0 : 12.5) : 10.5
+    const springK = isReturningRoll ? (absSteer < 0.005 ? 38.0 : 28.0) : 22.0
+    const dampC = isReturningRoll ? (absSteer < 0.005 ? 13.0 : 10.5) : 9.0
 
     const rollAccel = rollError * springK - this.rollRateDegPerSec * dampC
     this.rollRateDegPerSec += rollAccel * frameDt
@@ -398,35 +403,21 @@ export class ParagliderSimulation {
 
     const absBank = Math.abs(this.bankDeg)
 
-    const isSpeedwing = this.currentWingType === 'speedwing'
-    const isParamotor = this.currentWingType === 'paramotor'
-
-    // Authentic Unrestrained Flight Performance Profiles:
-    // Speedwing: 65 km/h trim, gentle -1.85 m/s sink.
-    // Uncapped Dive: 188 km/h, -35.0 m/s sink, pitch up to 72° nose-down down the mountain fall-line!
-    // Paraglider: 48 km/h trim, -1.25 m/s sink. Max dive: 135 km/h, -24.0 m/s sink, pitch up to 62°!
-    const baseTrimSpeed = isSpeedwing ? 65.0 : (isParamotor ? 58.0 : 48.0)
-    const baseTrimSink = isSpeedwing ? -1.85 : (isParamotor ? -1.50 : -1.25)
-    const maxDiveSpeed = isSpeedwing ? 188.0 : (isParamotor ? 120.0 : 135.0)
-    const maxDiveSink = isSpeedwing ? -35.0 : (isParamotor ? -18.0 : -24.0)
-    const maxDivePitch = isSpeedwing ? 72.0 : 62.0
-    const minFlareSpeed = isSpeedwing ? 32.0 : (isParamotor ? 24.0 : 20.0)
-
-    // Solid Heading Lock & Progressive Carve Turn Authority:
-    // When hands are off (steer < 0.005 and bank < 0.65°): locks heading strictly straight (0 drift).
-    // In flight: bank angle directly drives coordinated centripetal turn rate (1.55°/s per deg bank).
-    // Inside brake carve: pulling inside brake adds progressive edge bite (+36°/s on full deflection) for Cool Boarders carving!
-    if (absSteer < 0.005 && absBank < 0.65) {
+    // Solid Heading Lock when neutral; Proportional, finite turn rate when commanding:
+    if (absSteer < 0.005 && absBank < 0.45 && Math.abs(this.thermalRollTorqueDeg || 0) < 0.05) {
       this.turnRateDegPerSec = 0
       this.bankDeg = 0
       this.rollRateDegPerSec = 0
     } else {
       const speedScale = Math.min(1.35, Math.max(0.75, this.airspeedKmh / baseTrimSpeed))
-      const brakeCarve = brakeDiff * 36.0 * speedScale
-      const bankCarve = this.bankDeg * 1.55 * speedScale
-      const spiralCarve = Math.sign(this.bankDeg) * spiralFrac * 26.0
-      const targetTurnRate = bankCarve + brakeCarve + spiralCarve
-      const turnFollow = isReturningRoll ? 24.0 : 18.0
+      // Coordinated turn: centripetal acceleration a_c = g * tan(bank)
+      const bankRad = this.bankDeg * DEG
+      const centripetalTurnRate = (9.81 * Math.tan(bankRad) / Math.max(4.0, this.airspeedKmh / 3.6)) * (180.0 / Math.PI)
+      // Direct aerodynamic yaw from trailing-edge brake deflection:
+      const brakeYaw = brakeDiff * (isSpeedwing ? 32.0 : 22.0) * speedScale
+      const spiralYaw = Math.sign(this.bankDeg) * spiralFrac * 26.0
+      const targetTurnRate = centripetalTurnRate + brakeYaw + spiralYaw
+      const turnFollow = isReturningRoll ? 22.0 : 16.0
       this.turnRateDegPerSec += (targetTurnRate - this.turnRateDegPerSec) * Math.min(1.0, turnFollow * frameDt)
       this.headingDeg = (this.headingDeg + this.turnRateDegPerSec * frameDt + 360) % 360
     }
@@ -441,12 +432,10 @@ export class ParagliderSimulation {
     }
     this.isCollapsed = this.collapseFrac > 0.15
 
-    // Altitude-Preserving Carving:
-    // Normal turns maintain altitude! Sink only slightly increases with load factor (1/cos(bank) - 1).
-    // In a 30° bank, sink rate is only -2.05 m/s, NOT plunging into the ground!
+    // Authentic Polar Curve & Speed Envelope:
     const bankRad = absBank * DEG
-    const bankInducedSink = (1.0 / Math.max(0.2, Math.cos(bankRad)) - 1.0) * 1.2
-    let targetAirspeedKmh = baseTrimSpeed + (absBank / 45.0) * 8.0
+    const bankInducedSink = (1.0 / Math.max(0.2, Math.cos(bankRad)) - 1.0) * 0.95
+    let targetAirspeedKmh = baseTrimSpeed + (absBank / 45.0) * 4.0
     let targetSinkMps = baseTrimSink - bankInducedSink
     let targetPitchDeg = 1.0
 
@@ -456,20 +445,35 @@ export class ParagliderSimulation {
       targetSinkMps = -38.0 * Math.pow(this.collapseFrac, 0.75)
       targetPitchDeg = 65.0 * this.collapseFrac
     } else if (speedBar > 0.01) {
-      // Real Mountain Dive & High-G Fall-Line Plunge:
-      // Leaning forward lets the pilot dive with real paraglider speeds up to 188 km/h and -35 m/s sink!
+      // Speed Bar (accelerator system pulls A-risers, lower AoA, higher speed):
       targetAirspeedKmh = baseTrimSpeed + speedBar * (maxDiveSpeed - baseTrimSpeed)
       targetSinkMps = baseTrimSink + speedBar * (maxDiveSink - baseTrimSink) - spiralFrac * 8.0
       targetPitchDeg = 1.0 + speedBar * (maxDivePitch - 1.0)
     } else if (dualBrake > 0.02) {
-      // Dynamic Flare Climb & Hover:
-      // Converts speed into buoyant climb up to +3.5 m/s!
-      const hoverFactor = clamp(dualBrake / 0.70, 0, 1)
-      const speedExcess = Math.max(0, this.airspeedKmh - baseTrimSpeed * 0.75) / 25.0
-      const dynamicClimb = hoverFactor * (isSpeedwing ? 4.5 : 3.0) * speedExcess
-      targetAirspeedKmh = baseTrimSpeed - hoverFactor * (baseTrimSpeed - minFlareSpeed)
-      targetSinkMps = baseTrimSink + hoverFactor * Math.abs(baseTrimSink) + dynamicClimb
-      targetPitchDeg = 1.0 - hoverFactor * 14.0
+      // Symmetrical Dual Brake:
+      if (dualBrake <= 0.35) {
+        // Minimum Sink Mode (hands at chest / ~20% brake):
+        // Airfoil enters high-lift camber without excess drag.
+        // Airspeed decreases to ~32 km/h; sink rate drops to floaty -0.92 m/s!
+        const minSinkFrac = dualBrake / 0.35
+        targetAirspeedKmh = baseTrimSpeed - minSinkFrac * 6.0
+        targetSinkMps = baseTrimSink + minSinkFrac * 0.13 // -1.05 -> -0.92 m/s!
+        targetPitchDeg = 1.0 - minSinkFrac * 2.0
+      } else if (dualBrake <= 0.70) {
+        // Half to Three-Quarter Brake (slow flight / steep descent):
+        const deepFrac = (dualBrake - 0.35) / 0.35
+        targetAirspeedKmh = 32.0 - deepFrac * 6.0
+        targetSinkMps = -0.92 - deepFrac * 0.45 // -0.92 -> -1.37 m/s
+        targetPitchDeg = -1.0 - deepFrac * 3.0
+      } else {
+        // Full Flare (hands buried): converts remaining kinetic energy into buoyant climb up to +2.5 m/s!
+        const flareFrac = (dualBrake - 0.70) / 0.30
+        const speedExcess = Math.max(0, this.airspeedKmh - 22.0) / 20.0
+        const dynamicClimb = flareFrac * 3.2 * speedExcess
+        targetAirspeedKmh = 26.0 - flareFrac * (26.0 - minFlareSpeed)
+        targetSinkMps = -1.37 + flareFrac * 1.37 + dynamicClimb
+        targetPitchDeg = -4.0 - flareFrac * 10.0
+      }
     }
 
     // Paramotor throttle support (if active)
@@ -706,16 +710,28 @@ export class ParagliderSimulation {
     this.atmosphere.ridgeLiftMps = ridgeLiftMps
 
     let thermalUpdraft = 0
+    let thermalRollTorque = 0
     if (this.world && this.world.sampleUpdraft) {
+      const tSec = this.telemetry.flightDurationSeconds || 0
+      const windObj = { x: baseWind.x, y: baseWind.y, z: baseWind.z }
       thermalUpdraft = this.world.sampleUpdraft(
         pos.x,
         pos.y,
         pos.z,
-        this.telemetry.flightDurationSeconds || 0,
-        { x: baseWind.x, y: baseWind.y, z: baseWind.z },
+        tSec,
+        windObj,
       )
+      // Spanwise thermal lift differential:
+      // When one wingtip brushes against a thermal column, that wing experiences higher updraft,
+      // rolling the wing away from the thermal and communicating the invisible lift current physically to the pilot!
+      const tips = this.getWingTipPositions()
+      const upLeft = this.world.sampleUpdraft(tips.left.x, tips.left.y, tips.left.z, tSec, windObj)
+      const upRight = this.world.sampleUpdraft(tips.right.x, tips.right.y, tips.right.z, tSec, windObj)
+      // Right wingtip higher updraft -> rolls left (negative bank torque away from thermal)
+      thermalRollTorque = clamp((upLeft - upRight) * 1.85, -8.0, 8.0)
     }
     this.atmosphere.thermalUpdraftMps = thermalUpdraft
+    this.thermalRollTorqueDeg = thermalRollTorque
 
     return baseWind
   }

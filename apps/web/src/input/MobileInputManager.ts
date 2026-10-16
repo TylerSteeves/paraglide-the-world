@@ -53,9 +53,13 @@ export class MobileInputManager {
   public leftLagFrac: number = 0
   public rightLagFrac: number = 0
   public touchSteer: number = 0
+  public touchLeftBrake: number = 0
+  public touchRightBrake: number = 0
+  public touchSpeedBar: number = 0
   public touchDive: number = 0
   public touchFlare: number = 0
   public isTouchSteering: boolean = false
+  private activePointers: Map<number, { side: 'left' | 'right'; startX: number; startY: number; curX: number; curY: number }> = new Map()
 
   // Control mode & settings
   public controlMode: ControlMode = 'direct-tilt'
@@ -233,11 +237,13 @@ export class MobileInputManager {
       this.keysDown.delete(e.code)
     })
 
-    // 3. Touch Screen Aerobatics: Double-tap & Quick Swipe
+    // 3. Dual Independent Brake Toggle Multi-Touch System:
+    // Left side of screen controls Left Brake Toggle.
+    // Right side of screen controls Right Brake Toggle.
+    // Dragging down pulls that toggle down with 100% linear, finite precision!
+    // Dragging both down enters Minimum Sink float or flares!
+    // Dragging up engages Speed Bar!
     let lastTapTime = 0
-    let touchStartX = 0
-    let touchStartY = 0
-    let touchStartTime = 0
 
     window.addEventListener(
       'pointerdown',
@@ -246,23 +252,17 @@ export class MobileInputManager {
         if (target && target.closest && target.closest('button, .hud-pill, .guide-card, a')) {
           return
         }
-        touchStartX = e.clientX
-        touchStartY = e.clientY
-        touchStartTime = performance.now()
-
         const w = window.innerWidth || 400
-        if (e.clientX < w * 0.48) {
-          const norm = clamp((w * 0.48 - e.clientX) / (w * 0.44), 0.0, 1.0)
-          this.touchSteer = -Math.pow(norm, 1.25)
-          this.isTouchSteering = true
-        } else if (e.clientX > w * 0.52) {
-          const norm = clamp((e.clientX - w * 0.52) / (w * 0.44), 0.0, 1.0)
-          this.touchSteer = Math.pow(norm, 1.25)
-          this.isTouchSteering = true
-        } else {
-          this.touchSteer = 0
-          this.isTouchSteering = true
-        }
+        const side: 'left' | 'right' = e.clientX < w * 0.5 ? 'left' : 'right'
+        this.activePointers.set(e.pointerId, {
+          side,
+          startX: e.clientX,
+          startY: e.clientY,
+          curX: e.clientX,
+          curY: e.clientY,
+        })
+        this.isTouchSteering = true
+        this.recomputeTouchControls()
       },
       { passive: true },
     )
@@ -270,99 +270,94 @@ export class MobileInputManager {
     window.addEventListener(
       'pointermove',
       (e) => {
-        if (!this.isTouchSteering) return
-        const w = window.innerWidth || 400
-        const h = window.innerHeight || 800
-
-        // Continuous horizontal analog steering:
-        if (e.clientX < w * 0.48) {
-          const norm = clamp((w * 0.48 - e.clientX) / (w * 0.44), 0.0, 1.0)
-          this.touchSteer = -Math.pow(norm, 1.25)
-        } else if (e.clientX > w * 0.52) {
-          const norm = clamp((e.clientX - w * 0.52) / (w * 0.44), 0.0, 1.0)
-          this.touchSteer = Math.pow(norm, 1.25)
-        } else {
-          this.touchSteer = 0
-        }
-
-        // Vertical thumb dragging for intuitive dive/flare control on touchscreen:
-        const dy = e.clientY - touchStartY
-        if (dy < -22) {
-          // Drag up -> Speedbar / dive
-          this.touchDive = clamp((-dy - 22) / (h * 0.24), 0.0, 1.0)
-          this.touchFlare = 0
-        } else if (dy > 22) {
-          // Drag down -> Flare / brakes
-          this.touchFlare = clamp((dy - 22) / (h * 0.24), 0.0, 1.0)
-          this.touchDive = 0
-        } else {
-          this.touchDive = 0
-          this.touchFlare = 0
-        }
+        const ptr = this.activePointers.get(e.pointerId)
+        if (!ptr) return
+        ptr.curX = e.clientX
+        ptr.curY = e.clientY
+        this.recomputeTouchControls()
       },
       { passive: true },
     )
 
-    const stopTouchSteer = () => {
-      this.isTouchSteering = false
-      this.touchSteer = 0
-      this.touchDive = 0
-      this.touchFlare = 0
-    }
-    window.addEventListener('pointercancel', stopTouchSteer, { passive: true })
-
-    window.addEventListener(
-      'pointerup',
-      (e) => {
-        stopTouchSteer()
-        // Ignore if clicking on UI interactive buttons
-        const target = e.target as HTMLElement | null
-        if (target && target.closest && target.closest('button, .hud-pill, .guide-card, a')) {
-          return
-        }
-
-        const now = performance.now()
-        const dt = now - touchStartTime
-        const dx = e.clientX - touchStartX
-        const dy = e.clientY - touchStartY
+    const onPointerEnd = (e: PointerEvent) => {
+      const ptr = this.activePointers.get(e.pointerId)
+      if (ptr) {
+        const dx = e.clientX - ptr.startX
+        const dy = e.clientY - ptr.startY
         const dist = Math.hypot(dx, dy)
-
-        // Fast Flick / Swipe gesture (< 350ms):
-        if (dt < 350 && dist > 45) {
-          if (Math.abs(dy) > Math.abs(dx) && dy < -40) {
-            // Flick up -> Loop / Flip!
-            this.onTriggerLoop?.()
-            return
-          } else if (Math.abs(dx) > Math.abs(dy)) {
-            if (dx < -40) {
-              this.onTriggerRoll?.(-1)
-              return
-            } else if (dx > 40) {
-              this.onTriggerRoll?.(1)
-              return
-            }
-          }
-        }
-
-        // Tap / Double-tap (< 250ms, < 20px movement):
-        if (dt < 250 && dist < 20) {
+        // Double-tap or quick flick gesture for aerobatics:
+        const now = performance.now()
+        if (dist > 45 && Math.abs(dy) > Math.abs(dx) && dy < -40) {
+          this.onTriggerLoop?.()
+        } else if (dist < 20) {
           if (now - lastTapTime < 350) {
-            // Double-tap detected!
-            if (e.clientX < window.innerWidth * 0.3) {
-              this.onTriggerRoll?.(-1) // Left barrel roll
-            } else if (e.clientX > window.innerWidth * 0.7) {
-              this.onTriggerRoll?.(1)  // Right barrel roll
+            if (e.clientX < (window.innerWidth || 400) * 0.35) {
+              this.onTriggerRoll?.(-1)
+            } else if (e.clientX > (window.innerWidth || 400) * 0.65) {
+              this.onTriggerRoll?.(1)
             } else {
-              this.onTriggerLoop?.()   // Center double-tap -> Loop / Flip!
+              this.onTriggerLoop?.()
             }
             lastTapTime = 0
           } else {
             lastTapTime = now
           }
         }
-      },
-      { passive: true },
-    )
+        this.activePointers.delete(e.pointerId)
+      }
+
+      if (this.activePointers.size === 0) {
+        this.isTouchSteering = false
+        this.touchLeftBrake = 0
+        this.touchRightBrake = 0
+        this.touchSpeedBar = 0
+        this.touchSteer = 0
+        this.touchDive = 0
+        this.touchFlare = 0
+      } else {
+        this.recomputeTouchControls()
+      }
+    }
+
+    window.addEventListener('pointerup', onPointerEnd, { passive: true })
+    window.addEventListener('pointercancel', onPointerEnd, { passive: true })
+  }
+
+  private recomputeTouchControls(): void {
+    let leftBrake = 0
+    let rightBrake = 0
+    let maxSpeedBar = 0
+    const h = window.innerHeight || 800
+    const dragTravel = Math.max(90.0, Math.min(180.0, h * 0.18))
+
+    for (const ptr of this.activePointers.values()) {
+      const dy = ptr.curY - ptr.startY
+      if (dy > 3.0) {
+        // Dragging down: pulls brake toggle on this side!
+        const pull = clamp((dy - 3.0) / dragTravel, 0.0, 1.0)
+        // Smooth linear response gives direct 1:1 finger connection to the brake lines:
+        if (ptr.side === 'left') {
+          leftBrake = Math.max(leftBrake, pull)
+        } else {
+          rightBrake = Math.max(rightBrake, pull)
+        }
+      } else if (dy < -14.0) {
+        // Dragging up: pushes speed bar accelerator!
+        const barPull = clamp((-dy - 14.0) / dragTravel, 0.0, 1.0)
+        maxSpeedBar = Math.max(maxSpeedBar, barPull)
+      }
+    }
+
+    this.touchLeftBrake = leftBrake
+    this.touchRightBrake = rightBrake
+    this.leftThumbYFrac = leftBrake
+    this.rightThumbYFrac = rightBrake
+    this.leftLagFrac = leftBrake
+    this.rightLagFrac = rightBrake
+    this.touchSpeedBar = maxSpeedBar
+    this.touchSteer = rightBrake - leftBrake
+    this.touchDive = maxSpeedBar
+    this.touchFlare = Math.min(leftBrake, rightBrake)
   }
 
   private processMotion(rawRoll: number, rawElev: number, dt: number) {
@@ -399,13 +394,8 @@ export class MobileInputManager {
     const rollDelta = this.smoothedRollDeg - this.neutralRollDeg
     const absRoll = Math.abs(rollDelta)
 
-    if (absRoll < 3.2 && !this.needAutoCalibration) {
-      // Gentle auto-trim while holding phone steady in the middle
-      this.neutralRollDeg += (this.smoothedRollDeg - this.neutralRollDeg) * Math.min(1.0, 0.35 * dt)
-    }
-
-    const DEADBAND_ROLL = 3.2
-    const MAX_ROLL = 22.0
+    const DEADBAND_ROLL = 1.0
+    const MAX_ROLL = 24.0
 
     if (absRoll < DEADBAND_ROLL) {
       this.tiltWeightShift = 0
@@ -460,71 +450,60 @@ export class MobileInputManager {
   }
 
   public update(dt: number, ..._rest: any[]): void {
-    // 1. Steering & Roll:
-    let netRoll = 0
-    if (this.isTouchSteering && Math.abs(this.touchSteer) > 0.005) {
-      netRoll = this.touchSteer
-    } else if (this.isMotionActive) {
-      netRoll = this.tiltWeightShift
-    } else {
-      // Desktop keyboard fallback
-      if (this.keysDown.has('ArrowLeft') || this.keysDown.has('KeyA')) netRoll -= 1.0
-      if (this.keysDown.has('ArrowRight') || this.keysDown.has('KeyD')) netRoll += 1.0
-      if (this.isTouchSteering && Math.abs(this.touchSteer) > 0.005) {
-        netRoll = this.touchSteer
-      }
+    let targetLeftBrake = this.touchLeftBrake
+    let targetRightBrake = this.touchRightBrake
+    let targetSpeedBar = this.touchSpeedBar
+    let targetWeightShift = 0
+
+    // 1. Desktop Keyboard Controls:
+    if (this.keysDown.has('ArrowLeft') || this.keysDown.has('KeyA')) {
+      targetLeftBrake = Math.max(targetLeftBrake, 0.55)
+      targetWeightShift = -0.85
+    }
+    if (this.keysDown.has('ArrowRight') || this.keysDown.has('KeyD')) {
+      targetRightBrake = Math.max(targetRightBrake, 0.55)
+      targetWeightShift = 0.85
+    }
+    if (this.keysDown.has('ArrowDown') || this.keysDown.has('KeyS')) {
+      targetLeftBrake = Math.max(targetLeftBrake, 0.70)
+      targetRightBrake = Math.max(targetRightBrake, 0.70)
+    }
+    if (this.keysDown.has('ArrowUp') || this.keysDown.has('KeyW')) {
+      targetSpeedBar = Math.max(targetSpeedBar, 1.0)
     }
 
-    // 2. Pitch / Speedbar & Flare:
-    let speedBarTarget = 0
-    let flareTarget = 0
-
+    // 2. Mobile Motion (Tilt) Integration:
     if (this.isMotionActive) {
-      speedBarTarget = Math.max(this.diveDemand, this.touchDive)
-      flareTarget = Math.max(this.flareDemand, this.touchFlare)
-    } else {
-      if (this.keysDown.has('ArrowUp') || this.keysDown.has('KeyW')) speedBarTarget = 1.0
-      if (this.keysDown.has('ArrowDown') || this.keysDown.has('KeyS')) flareTarget = 1.0
-      if (this.isTouchSteering) {
-        speedBarTarget = Math.max(speedBarTarget, this.touchDive)
-        flareTarget = Math.max(flareTarget, this.touchFlare)
+      if (this.diveDemand > 0) targetSpeedBar = Math.max(targetSpeedBar, this.diveDemand)
+      if (this.flareDemand > 0) {
+        targetLeftBrake = Math.max(targetLeftBrake, this.flareDemand)
+        targetRightBrake = Math.max(targetRightBrake, this.flareDemand)
       }
-    }
-
-    // 3. Coordinated Brake Mixing:
-    // Real paraglider pilots initiate minor trim adjustments with body weight-shift alone.
-    // Brake lines are only pulled down when deliberately carving deeper (>18% weight shift),
-    // eliminating brake-induced yaw snatch in the center!
-    let targetLeftBrake = flareTarget
-    let targetRightBrake = flareTarget
-
-    const absRollMag = Math.abs(netRoll)
-    if (absRollMag > 0.18) {
-      const brakeEngagement = (absRollMag - 0.18) / 0.82
-      const pull = Math.pow(brakeEngagement, 1.25) * 0.85
-      if (netRoll < 0) {
-        // Turning left: pull left brake, release outside right brake
-        targetLeftBrake = Math.max(flareTarget, pull)
-        targetRightBrake = Math.max(0, flareTarget - pull * 0.4)
+      // If not overriding with active thumb touch, tilt provides direct weight shift + coordinated brake assist:
+      if (!this.isTouchSteering) {
+        targetWeightShift = this.tiltWeightShift
+        if (Math.abs(this.tiltWeightShift) > 0.05) {
+          if (this.tiltWeightShift < 0) {
+            targetLeftBrake = Math.max(targetLeftBrake, Math.abs(this.tiltWeightShift) * 0.45)
+          } else {
+            targetRightBrake = Math.max(targetRightBrake, this.tiltWeightShift * 0.45)
+          }
+        }
       } else {
-        // Turning right: pull right brake, release outside left brake
-        targetRightBrake = Math.max(flareTarget, pull)
-        targetLeftBrake = Math.max(0, flareTarget - pull * 0.4)
+        // Subtle tilt complement during touch
+        targetWeightShift = this.tiltWeightShift * 0.65
       }
     }
 
-    // 4. Smooth Control Actuation & Positive Centering:
-    // When returning to center, faster recovery (14.0) firmly locks into neutral stability.
-    // When rolling into a turn, a progressive rate (5.5) feels like a physical human weight shift, not a twitch.
-    const isReturningToCenter = Math.abs(netRoll) < Math.abs(this.controls.weightShift || 0)
-    const steerRate = isReturningToCenter ? 24.0 : 18.0
-    const brakeRate = isReturningToCenter ? 20.0 : 16.0
-    const barRate = speedBarTarget > (this.controls.speedBar || 0) ? 14.0 : 10.0
+    // 3. Smooth Physical Control Actuation:
+    const brakeFollow = 22.0
+    const steerFollow = 24.0
+    const barFollow = 16.0
 
-    this.controls.weightShift += (netRoll - this.controls.weightShift) * Math.min(1.0, steerRate * dt)
-    this.controls.leftBrake += (targetLeftBrake - this.controls.leftBrake) * Math.min(1.0, brakeRate * dt)
-    this.controls.rightBrake += (targetRightBrake - this.controls.rightBrake) * Math.min(1.0, brakeRate * dt)
-    this.controls.speedBar += (speedBarTarget - this.controls.speedBar) * Math.min(1.0, barRate * dt)
+    this.controls.weightShift += (targetWeightShift - this.controls.weightShift) * Math.min(1.0, steerFollow * dt)
+    this.controls.leftBrake += (targetLeftBrake - this.controls.leftBrake) * Math.min(1.0, brakeFollow * dt)
+    this.controls.rightBrake += (targetRightBrake - this.controls.rightBrake) * Math.min(1.0, brakeFollow * dt)
+    this.controls.speedBar += (targetSpeedBar - this.controls.speedBar) * Math.min(1.0, barFollow * dt)
     this.controls.pullingA = this.controls.speedBar
     ;(this.controls as any).isCollapsed = this.isWingCollapsed
   }

@@ -33,6 +33,7 @@ import { LnStyleManager } from './rendering/LnStyleManager'
 import { WindStreakSystem } from './rendering/WindStreakSystem'
 import { XCMissionSystem } from './simulation/XCMissionSystem'
 import { ToroidalFluidSplatSystem } from './rendering/ToroidalFluidSplatSystem'
+import { GliderFlock } from './world/GliderFlock'
 
 function initApp() {
   const canvas = document.getElementById('renderCanvas') as HTMLCanvasElement
@@ -86,9 +87,11 @@ function initApp() {
   const thermalVortex = new ThermalVortexSystem(scene)
   thermalVortex.setThermals(activeWorld.thermals || [])
 
-  // 4. Multi-Glider Thermal Gaggle (Autonomous AI pilots sharing thermal spirals)
+  // 4. Multi-Glider Thermal Gaggle & Living AI Paraglider Flock
   const gaggle = new ThermalGaggleSystem(scene)
   gaggle.setThermals(activeWorld.thermals || [])
+  let gliderFlock = new GliderFlock(scene, activeWorld, activeWorld.launchPosition)
+  ;(window as any).gliderFlock = gliderFlock
 
   // 5. Real Competition Tracked GPS Flights & Ghost Pilot
   const trackedPlayer = new TrackedFlightPlayer(scene)
@@ -103,8 +106,8 @@ function initApp() {
   // 6. Build Flight Core, Camera, and Rig
   const lPos = activeWorld.launchPosition
   const lHeading = activeWorld.launchHeadingDeg
-  const sim = new ParagliderSimulation(lPos.y, lHeading, 'speedwing', { x: lPos.x, y: lPos.y, z: lPos.z })
-  sim.setWing('speedwing') // High-speed downhill speedwing (4.8:1 slope carver)!
+  const sim = new ParagliderSimulation(lPos.y, lHeading, 'paraglider', { x: lPos.x, y: lPos.y, z: lPos.z })
+  sim.setWing('paraglider') // Default to authentic 24m² XC Paraglider with 10.5:1 glide and thermal soaring!
   sim.world = activeWorld
   ;(window as any).sim = sim
   ;(window as any).scene = scene
@@ -288,6 +291,11 @@ function initApp() {
     if (coinRings) coinRings.reset()
     trickDetector.reset()
     xcMission.resetTask()
+    if (gliderFlock) {
+      gliderFlock.dispose()
+      gliderFlock = new GliderFlock(scene, activeWorld, activeWorld.launchPosition)
+      ;(window as any).gliderFlock = gliderFlock
+    }
     actionCam.snap()
     hud.hideRelaunch()
     inputManager.requestAutoCalibration()
@@ -311,6 +319,9 @@ function initApp() {
     if (lineArtTerrain) {
       lineArtTerrain.dispose()
     }
+    if (gliderFlock) {
+      gliderFlock.dispose()
+    }
 
     if (currentWorldId === 'roldanillo') {
       activeWorld = new RoldanilloMountain(scene)
@@ -326,16 +337,19 @@ function initApp() {
       activeWorld = wm
       hud.setWorldName('🇨🇦 Whistler')
       hud.setTotalCoins(coinRings.totalCoins)
-      sim.setWing('speedwing')
-      hud.setWingLabel(getWingLabel('speedwing'))
+      sim.setWing('paraglider')
+      hud.setWingLabel(getWingLabel('paraglider'))
     } else {
       activeWorld = new HimalayasMountain(scene)
       coinRings = new CoinRings(scene, activeWorld)
       hud.setWorldName('🇳🇵 Himalayas')
       hud.setTotalCoins(coinRings.totalCoins)
-      sim.setWing('speedwing')
-      hud.setWingLabel(getWingLabel('speedwing'))
+      sim.setWing('paraglider')
+      hud.setWingLabel(getWingLabel('paraglider'))
     }
+
+    gliderFlock = new GliderFlock(scene, activeWorld, activeWorld.launchPosition)
+    ;(window as any).gliderFlock = gliderFlock
 
     if (fluidSplats) {
       fluidSplats.dispose()
@@ -595,6 +609,7 @@ function initApp() {
       thermalVortex.update(dt, sim.atmosphere.windVector, sim.pilot.position)
       fluidSplats.update(dt, sim.atmosphere.windVector, sim.telemetry.staticChargeField ?? 0)
       gaggle.update(dt, sim.atmosphere.windVector)
+      gliderFlock.update(dt, sim.atmosphere.windVector, sim.pilot.position)
       trackedPlayer.update(dt)
 
       // Step I: Update Minimal HUD with Pseudo-Haptic Lag & Tension Tethers
@@ -674,6 +689,7 @@ function initApp() {
       thermalVortex.update(dt, sim.atmosphere.windVector, sim.pilot.position)
       fluidSplats.update(dt, sim.atmosphere.windVector, 0)
       gaggle.update(dt, sim.atmosphere.windVector)
+      gliderFlock.update(dt, sim.atmosphere.windVector, sim.pilot.position)
       trackedPlayer.update(dt)
 
       if (lnStyle.isIrGoggles) {

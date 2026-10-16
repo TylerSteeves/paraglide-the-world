@@ -443,10 +443,10 @@ export class FlightHUD {
       <div class="relaunch-overlay" id="hud-relaunch">
         <div class="relaunch-card">
           <div style="font-size: 11px; font-weight: 800; color: #38bdf8; letter-spacing: 1.5px; margin-bottom: 8px;">🪂 PARAGLIDE THE WORLD</div>
-          <h2 id="relaunch-title">1:1 TILT & DESCENT CONTROL</h2>
-          <p id="relaunch-sub" style="margin-bottom: 16px;">Tilt Left/Right to Steer • Tilt Forward to Dive • Tilt Back to Float • Rock-steady horizon</p>
+          <h2 id="relaunch-title">TRUE PARAGLIDER FLIGHT</h2>
+          <p id="relaunch-sub" style="margin-bottom: 16px;">Left & Right Thumbs Pull Brakes • Both Down to Float & Flare • Phone Tilt for Harness Weight Shift • Soar in Thermals</p>
           <button id="btn-play-portrait" style="background: linear-gradient(135deg, #0284c7, #0369a1); color: #fff; border: 1px solid rgba(255,255,255,0.3); border-radius: 9999px; padding: 14px 32px; font-size: 16px; font-weight: 800; box-shadow: 0 4px 24px rgba(2,132,199,0.6); pointer-events: auto; cursor: pointer; display: inline-block;">
-            TAP TO FLY (ENABLE TILT)
+            TAP TO FLY (DUAL TOGGLE & TILT)
           </button>
           <div style="margin-top: 16px; font-size: 12px; color: #94a3b8; line-height: 1.4; max-width: 320px; margin-left: auto; margin-right: auto;">
             🔒 <b>Tip:</b> Turn on <b>Portrait Orientation Lock</b> in iPhone Control Center so your phone stays vertical when tilting!

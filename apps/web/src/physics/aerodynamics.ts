@@ -94,10 +94,10 @@ export const PARAGLIDER_XC_24M: WingGeometry = {
   pilotMassKg: 88.0,
   pilotDragAreaM2: 0.20, // Streamlined pod / cocoon XC harness
   lineDragAreaM2: 0.04,  // Unsheathed microline suspension lines
-  trimSpeedKmh: 62.0,
-  minSpeedKmh: 28.0,
-  maxSpeedKmh: 98.0,
-  glideRatio: 11.2,
+  trimSpeedKmh: 38.0,
+  minSpeedKmh: 24.0,
+  maxSpeedKmh: 56.0,
+  glideRatio: 10.5,
 }
 
 export const PARAMOTOR_FREERIDE_18M: WingGeometry = {

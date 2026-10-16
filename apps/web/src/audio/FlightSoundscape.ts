@@ -288,11 +288,11 @@ export class FlightSoundscape {
 
     // 5. Variometer Logic: Climb = Beeping Tones; Sink = Low Growl
 
-    if (verticalSpeedMps > 0.4) {
-      // Climbing!
+    if (verticalSpeedMps > 0.15) {
+      // Climbing in thermal updraft!
       const climbRate = Math.min(6.0, verticalSpeedMps)
       const pitchHz = 620 + climbRate * 180
-      const beepInterval = Math.max(0.12, 0.45 - climbRate * 0.05)
+      const beepInterval = Math.max(0.10, 0.42 - climbRate * 0.055)
 
       this.varioOsc.frequency.setTargetAtTime(pitchHz, this.ctx.currentTime, 0.03)
 
@@ -304,13 +304,13 @@ export class FlightSoundscape {
       // Beep on/off pulse
       const isBeeping = this.varioTimer < beepInterval && !this.varioMuted
       this.varioGain.gain.setTargetAtTime(isBeeping ? 0.09 : 0, this.ctx.currentTime, 0.015)
-    } else if (verticalSpeedMps < -2.4 && !this.varioMuted && wingType !== 'speedwing') {
-      // Strong sink tone only for paraglider XC thermal mode, not speedwing downhill riding
-      const sinkPitch = Math.max(220, 420 + verticalSpeedMps * 35)
+    } else if (verticalSpeedMps < -1.8 && !this.varioMuted && wingType !== 'speedwing') {
+      // Moderate to strong sink tone for paraglider XC mode
+      const sinkPitch = Math.max(200, 380 + (verticalSpeedMps + 1.8) * 35)
       this.varioOsc.frequency.setTargetAtTime(sinkPitch, this.ctx.currentTime, 0.05)
-      this.varioGain.gain.setTargetAtTime(0.05, this.ctx.currentTime, 0.05)
+      this.varioGain.gain.setTargetAtTime(0.045, this.ctx.currentTime, 0.05)
     } else {
-      // Near neutral glide -> quiet
+      // Quiet laminar float in neutral glide
       this.varioGain.gain.setTargetAtTime(0, this.ctx.currentTime, 0.05)
     }
 
