@@ -350,13 +350,17 @@ export class ActionCamera {
     // Visceral Heaviness & G-Force Sensation (with dynamic seat-compression):
     const gForce = sim.telemetry.gForce || 1.0
     const snapHeaviness = snapIntensity * 0.25
+    // Stomach-Turning Weightless Pushover Float:
+    // When gForce drops below 1.0 (pushover into a dive), the camera experiences vertical floating inertia,
+    // lingering higher above the falling pilot so the pilot visually drops toward the bottom of the screen!
+    const stomachDropFloat = Math.max(0, 1.0 - gForce) * 0.65
     const gHeavinessComp = (gForce > 1.0
       ? Math.min(0.48, (gForce - 1.0) * 0.32)
-      : -Math.min(0.42, (1.0 - gForce) * 0.40)) + snapHeaviness
+      : -Math.min(0.55, (1.0 - gForce) * 0.45)) + snapHeaviness
 
-    // Up & Down Heave: vertical climb in thermals lifts gaze; diving down tilts down the fall-line
+    // Up & Down Heave: vertical climb in thermals lifts gaze; diving down tilts gaze into the fall-line
     const verticalMps = sim.telemetry.verticalSpeedMps || 0
-    const downhillDescend = Math.max(0, -verticalMps / 5.5)
+    const downhillDescend = Math.max(0, -verticalMps / 4.5)
     const thermalClimb = Math.max(0, verticalMps / 4.5)
 
     // Rock-steady look target: look ahead along flight path with zero control-induced camera twitching
@@ -381,10 +385,9 @@ export class ActionCamera {
     if (this.vantage === 'chase-360' || this.vantage === 'orbit-360') {
       // 1. Forward Driver & 360° Rotating Orbit Perspective:
       // Perfectly frames the flyer from any angle, rotating 360° around the pilot and canopy!
-      const verticalMps = sim.canopy.verticalSpeedMps || 0
       const diveTighten = Math.min(0.75, (Math.max(0, -verticalMps) / 25.0) * (isSpeedwing ? 0.70 : 0.55))
       const dist = (2.35 * portraitDistMult) + this.elasticLag * 0.40 + Math.min(0.35, speedSurge * 0.012) - diveTighten
-      const height = (0.78 * portraitHeightMult) + Math.min(0.18, speedSurge * 0.008) + downhillDescend * 0.20 - gHeavinessComp
+      const height = (0.78 * portraitHeightMult) + Math.min(0.18, speedSurge * 0.008) + downhillDescend * 0.20 - gHeavinessComp + stomachDropFloat
 
       const cosY = Math.cos(effectiveYaw)
       const sinY = Math.sin(effectiveYaw)
@@ -414,7 +417,7 @@ export class ActionCamera {
       // Forward flight path line-of-sight: look target projects ahead down the slope,
       // blended smoothly towards flyer center as orbit angle rotates to side/front
       const lookDist = 55.0 + (speedKmh / trimSpeed) * 25.0
-      const slopeDip = downhillDescend * 2.8 - thermalClimb * 2.2
+      const slopeDip = downhillDescend * 3.4 - thermalClimb * 2.2
       const forwardLook = this.targetCamPos
         .add(vDir.scale(lookDist))
         .subtract(uTether.scale(slopeDip))
@@ -476,10 +479,14 @@ export class ActionCamera {
     }
 
     // Responsive spring-like follow smoothing
+    // During weightless low-G pushover and steep descent, vertical follow relaxes slightly
+    // so the pilot visibly plunges downward on screen before the camera tracks down!
+    const isPlungingLowG = gForce < 0.90 && verticalMps < -2.5
+    const camLerpY = isPlungingLowG ? Math.min(1.0, 7.8 * dt) : Math.min(1.0, 16.0 * dt)
     const camLerp = Math.min(1.0, 16.0 * dt)
     const lookLerp = Math.min(1.0, 20.0 * dt)
     this.smoothedCamPos.x += (this.targetCamPos.x - this.smoothedCamPos.x) * camLerp
-    this.smoothedCamPos.y += (this.targetCamPos.y - this.smoothedCamPos.y) * camLerp
+    this.smoothedCamPos.y += (this.targetCamPos.y - this.smoothedCamPos.y) * camLerpY
     this.smoothedCamPos.z += (this.targetCamPos.z - this.smoothedCamPos.z) * camLerp
     this.camera.position.copyFrom(this.smoothedCamPos)
 
