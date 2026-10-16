@@ -41,6 +41,9 @@ export class CoinRings {
   private materials: Map<RingCategory, { ringMat: StandardMaterial; coreMat: StandardMaterial }> = new Map()
   private spawnedMeshes: (Mesh | TransformNode | any)[] = []
   public comboStreak: number = 0
+  private prevPilotPos: Vector3 = new Vector3(0, 1860, 20)
+  private hasPrevPos: boolean = false
+  private funnelNudgeResult: Vector3 = new Vector3(0, 0, 0)
 
   constructor(scene: Scene, world: FlightWorld) {
     this.initMaterials(scene)
@@ -439,12 +442,32 @@ export class CoinRings {
     pilotPos: Vector3,
     dt: number,
     airspeedKmh: number = 0,
-  ): { ringCollected: boolean; points: number; speedBonus: boolean; category?: RingCategory; liftBoost?: boolean } {
+  ): {
+    ringCollected: boolean
+    points: number
+    speedBonus: boolean
+    category?: RingCategory
+    liftBoost?: boolean
+    funnelNudge: Vector3
+  } {
     let ringCollected = false
     let points = 0
     let speedBonus = false
     let liftBoost = false
     let hitCategory: RingCategory | undefined
+
+    this.funnelNudgeResult.set(0, 0, 0)
+
+    if (!this.hasPrevPos) {
+      this.prevPilotPos.copyFrom(pilotPos)
+      this.hasPrevPos = true
+    }
+
+    const p0 = this.prevPilotPos
+    const p1 = pilotPos
+    const segX = p1.x - p0.x
+    const segY = p1.y - p0.y
+    const segZ = p1.z - p0.z
 
     for (const ring of this.rings) {
       if (ring.collected) continue
@@ -466,15 +489,53 @@ export class CoinRings {
       ring.baseRotationY += dt * 2.4
       ring.coreMesh.rotation.z = ring.baseRotationY
 
-      // Distance check to paraglider pilot
-      const dx = pilotPos.x - ring.position.x
-      const dy = pilotPos.y - ring.position.y
-      const dz = pilotPos.z - ring.position.z
-      const distSq = dx * dx + dy * dy + dz * dz
+      // --- 1. Continuous Plane-Crossing + Distance Detection ---
+      const cx = ring.position.x
+      const cy = ring.position.y
+      const cz = ring.position.z
+      const nx = ring.forward.x
+      const ny = ring.forward.y
+      const nz = ring.forward.z
 
-      // Collection radius (generous 7.5m - 10.0m)
-      const collectDist = ring.radius + 3.8
-      if (distSq < collectDist * collectDist) {
+      // Signed distance of previous and current pilot positions from the hoop's plane
+      const d0 = (p0.x - cx) * nx + (p0.y - cy) * ny + (p0.z - cz) * nz
+      const d1 = (p1.x - cx) * nx + (p1.y - cy) * ny + (p1.z - cz) * nz
+
+      let isHit = false
+      const collectRadius = ring.radius + 3.8
+
+      // Check plane crossing between frames (catches 180+ km/h dives without tunneling)
+      if ((d0 <= 0 && d1 >= 0) || (d0 >= 0 && d1 <= 0)) {
+        const denom = d1 - d0
+        if (Math.abs(denom) > 1e-5) {
+          const t = -d0 / denom
+          if (t >= -0.1 && t <= 1.1) {
+            const ix = p0.x + t * segX
+            const iy = p0.y + t * segY
+            const iz = p0.z + t * segZ
+            const idx = ix - cx
+            const idy = iy - cy
+            const idz = iz - cz
+            const distFromPlaneCenterSq = idx * idx + idy * idy + idz * idz
+            if (distFromPlaneCenterSq <= collectRadius * collectRadius) {
+              isHit = true
+            }
+          }
+        }
+      }
+
+      // Point proximity fallback check
+      if (!isHit) {
+        const dx = p1.x - cx
+        const dy = p1.y - cy
+        const dz = p1.z - cz
+        const distSq = dx * dx + dy * dy + dz * dz
+        if (distSq <= collectRadius * collectRadius) {
+          isHit = true
+        }
+      }
+
+      if (isHit) {
         ring.collecting = true
         ringCollected = true
         liftBoost = true
@@ -490,10 +551,43 @@ export class CoinRings {
           points += 150
           speedBonus = true
         }
+      } else {
+        // --- 2. Aerodynamic Streamline Funnel Nudge ---
+        // When approaching from upstream (up to 38m away), gently funnel pilot towards hoop center
+        // d1 is signed distance along normal (forward). Upstream means d1 < 0.
+        if (d1 < -0.8 && d1 > -38.0) {
+          const dx = p1.x - cx
+          const dy = p1.y - cy
+          const dz = p1.z - cz
+          // Radial vector perpendicular to forward normal
+          const rx = dx - d1 * nx
+          const ry = dy - d1 * ny
+          const rz = dz - d1 * nz
+          const radialDist = Math.sqrt(rx * rx + ry * ry + rz * rz)
+          const coneRadius = ring.radius * 2.8 + 4.0
+
+          if (radialDist < coneRadius && radialDist > 0.05) {
+            const approachWeight = 1.0 - (-d1 / 38.0)
+            const coneWeight = 1.0 - (radialDist / coneRadius)
+            const strength = 7.5 * approachWeight * coneWeight * dt
+            const pullFactor = Math.min(0.20, strength / radialDist)
+            this.funnelNudgeResult.x -= rx * pullFactor
+            this.funnelNudgeResult.y -= ry * pullFactor
+            this.funnelNudgeResult.z -= rz * pullFactor
+          }
+        }
       }
     }
 
-    return { ringCollected, points, speedBonus, category: hitCategory, liftBoost }
+    this.prevPilotPos.copyFrom(pilotPos)
+    return {
+      ringCollected,
+      points,
+      speedBonus,
+      category: hitCategory,
+      liftBoost,
+      funnelNudge: this.funnelNudgeResult,
+    }
   }
 
   public dispose(): void {

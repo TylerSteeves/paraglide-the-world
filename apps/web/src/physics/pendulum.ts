@@ -361,31 +361,36 @@ export class ParagliderSimulation {
     const brakeDiff = (this.controls.rightBrake || 0) - (this.controls.leftBrake || 0)
     const steerInput = this.controls.weightShift || 0
     // Coordinated steering: weightShift provides the smooth roll command;
-    // inside brake adds progressive carve authority in deep turns without double-counting
+    // inside brake adds progressive carve authority in deep turns without deadband thresholding
     const combinedSteer = clamp(
-      Math.abs(steerInput) > 0.05
-        ? steerInput * (1.0 + Math.abs(brakeDiff) * 0.25)
-        : brakeDiff,
+      steerInput + (1.0 - Math.abs(steerInput) * 0.4) * brakeDiff,
       -1.0,
       1.0,
     )
     const speedBar = clamp((this.controls.speedBar ?? 0) + (this.controls.pullingA ?? 0), 0, 1)
     const dualBrake = clamp(Math.min(this.controls.leftBrake ?? 0, this.controls.rightBrake ?? 0), 0, 1)
 
-    // Spiral dive coupling intensity (banking while diving forward):
-    const spiralFrac = clamp(Math.min(Math.abs(combinedSteer) * 1.25, speedBar * 1.25), 0, 1)
+    // Progressive Carve Law (Cool Boarders edge carving & fine motor precision):
+    // - Micro-trim region (absSteer < 0.20): gentle polynomial curve maps 0-20% input to 0-7.5° bank.
+    //   Allows ultra-precise, smooth micro-adjustments to thread hoops without overshooting!
+    // - Deep carve region (absSteer >= 0.20): linear progression up to 48° (or 66° in high-G spiral).
+    const absSteer = Math.abs(combinedSteer)
+    const spiralFrac = clamp(Math.min(absSteer * 1.25, speedBar * 1.25), 0, 1)
+    const maxBankDeg = 48.0 + spiralFrac * 18.0
 
-    // Maximum bank angle: 45° in normal carve, up to 60° in high-speed spiral
-    const maxBankDeg = 45.0 + spiralFrac * 15.0
-    const targetBankDeg = combinedSteer * maxBankDeg
+    const steerMag = Math.sign(combinedSteer) * (
+      absSteer < 0.20
+        ? Math.pow(absSteer / 0.20, 1.35) * 0.16
+        : 0.16 + ((absSteer - 0.20) / 0.80) * 0.84
+    )
+    const targetBankDeg = steerMag * maxBankDeg
 
     // Direct, Tight Rotational Roll Dynamics:
-    // Tight spring and critical damping for immediate, athletic roll response (<0.15s)
     const rollError = targetBankDeg - this.bankDeg
-    const isReturningRoll = Math.abs(targetBankDeg) < Math.abs(this.bankDeg)
+    const isReturningRoll = Math.abs(targetBankDeg) < Math.abs(this.bankDeg) || absSteer < 0.005
 
-    const springK = isReturningRoll ? 36.0 : 30.0
-    const dampC = isReturningRoll ? 12.0 : 10.8
+    const springK = isReturningRoll ? (absSteer < 0.005 ? 45.0 : 36.0) : 28.0
+    const dampC = isReturningRoll ? (absSteer < 0.005 ? 15.0 : 12.5) : 10.5
 
     const rollAccel = rollError * springK - this.rollRateDegPerSec * dampC
     this.rollRateDegPerSec += rollAccel * frameDt
@@ -396,30 +401,32 @@ export class ParagliderSimulation {
     const isSpeedwing = this.currentWingType === 'speedwing'
     const isParamotor = this.currentWingType === 'paramotor'
 
-    // Buoyant Mountain Soaring Performance Profiles:
-    // Speedwing: 62 km/h trim, gentle -1.85 m/s sink (9.3:1 glide ratio in the big sky!)
-    // Max dive: 145 km/h, -18.0 m/s sink, pitch up to 44° nose-down on speedbar!
-    // Dynamic flare: converts speed into buoyant +3.5 m/s climb and hover!
-    const baseTrimSpeed = isSpeedwing ? 62.0 : (isParamotor ? 58.0 : 48.0)
+    // Authentic Unrestrained Flight Performance Profiles:
+    // Speedwing: 65 km/h trim, gentle -1.85 m/s sink.
+    // Uncapped Dive: 188 km/h, -35.0 m/s sink, pitch up to 72° nose-down down the mountain fall-line!
+    // Paraglider: 48 km/h trim, -1.25 m/s sink. Max dive: 135 km/h, -24.0 m/s sink, pitch up to 62°!
+    const baseTrimSpeed = isSpeedwing ? 65.0 : (isParamotor ? 58.0 : 48.0)
     const baseTrimSink = isSpeedwing ? -1.85 : (isParamotor ? -1.50 : -1.25)
-    const maxDiveSpeed = isSpeedwing ? 145.0 : (isParamotor ? 100.0 : 88.0)
-    const maxDiveSink = isSpeedwing ? -18.0 : (isParamotor ? -12.0 : -10.0)
+    const maxDiveSpeed = isSpeedwing ? 188.0 : (isParamotor ? 120.0 : 135.0)
+    const maxDiveSink = isSpeedwing ? -35.0 : (isParamotor ? -18.0 : -24.0)
+    const maxDivePitch = isSpeedwing ? 72.0 : 62.0
     const minFlareSpeed = isSpeedwing ? 32.0 : (isParamotor ? 24.0 : 20.0)
 
-    // Solid Heading Lock & Agile Deeking Turn Authority:
-    // When centered (absBank < 3.2°): locks heading dead-straight (0 drift) so the glider flies like an arrow!
-    // When steering: immediate carve bite (1.85°/s per deg bank + 26°/s direct carve deflection) allows nimble deeking around chalets & bridges!
-    if (absBank < 3.2 && Math.abs(targetBankDeg) < 3.2) {
+    // Solid Heading Lock & Progressive Carve Turn Authority:
+    // When hands are off (steer < 0.005 and bank < 0.65°): locks heading strictly straight (0 drift).
+    // In flight: bank angle directly drives coordinated centripetal turn rate (1.55°/s per deg bank).
+    // Inside brake carve: pulling inside brake adds progressive edge bite (+36°/s on full deflection) for Cool Boarders carving!
+    if (absSteer < 0.005 && absBank < 0.65) {
       this.turnRateDegPerSec = 0
       this.bankDeg = 0
       this.rollRateDegPerSec = 0
     } else {
       const speedScale = Math.min(1.35, Math.max(0.75, this.airspeedKmh / baseTrimSpeed))
-      const directCarve = combinedSteer * 26.0 * speedScale
-      const bankCarve = this.bankDeg * 1.85 * speedScale
-      const spiralCarve = Math.sign(this.bankDeg) * spiralFrac * 28.0
-      const targetTurnRate = bankCarve + directCarve + spiralCarve
-      const turnFollow = isReturningRoll ? 26.0 : 20.0
+      const brakeCarve = brakeDiff * 36.0 * speedScale
+      const bankCarve = this.bankDeg * 1.55 * speedScale
+      const spiralCarve = Math.sign(this.bankDeg) * spiralFrac * 26.0
+      const targetTurnRate = bankCarve + brakeCarve + spiralCarve
+      const turnFollow = isReturningRoll ? 24.0 : 18.0
       this.turnRateDegPerSec += (targetTurnRate - this.turnRateDegPerSec) * Math.min(1.0, turnFollow * frameDt)
       this.headingDeg = (this.headingDeg + this.turnRateDegPerSec * frameDt + 360) % 360
     }
@@ -436,7 +443,7 @@ export class ParagliderSimulation {
 
     // Altitude-Preserving Carving:
     // Normal turns maintain altitude! Sink only slightly increases with load factor (1/cos(bank) - 1).
-    // In a 30° bank, sink rate is only -2.05 m/s, NOT plunging -20 m/s into the ground!
+    // In a 30° bank, sink rate is only -2.05 m/s, NOT plunging into the ground!
     const bankRad = absBank * DEG
     const bankInducedSink = (1.0 / Math.max(0.2, Math.cos(bankRad)) - 1.0) * 1.2
     let targetAirspeedKmh = baseTrimSpeed + (absBank / 45.0) * 8.0
@@ -446,14 +453,14 @@ export class ParagliderSimulation {
     if (this.collapseFrac > 0.05) {
       // True Freefall Plunge (Wing Collapse):
       targetAirspeedKmh = 14.0
-      targetSinkMps = -36.0 * Math.pow(this.collapseFrac, 0.75)
-      targetPitchDeg = 55.0 * this.collapseFrac
-    } else if (speedBar > 0.02) {
-      // Intentional Mountain Dive & High-G Spiral (Controlled by User):
-      // Only dives when player actively pushes speedbar / tilts forward!
+      targetSinkMps = -38.0 * Math.pow(this.collapseFrac, 0.75)
+      targetPitchDeg = 65.0 * this.collapseFrac
+    } else if (speedBar > 0.01) {
+      // Real Mountain Dive & High-G Fall-Line Plunge:
+      // Leaning forward lets the pilot dive with real paraglider speeds up to 188 km/h and -35 m/s sink!
       targetAirspeedKmh = baseTrimSpeed + speedBar * (maxDiveSpeed - baseTrimSpeed)
-      targetSinkMps = baseTrimSink + speedBar * (maxDiveSink - baseTrimSink) - spiralFrac * 6.0
-      targetPitchDeg = 1.0 + speedBar * 44.0
+      targetSinkMps = baseTrimSink + speedBar * (maxDiveSink - baseTrimSink) - spiralFrac * 8.0
+      targetPitchDeg = 1.0 + speedBar * (maxDivePitch - 1.0)
     } else if (dualBrake > 0.02) {
       // Dynamic Flare Climb & Hover:
       // Converts speed into buoyant climb up to +3.5 m/s!
@@ -489,25 +496,25 @@ export class ParagliderSimulation {
     const gravityComponent = Math.sin(curPitchRad) // 0 at level, ~0.75 at 49° dive
 
     // Pitch follows aerodynamic pendulum inertia (canopy nose dips forward progressively)
-    const pitchLerp = isCollapsing ? 16.0 : (speedBar > 0.05 ? 6.5 : 12.0)
+    const pitchLerp = isCollapsing ? 16.0 : (speedBar > 0.05 ? 8.5 : 12.0)
     this.pitchDeg += (targetPitchDeg - this.pitchDeg) * Math.min(1.0, pitchLerp * frameDt)
 
     // Airspeed acceleration & momentum retention:
     // When whipping into a turn or diving, gravity compounds acceleration down the fall-line.
-    // When leveling out, aerodynamic parasite drag decelerates slowly (0.38), sustaining tremendous swoop speed!
-    let speedRate = 0.38
+    // When leveling out, aerodynamic parasite drag decelerates slowly (0.25), sustaining tremendous swoop speed!
+    let speedRate = 0.25
     if (isCollapsing) {
       speedRate = 16.0
     } else if (targetAirspeedKmh > this.airspeedKmh) {
-      // Compounding gravity acceleration: builds from 1.4 up to 9.2 as dive steepens
-      speedRate = 1.4 + Math.pow(gravityComponent, 1.35) * 8.5
+      // Compounding gravity acceleration: builds up to 12.5 as dive steepens to 72°!
+      speedRate = 1.6 + Math.pow(gravityComponent, 1.15) * 11.5
     } else if (dualBrake > 0.05) {
-      speedRate = 7.0
+      speedRate = 7.5
     }
     this.airspeedKmh += (targetAirspeedKmh - this.airspeedKmh) * Math.min(1.0, speedRate * frameDt)
 
-    // Sink rate steepens in sync with dive plunge
-    const sinkRate = isCollapsing ? 14.0 : (speedBar > 0.05 ? (3.5 + Math.pow(gravityComponent, 1.2) * 7.5) : 8.0)
+    // Sink rate steepens in sync with dive plunge (up to -35 m/s plunge down the mountain face)
+    const sinkRate = isCollapsing ? 14.0 : (speedBar > 0.05 ? (4.5 + Math.pow(gravityComponent, 1.1) * 9.5) : 8.0)
     this.currentSinkMps += (targetSinkMps - this.currentSinkMps) * Math.min(1.0, sinkRate * frameDt)
 
     // Aerobatics execution:
@@ -536,7 +543,7 @@ export class ParagliderSimulation {
       }
     }
 
-    // 3. Trajectory & World Position Integration
+    // 3. Trajectory & World Position Integration (Cool Boarders Edge Carving Physics)
     const headingRad = this.headingDeg * DEG
 
     // In true freefall (wing collapse):
@@ -558,10 +565,22 @@ export class ParagliderSimulation {
     const rawHSpeedMps = (this.airspeedKmh / 3.6) * forwardGlideEff * horizPitchFactor * spiralTransDamp
     const hSpeedMps = Math.max(0, rawHSpeedMps)
 
-    const fwdX = Math.sin(headingRad) * hSpeedMps
-    const fwdZ = Math.cos(headingRad) * hSpeedMps
+    // Aerodynamic Edge Carving Trajectory:
+    // The velocity vector curves along the turn with aerodynamic weathervane following,
+    // holding an edge like a snowboard in Cool Boarders rather than snapping instantaneously!
+    const targetFwdX = Math.sin(headingRad) * hSpeedMps
+    const targetFwdZ = Math.cos(headingRad) * hSpeedMps
+
     const windHorizDamp = 1.0 - this.collapseFrac * 0.85
-    this.cVel = v3(fwdX + wind.x * windHorizDamp, this.currentSinkMps + wind.y, fwdZ + wind.z * windHorizDamp)
+    const curHorizVX = this.cVel.x - wind.x * windHorizDamp
+    const curHorizVZ = this.cVel.z - wind.z * windHorizDamp
+
+    // ~80ms relaxation follow rate produces natural geometric arcs and tangible edge pressure:
+    const carveFollowRate = 12.5
+    const newVX = curHorizVX + (targetFwdX - curHorizVX) * Math.min(1.0, carveFollowRate * frameDt)
+    const newVZ = curHorizVZ + (targetFwdZ - curHorizVZ) * Math.min(1.0, carveFollowRate * frameDt)
+
+    this.cVel = v3(newVX + wind.x * windHorizDamp, this.currentSinkMps + wind.y, newVZ + wind.z * windHorizDamp)
     this.cPos = vAddScaled(this.cPos, this.cVel, frameDt)
     this.cQ = qFromYawPitchRoll(this.headingDeg, renderPitchDeg, renderBankDeg)
 

@@ -53,6 +53,8 @@ export class MobileInputManager {
   public leftLagFrac: number = 0
   public rightLagFrac: number = 0
   public touchSteer: number = 0
+  public touchDive: number = 0
+  public touchFlare: number = 0
   public isTouchSteering: boolean = false
 
   // Control mode & settings
@@ -249,13 +251,16 @@ export class MobileInputManager {
         touchStartTime = performance.now()
 
         const w = window.innerWidth || 400
-        if (e.clientX < w * 0.44) {
-          const depth = clamp((w * 0.44 - e.clientX) / (w * 0.36), 0.35, 1.0)
-          this.touchSteer = -depth
+        if (e.clientX < w * 0.48) {
+          const norm = clamp((w * 0.48 - e.clientX) / (w * 0.44), 0.0, 1.0)
+          this.touchSteer = -Math.pow(norm, 1.25)
           this.isTouchSteering = true
-        } else if (e.clientX > w * 0.56) {
-          const depth = clamp((e.clientX - w * 0.56) / (w * 0.36), 0.35, 1.0)
-          this.touchSteer = depth
+        } else if (e.clientX > w * 0.52) {
+          const norm = clamp((e.clientX - w * 0.52) / (w * 0.44), 0.0, 1.0)
+          this.touchSteer = Math.pow(norm, 1.25)
+          this.isTouchSteering = true
+        } else {
+          this.touchSteer = 0
           this.isTouchSteering = true
         }
       },
@@ -267,14 +272,32 @@ export class MobileInputManager {
       (e) => {
         if (!this.isTouchSteering) return
         const w = window.innerWidth || 400
-        if (e.clientX < w * 0.44) {
-          const depth = clamp((w * 0.44 - e.clientX) / (w * 0.36), 0.35, 1.0)
-          this.touchSteer = -depth
-        } else if (e.clientX > w * 0.56) {
-          const depth = clamp((e.clientX - w * 0.56) / (w * 0.36), 0.35, 1.0)
-          this.touchSteer = depth
+        const h = window.innerHeight || 800
+
+        // Continuous horizontal analog steering:
+        if (e.clientX < w * 0.48) {
+          const norm = clamp((w * 0.48 - e.clientX) / (w * 0.44), 0.0, 1.0)
+          this.touchSteer = -Math.pow(norm, 1.25)
+        } else if (e.clientX > w * 0.52) {
+          const norm = clamp((e.clientX - w * 0.52) / (w * 0.44), 0.0, 1.0)
+          this.touchSteer = Math.pow(norm, 1.25)
         } else {
           this.touchSteer = 0
+        }
+
+        // Vertical thumb dragging for intuitive dive/flare control on touchscreen:
+        const dy = e.clientY - touchStartY
+        if (dy < -22) {
+          // Drag up -> Speedbar / dive
+          this.touchDive = clamp((-dy - 22) / (h * 0.24), 0.0, 1.0)
+          this.touchFlare = 0
+        } else if (dy > 22) {
+          // Drag down -> Flare / brakes
+          this.touchFlare = clamp((dy - 22) / (h * 0.24), 0.0, 1.0)
+          this.touchDive = 0
+        } else {
+          this.touchDive = 0
+          this.touchFlare = 0
         }
       },
       { passive: true },
@@ -283,6 +306,8 @@ export class MobileInputManager {
     const stopTouchSteer = () => {
       this.isTouchSteering = false
       this.touchSteer = 0
+      this.touchDive = 0
+      this.touchFlare = 0
     }
     window.addEventListener('pointercancel', stopTouchSteer, { passive: true })
 
@@ -379,7 +404,7 @@ export class MobileInputManager {
       this.neutralRollDeg += (this.smoothedRollDeg - this.neutralRollDeg) * Math.min(1.0, 0.35 * dt)
     }
 
-    const DEADBAND_ROLL = 4.2
+    const DEADBAND_ROLL = 3.2
     const MAX_ROLL = 22.0
 
     if (absRoll < DEADBAND_ROLL) {
@@ -395,11 +420,11 @@ export class MobileInputManager {
     this.instantTwistRad = (this.tiltWeightShift * 0.12)
 
     // 2. Pitch & Wing Envelope:
-    // Generous ±8.5° deadband around neutral prevents unintentional dive/sink while steering!
-    // Leaning forwards (> 8.5° forward) deliberately dives and speeds up.
-    // Tilting back (> 8.5° back) flares and floats.
+    // Natural ±5.5° deadband around neutral prevents unintentional dive/sink while steering!
+    // Leaning forwards reaching down to 18° (held flat in hands) gives full 100% screaming dive.
+    // Tilting back gives buoyant flare hover.
     const neutral = clamp(this.neutralElevationDeg, 42.0, 72.0)
-    const deadband = 8.5
+    const deadband = 5.5
 
     if (this.smoothedElevationDeg >= 90.0) {
       this.isWingCollapsed = true
@@ -412,18 +437,18 @@ export class MobileInputManager {
       this.flareDemand = 0
       this.pitchDemand = 0
     } else if (this.smoothedElevationDeg < neutral - deadband) {
-      // Leaning forwards from (neutral - deadband) down through flat to -25°
-      const maxDownAngle = -25.0
+      // Natural forward tilt travel: 100% dive reached at ~18° (comfortable hand angle)
+      const maxDownAngle = 18.0
       const diveTravel = (neutral - deadband) - maxDownAngle
-      const norm = clamp((neutral - deadband - this.smoothedElevationDeg) / Math.max(15.0, diveTravel), 0, 1)
-      this.diveDemand = Math.pow(norm, 1.25)
+      const norm = clamp((neutral - deadband - this.smoothedElevationDeg) / Math.max(12.0, diveTravel), 0, 1)
+      this.diveDemand = Math.pow(norm, 1.15)
       this.flareDemand = 0
       this.pitchDemand = this.diveDemand
     } else if (this.smoothedElevationDeg > neutral + deadband) {
       // Looking upwards: flares, hovers and floats
-      const flareTravel = 88.0 - (neutral + deadband)
+      const flareTravel = 86.0 - (neutral + deadband)
       const norm = clamp((this.smoothedElevationDeg - (neutral + deadband)) / Math.max(8.0, flareTravel), 0, 1)
-      this.flareDemand = Math.pow(norm, 1.25)
+      this.flareDemand = Math.pow(norm, 1.15)
       this.diveDemand = 0
       this.pitchDemand = -this.flareDemand
     } else {
@@ -437,7 +462,7 @@ export class MobileInputManager {
   public update(dt: number, ..._rest: any[]): void {
     // 1. Steering & Roll:
     let netRoll = 0
-    if (this.isTouchSteering && Math.abs(this.touchSteer) > 0.05) {
+    if (this.isTouchSteering && Math.abs(this.touchSteer) > 0.005) {
       netRoll = this.touchSteer
     } else if (this.isMotionActive) {
       netRoll = this.tiltWeightShift
@@ -445,6 +470,9 @@ export class MobileInputManager {
       // Desktop keyboard fallback
       if (this.keysDown.has('ArrowLeft') || this.keysDown.has('KeyA')) netRoll -= 1.0
       if (this.keysDown.has('ArrowRight') || this.keysDown.has('KeyD')) netRoll += 1.0
+      if (this.isTouchSteering && Math.abs(this.touchSteer) > 0.005) {
+        netRoll = this.touchSteer
+      }
     }
 
     // 2. Pitch / Speedbar & Flare:
@@ -452,11 +480,15 @@ export class MobileInputManager {
     let flareTarget = 0
 
     if (this.isMotionActive) {
-      speedBarTarget = this.diveDemand
-      flareTarget = this.flareDemand // Full buoyant hover float up to 100% flare
+      speedBarTarget = Math.max(this.diveDemand, this.touchDive)
+      flareTarget = Math.max(this.flareDemand, this.touchFlare)
     } else {
       if (this.keysDown.has('ArrowUp') || this.keysDown.has('KeyW')) speedBarTarget = 1.0
       if (this.keysDown.has('ArrowDown') || this.keysDown.has('KeyS')) flareTarget = 1.0
+      if (this.isTouchSteering) {
+        speedBarTarget = Math.max(speedBarTarget, this.touchDive)
+        flareTarget = Math.max(flareTarget, this.touchFlare)
+      }
     }
 
     // 3. Coordinated Brake Mixing:
