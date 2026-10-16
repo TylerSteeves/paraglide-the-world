@@ -129,6 +129,7 @@ export class ParagliderSimulation {
   public whipFrac: number = 0.0
   public airspeedKmh: number = 45.0
   private currentSinkMps: number = -1.2
+  private diveKineticSpeedMps: number = 0
   private currentUnloadFactor: number = 1.0
   public ringLiftBoostTimer: number = 0
   public ringLiftBoostMps: number = 0
@@ -197,6 +198,7 @@ export class ParagliderSimulation {
     this.bankDeg = 0
     this.airspeedKmh = this.wing.trimSpeedKmh || 45.0
     this.currentSinkMps = -1.2
+    this.diveKineticSpeedMps = 0
 
     const headingRad = initialHeadingDeg * DEG
     const trimSpeedMps = this.airspeedKmh / 3.6
@@ -354,6 +356,7 @@ export class ParagliderSimulation {
     this.whipFrac = 0
     this.airspeedKmh = this.wing.trimSpeedKmh || 82.0
     this.currentSinkMps = -6.2
+    this.diveKineticSpeedMps = 0
 
     const headingRad = initialHeadingDeg * DEG
     const trimSpeedMps = this.airspeedKmh / 3.6
@@ -422,9 +425,9 @@ export class ParagliderSimulation {
     // Paramotor: 52.0 km/h base trim. Full throttle: +5.2 m/s zoom climb, 70+ km/h cruise!
     const baseTrimSpeed = (isSpeedwing ? 74.0 : (isParamotor ? 52.0 : 38.5)) * massRatio
     const baseTrimSink = (isSpeedwing ? -2.45 : (isParamotor ? -1.40 : -1.05)) * massRatio
-    const maxDiveSpeed = (isSpeedwing ? 210.0 : (isParamotor ? 100.0 : 118.0)) * massRatio
-    const maxDiveSink = (isSpeedwing ? -52.0 : (isParamotor ? -18.0 : -24.0)) * massRatio
-    const maxDivePitch = isSpeedwing ? 82.0 : 58.0
+    const maxDiveSink = (isSpeedwing ? -65.0 : (isParamotor ? -28.0 : -42.0)) * massRatio
+    const maxDiveSpeed = Math.abs(maxDiveSink) * 3.6
+    const maxDivePitch = isSpeedwing ? 90.0 : 88.0
     const minFlareSpeed = (isSpeedwing ? 36.0 : (isParamotor ? 24.0 : 18.0)) * massRatio
 
     const spiralFrac = isSpeedwing ? clamp(Math.min(absSteer * 1.25, speedBar * 1.25), 0, 1) : 0
@@ -580,33 +583,33 @@ export class ParagliderSimulation {
     // 2. Wing Aerodynamic Lift Unload Factor:
     const diveCurve = Math.pow(speedBar, 1.15)
     const unloadFactor = isCollapsing
-      ? 0.05
+      ? 0.04
       : (speedBar > 0.01
-        ? clamp(1.0 - diveCurve * 0.72 * (0.35 + 0.65 * Math.sin(pitchRad)), 0.18, 1.0)
+        ? clamp(1.0 - diveCurve * 0.90 * (0.25 + 0.75 * Math.sin(pitchRad)), 0.08, 1.0)
         : (dualBrake > 0.70 ? 1.45 : 1.0))
     this.currentUnloadFactor = unloadFactor
 
     // 3. Vertical Acceleration & Gravitational Plunge (ay):
-    // Gravitational plunge: heavier pilot carries more momentum to punch through aerodynamic parasitic drag:
+    // Standard freefall aerodynamic differential equation: dv/dt = -g * sin(theta) * (1 - (v / vt)^2)
     const g = 9.81
     const massPunchFactor = Math.min(1.55, Math.max(0.70, totalMassKg / 95.0))
     const targetTerminalSink = isCollapsing
-      ? -38.0
+      ? -45.0 * massPunchFactor
       : (speedBar > 0.01
         ? (baseTrimSink + diveCurve * (maxDiveSink - baseTrimSink) - spiralFrac * 12.0)
         : targetSinkMps)
 
     if (this.currentSinkMps > targetTerminalSink && (speedBar > 0.01 || isCollapsing)) {
       // Freefall Gravity Plunge:
-      const gravitySurge = g * (1.0 - unloadFactor)
-      const sinkFraction = clamp(this.currentSinkMps / targetTerminalSink, 0, 1)
-      const dragDamp = Math.pow(sinkFraction, 2.6)
-      const verticalPlungeAcc = gravitySurge * (1.0 - dragDamp) * (isSpeedwing ? 2.85 : 1.55) * massPunchFactor
-      this.currentSinkMps -= verticalPlungeAcc * frameDt
+      const pitchFactor = Math.max(0.20, Math.sin(Math.max(0.10, pitchRad)))
+      const sinkRatio = clamp(Math.abs(this.currentSinkMps) / Math.max(1.0, Math.abs(targetTerminalSink)), 0, 1)
+      const dragOpposition = Math.pow(sinkRatio, 2.0) // Quadratic aerodynamic drag
+      const netGravityAcc = g * pitchFactor * (1.0 - dragOpposition) * (1.0 - unloadFactor * 0.5) * (isSpeedwing ? 1.65 : 1.20) * massPunchFactor
+      this.currentSinkMps -= netGravityAcc * frameDt
       this.currentSinkMps = Math.max(targetTerminalSink, this.currentSinkMps)
     } else {
       // Aerodynamic lift recovery / thermalling / float:
-      const recoveryRate = isSpeedwing ? 12.0 : 8.5
+      const recoveryRate = isSpeedwing ? 14.0 : 9.5
       this.currentSinkMps += (targetSinkMps - this.currentSinkMps) * Math.min(1.0, recoveryRate * frameDt)
     }
 
@@ -617,39 +620,68 @@ export class ParagliderSimulation {
     const windHorizDamp = 1.0 - this.collapseFrac * 0.85
     const curVX = this.cVel.x - wind.x * windHorizDamp
     const curVZ = this.cVel.z - wind.z * windHorizDamp
-    const curHSpeedMps = Math.max(2.0, Math.hypot(curVX, curVZ))
+    const curHSpeedMps = Math.hypot(curVX, curVZ)
 
     let newHSpeedMps = curHSpeedMps
+
     if (speedBar > 0.01 && !isCollapsing) {
-      // Forward component of gravity sliding down the fall-line:
-      const maxFwdAcc = g * Math.sin(pitchRad) * Math.cos(pitchRad * 0.5) * (isSpeedwing ? 1.65 : 0.90) * massPunchFactor
-      const diveHSpeedTarget = Math.max(baseTrimSpeedMps, (baseTrimSpeedMps + diveCurve * (maxDiveSpeed / 3.6 - baseTrimSpeedMps)) * Math.cos(pitchRad * 0.55))
+      // While diving, track total 3D kinetic airspeed:
+      const current3DAirspeed = Math.hypot(curHSpeedMps, this.currentSinkMps)
+      this.diveKineticSpeedMps = Math.max(this.diveKineticSpeedMps, current3DAirspeed)
+
+      // In a dive, total target airspeed accelerates along the flight path:
+      const diveTargetTotalMps = (baseTrimSpeed + diveCurve * (maxDiveSpeed - baseTrimSpeed)) / 3.6
+      // Authentic aerodynamic trigonometric flight path projection:
+      // V_h = V_total * cos(pitchRad)
+      // When pointing straight down (pitchRad = 90 deg = pi/2), cos(pitchRad) = 0 -> diveHSpeedTarget = 0 m/s!
+      const diveHSpeedTarget = Math.max(0, diveTargetTotalMps * Math.cos(pitchRad))
+
       if (curHSpeedMps < diveHSpeedTarget) {
+        const maxFwdAcc = g * Math.sin(pitchRad) * Math.cos(pitchRad) * (isSpeedwing ? 1.65 : 0.90) * massPunchFactor
         newHSpeedMps = Math.min(diveHSpeedTarget, curHSpeedMps + maxFwdAcc * frameDt)
       } else {
-        newHSpeedMps = Math.max(diveHSpeedTarget, curHSpeedMps - 0.35 * frameDt)
+        // Rapid bleed-off of forward speed when diving steeply (frontal aerodynamic drag + pitch redirection):
+        // In steep dives (pitch > 60°), horizontal translation vanishes in under 1 second!
+        const steepPitchDecel = Math.sin(pitchRad) * (pitchRad > 1.0 ? 16.0 : 4.0)
+        const decelRate = Math.max(0.45, steepPitchDecel)
+        newHSpeedMps = Math.max(diveHSpeedTarget, curHSpeedMps - (curHSpeedMps - diveHSpeedTarget) * Math.min(1.0, decelRate * frameDt))
       }
+    } else if (this.diveKineticSpeedMps > baseTrimSpeedMps + 1.0) {
+      // The Recovery Arc (Canopy Swoop Conversion):
+      // As the canopy pulls out of the dive, dynamic lift turns the trajectory from vertical to horizontal.
+      // Total dive kinetic speed is rotated into horizontal swoop speed along the flight path:
+      const swoopEfficiency = isSpeedwing ? 0.90 : 0.84
+      // As pitch flattens out (pitchRad -> 0), horizontal target surges to full swoop speed:
+      const pulloutFrac = Math.max(0, 1.0 - Math.min(1.0, pitchRad / 1.15))
+      const swoopTargetMps = this.diveKineticSpeedMps * swoopEfficiency * (0.35 + 0.65 * pulloutFrac)
+
+      if (newHSpeedMps < swoopTargetMps) {
+        const swoopFollowRate = 24.0
+        newHSpeedMps += (swoopTargetMps - newHSpeedMps) * Math.min(1.0, swoopFollowRate * frameDt)
+      }
+
+      // High-speed swoop retention: aerodynamic drag gradually bleeds off excess kinetic swoop speed:
+      // Deep flare (dualBrake > 0.70) bleeds swoop speed faster into aerodynamic lift/hover
+      const flareBrakeDamp = dualBrake > 0.70 ? (dualBrake - 0.70) * 0.8 : 0
+      const swoopBleedRate = (isSpeedwing ? 0.18 : 0.28) + flareBrakeDamp
+      this.diveKineticSpeedMps += (baseTrimSpeedMps - this.diveKineticSpeedMps) * Math.min(1.0, swoopBleedRate * frameDt)
+      newHSpeedMps += (baseTrimSpeedMps - newHSpeedMps) * Math.min(1.0, swoopBleedRate * frameDt)
     } else if (dualBrake > 0.02) {
+      this.diveKineticSpeedMps = 0
       const brakeTargetMps = targetAirspeedKmh / 3.6
       const brakeDecelRate = isSpeedwing ? 12.0 : 7.5
       newHSpeedMps += (brakeTargetMps - curHSpeedMps) * Math.min(1.0, brakeDecelRate * frameDt)
-    } else if (curHSpeedMps > baseTrimSpeedMps) {
-      // High-speed swoop retention: aerodynamic drag slowly bleeds off excess kinetic swoop speed:
-      const swoopBleedRate = isSpeedwing ? 0.22 : 0.35
-      newHSpeedMps += (baseTrimSpeedMps - curHSpeedMps) * Math.min(1.0, swoopBleedRate * frameDt)
     } else {
+      this.diveKineticSpeedMps = 0
       newHSpeedMps += (baseTrimSpeedMps - curHSpeedMps) * Math.min(1.0, 4.0 * frameDt)
     }
 
-    // Total Airspeed derived from 3D relative airflow:
-    if (speedBar > 0.01) {
+    // Total Airspeed derived from true 3D relative airflow:
+    if (speedBar > 0.01 || newHSpeedMps > baseTrimSpeedMps + 1.0) {
       this.airspeedKmh = Math.sqrt(newHSpeedMps * newHSpeedMps + this.currentSinkMps * this.currentSinkMps) * 3.6
     } else {
       const speedRate = dualBrake > 0.05 ? (isSpeedwing ? 12.0 : 7.5) : 4.0
       this.airspeedKmh += (targetAirspeedKmh - this.airspeedKmh) * Math.min(1.0, speedRate * frameDt)
-      if (curHSpeedMps <= baseTrimSpeedMps + 0.5) {
-        newHSpeedMps = (this.airspeedKmh / 3.6) * Math.cos(pitchRad)
-      }
     }
 
     // Aerobatics execution:
@@ -703,7 +735,8 @@ export class ParagliderSimulation {
     const curHorizVZ = this.cVel.z - wind.z * windHorizDamp
 
     // ~80ms relaxation follow rate produces natural geometric arcs and tangible edge pressure:
-    const carveFollowRate = 12.5
+    // In steep dives (pitch > 60°) or high-speed swoop pullouts, relaxation accelerates so trajectory responds immediately!
+    const carveFollowRate = (pitchRad > 1.0 || newHSpeedMps > baseTrimSpeedMps + 2.0) ? 22.0 : 12.5
     const newVX = curHorizVX + (targetFwdX - curHorizVX) * Math.min(1.0, carveFollowRate * frameDt)
     const newVZ = curHorizVZ + (targetFwdZ - curHorizVZ) * Math.min(1.0, carveFollowRate * frameDt)
 
@@ -740,9 +773,20 @@ export class ParagliderSimulation {
     const horizDistSq = trailZ * trailZ + slingX * slingX
     const dropY = Math.sqrt(Math.max(1.0, tetherL * tetherL - horizDistSq)) - zeroGSlack + gTensionStretch
 
+    // Steep Dive Alignment & Relative Wind Vector:
+    // As pitch approaches 90° (vertical dive), the pilot naturally trails BEHIND the canopy along the flight path.
+    // In canopy space, this transitions local (X, Y, Z) smoothly from (slingX, -dropY, trailZ) at level trim
+    // to (0, 0, -tetherL) at 90° dive, so when rotated by cQ, the pilot is positioned directly ABOVE
+    // the downward-plunging canopy in world space with lines taut along the vertical fall-line!
+    const pFrac = clamp(renderPitchDeg / 85.0, 0, 1)
+    const divePilotShift = Math.pow(pFrac, 1.35)
+    const localX = slingX * (1.0 - divePilotShift)
+    const localY = -dropY * (1.0 - divePilotShift)
+    const localZ = trailZ * (1.0 - divePilotShift) - (tetherL - zeroGSlack + gTensionStretch) * divePilotShift
+
     // Rotate local offset by canopy quaternion cQ:
     // This locks pilot and carabiners 100% to canopy frame with ZERO line jumping!
-    const pilotLocalOffset = v3(slingX, -dropY, trailZ)
+    const pilotLocalOffset = v3(localX, localY, localZ)
     this.pPos = vAdd(this.cPos, qRotate(this.cQ, pilotLocalOffset))
     this.pVel = vCopy(this.cVel)
 

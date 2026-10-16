@@ -400,7 +400,7 @@ export class ActionCamera {
       // effectiveYaw = PI: points along uFwdH (front selfie)
       // effectiveYaw = 3*PI/2: points along -uRight (left side)
       const uH = uFwdH.scale(-cosY).add(uRight.scale(sinY))
-      const upRef = (sim.isLooping || sim.isRolling) ? Vector3.Up() : uTether
+      const upRef = Vector3.Up()
       const uOrbitDir = uH.scale(cosP).add(upRef.scale(sinP)).normalize()
 
       // Centrifugal lateral camera swing during high-G turns:
@@ -420,10 +420,10 @@ export class ActionCamera {
       const slopeDip = downhillDescend * 3.4 - thermalClimb * 2.2
       const forwardLook = this.targetCamPos
         .add(vDir.scale(lookDist))
-        .subtract(uTether.scale(slopeDip))
+        .subtract(Vector3.Up().scale(slopeDip))
         .add(turnLookAhead)
 
-      const flyerCenter = pilotPos.add(uTether.scale(0.75))
+      const flyerCenter = pilotPos.add(tetherDiff.scale(0.5))
       const rotAngleMag = Math.abs(effectiveYaw) + Math.abs(effectivePitch)
       const lookFlyerWeight = Math.max(0, Math.min(1.0, rotAngleMag / 0.75 + (this.vantage === 'orbit-360' ? 0.6 : 0)))
       this.lookTarget = Vector3.Lerp(forwardLook, flyerCenter, lookFlyerWeight)
@@ -434,14 +434,14 @@ export class ActionCamera {
       this.targetCamPos = pilotPos
         .subtract(uFwdH.scale(dist))
         .add(uRight.scale(0.70))
-        .add(uTether.scale(height))
+        .add(Vector3.Up().scale(height))
         .add(shake)
 
       const lookDist = 50.0 + (speedKmh / trimSpeed) * 20.0
       const slopeDip = downhillDescend * 2.0 - thermalClimb * 1.8
       this.lookTarget = this.targetCamPos
         .add(vDir.scale(lookDist))
-        .subtract(uTether.scale(slopeDip))
+        .subtract(Vector3.Up().scale(slopeDip))
         .add(turnLookAhead)
     } else if (this.vantage === 'pilot-fpv') {
       // 3. Cockpit First-Person Pilot View:
@@ -469,12 +469,12 @@ export class ActionCamera {
       const height = (1.55 * portraitHeightMult) - Math.min(0.20, speedSurge * 0.008) - gHeavinessComp
       this.targetCamPos = pilotPos
         .subtract(uFwdH.scale(dist))
-        .add(uTether.scale(height))
+        .add(Vector3.Up().scale(height))
         .add(shake)
 
       this.lookTarget = pilotPos
         .add(vDir.scale(30.0))
-        .add(uTether.scale(1.2))
+        .add(Vector3.Up().scale(1.2))
         .add(turnLookAhead)
     }
 
@@ -501,7 +501,7 @@ export class ActionCamera {
     const viewDir = this.smoothedTarget.subtract(this.smoothedCamPos).normalize()
     let camRight = Vector3.Cross(Vector3.Up(), viewDir)
     if (camRight.lengthSquared() < 0.001) {
-      camRight = Vector3.Right()
+      camRight = uRight
     } else {
       camRight.normalize()
     }
@@ -520,14 +520,14 @@ export class ActionCamera {
     // Dynamic speed-tunnel FOV dilation: expands peripheral vision and creates forward speed rush
     const effectiveBaseFov = isPortrait ? 1.25 : this.baseFov
     // Plunge boost: in steep dives, FOV immediately flares open to give the stomach-dropping speed sensation!
-    const plungeBoost = Math.min(0.28, (Math.max(0, -sim.telemetry.verticalSpeedMps - 2.5) / 20.0) * 0.28)
+    const plungeBoost = Math.min(0.40, (Math.max(0, -sim.telemetry.verticalSpeedMps - 2.5) / 25.0) * 0.40)
     const fovBoost = isSpeedwing
-      ? Math.min(0.65, Math.pow(Math.max(0, speedKmh - 65.0) / 50.0, 1.1) * 0.50 + plungeBoost)
-      : Math.min(0.45, Math.pow(Math.max(0, speedKmh - 38.0) / 35.0, 1.15) * 0.35 + plungeBoost)
+      ? Math.min(0.68, Math.pow(Math.max(0, speedKmh - 65.0) / 50.0, 1.1) * 0.50 + plungeBoost)
+      : Math.min(0.50, Math.pow(Math.max(0, speedKmh - 38.0) / 35.0, 1.15) * 0.35 + plungeBoost)
     const snapFovBoost = snapIntensity * 0.08
     const loopFovBoost = (sim.isLooping || sim.isRolling) ? 0.12 : 0
     const gTunnelFov = Math.max(0, gForce - 1.2) * 0.025
-    const targetFov = Math.min(1.72, effectiveBaseFov * (1.0 + fovBoost + snapFovBoost + loopFovBoost - gTunnelFov))
+    const targetFov = Math.min(1.75, effectiveBaseFov * (1.0 + fovBoost + snapFovBoost + loopFovBoost - gTunnelFov))
     this.camera.fov += (targetFov - this.camera.fov) * Math.min(1.0, 14.0 * dt)
   }
 }

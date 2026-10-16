@@ -814,11 +814,15 @@ export class FlightHUD {
     }
 
     if (this.descentBadgeEl) {
+      const vs = telemetry.verticalSpeedMps
       const speedBar = controls.speedBar ?? 0
       const symBrake = Math.min(controls.leftBrake, controls.rightBrake)
       const isDiving = pitchDemand > 0.15 || speedBar > 0.15 || telemetry.airspeedKmh > 72
       const isFlaring = pitchDemand < -0.15 || symBrake > 0.35
       const isSpiral = (isDiving || speedBar > 0.10) && Math.abs(telemetry.bankDeg) > 35
+
+      const isVerticalPlunge = vs < -20.0 || (isDiving && Math.abs(telemetry.pitchDeg) > 65.0)
+      const isHighSpeedSwoop = telemetry.airspeedKmh > 70.0 && vs > -4.0
 
       if (telemetry.isCollapsed) {
         this.descentBadgeEl.innerText = '⚡ FREEFALL'
@@ -826,13 +830,18 @@ export class FlightHUD {
       } else if (isSpiral) {
         this.descentBadgeEl.innerText = '🌀 SPIRAL DIVE'
         this.descentBadgeEl.className = 'hud-descent-badge descent-dive'
+      } else if (isVerticalPlunge) {
+        this.descentBadgeEl.innerText = '⚡ VERTICAL PLUNGE'
+        this.descentBadgeEl.className = 'hud-descent-badge descent-dive'
       } else if (isDiving) {
-        const isFastDive = telemetry.airspeedKmh > 110 || speedBar > 0.65
+        const isFastDive = telemetry.airspeedKmh > 100 || speedBar > 0.65
         this.descentBadgeEl.innerText = isFastDive ? '⚡ FAST DIVE' : '▲ DIVE'
         this.descentBadgeEl.className = 'hud-descent-badge descent-dive'
+      } else if (isHighSpeedSwoop) {
+        this.descentBadgeEl.innerText = '⚡ SWOOP'
+        this.descentBadgeEl.className = 'hud-descent-badge descent-flare'
       } else if (isFlaring) {
-        const isHighSpeedSwoop = telemetry.airspeedKmh > 52
-        this.descentBadgeEl.innerText = isHighSpeedSwoop ? '▼ FLARE' : '▼ HOVER / FLOAT'
+        this.descentBadgeEl.innerText = '▼ FLARE / FLOAT'
         this.descentBadgeEl.className = 'hud-descent-badge descent-flare'
       } else {
         this.descentBadgeEl.innerText = '— GLIDE'
