@@ -174,6 +174,7 @@ export class MobileInputManager {
 
   public toggleCruiseLock(): boolean {
     this.isCruiseLocked = !this.isCruiseLocked
+    this.targetThrottle = this.isCruiseLocked ? 0.35 : 0
     return this.isCruiseLocked
   }
 
@@ -225,8 +226,10 @@ export class MobileInputManager {
     // 2. Keyboard fallback for desktop testing & aerobatics
     window.addEventListener('keydown', (e) => {
       this.keysDown.add(e.code)
-      if (e.code === 'Space' || e.code === 'KeyF') {
+      if (e.code === 'KeyF') {
         this.onTriggerLoop?.()
+      } else if (e.code === 'KeyC') {
+        this.toggleCruiseLock()
       } else if (e.code === 'KeyQ') {
         this.onTriggerRoll?.(-1)
       } else if (e.code === 'KeyE') {
@@ -501,12 +504,28 @@ export class MobileInputManager {
     const brakeFollow = 22.0
     const steerFollow = 24.0
     const barFollow = 16.0
+    const throttleFollow = 14.0
+
+    // Throttle input from keyboard (Space, Shift, or X), or touch/cruise dock:
+    const isThrottleKeyDown =
+      this.keysDown.has('Space') ||
+      this.keysDown.has('ShiftLeft') ||
+      this.keysDown.has('ShiftRight') ||
+      this.keysDown.has('KeyX')
+    let desiredThrottle = this.targetThrottle
+    if (isThrottleKeyDown) {
+      desiredThrottle = 1.0
+    } else if (this.isCruiseLocked) {
+      desiredThrottle = Math.max(desiredThrottle, 0.35)
+    }
 
     this.controls.weightShift += (targetWeightShift - this.controls.weightShift) * Math.min(1.0, steerFollow * dt)
     this.controls.leftBrake += (targetLeftBrake - this.controls.leftBrake) * Math.min(1.0, brakeFollow * dt)
     this.controls.rightBrake += (targetRightBrake - this.controls.rightBrake) * Math.min(1.0, brakeFollow * dt)
     this.controls.speedBar += (targetSpeedBar - this.controls.speedBar) * Math.min(1.0, barFollow * dt)
     this.controls.pullingA = this.controls.speedBar
+    const curThrottle = this.controls.throttle ?? 0
+    this.controls.throttle = curThrottle + (desiredThrottle - curThrottle) * Math.min(1.0, throttleFollow * dt)
     ;(this.controls as any).isCollapsed = this.isWingCollapsed
   }
 

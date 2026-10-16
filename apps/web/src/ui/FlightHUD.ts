@@ -62,17 +62,25 @@ export class FlightHUD {
 
   // Paramotor HUD Elements
   private paramotorPillEl: HTMLElement | null = null
+  private paramotorDockEl: HTMLElement | null = null
   private rpmEl: HTMLElement | null = null
   private thrustEl: HTMLElement | null = null
   private throttleEl: HTMLElement | null = null
   private dockBtnThrottle: HTMLElement | null = null
   private dockThrottleSubEl: HTMLElement | null = null
+  private dockCruiseBtn: HTMLElement | null = null
+  private dockCruiseLabelEl: HTMLElement | null = null
   private hintThrottleEl: HTMLElement | null = null
+
+  // Pilot Mass Elements
+  private massEl: HTMLElement | null = null
+  private massBtnEl: HTMLElement | null = null
 
   private onThrottleHoldCallback: (holding: boolean) => void = () => {}
   private onToggleCruiseCallback: () => void = () => {}
 
   private onCycleWingCallback: () => void = () => {}
+  private onCyclePilotMassCallback: () => void = () => {}
   private onCycleControlModeCallback: () => void = () => {}
 
   private onStartCallback: () => void = () => {}
@@ -89,6 +97,10 @@ export class FlightHUD {
 
   public setOnTriggerFlip(cb: () => void) {
     this.onTriggerFlipCallback = cb
+  }
+
+  public setOnCyclePilotMass(cb: () => void) {
+    this.onCyclePilotMassCallback = cb
   }
 
   constructor(containerId: string) {
@@ -325,6 +337,20 @@ export class FlightHUD {
             <span id="hud-wing-label">XC 10:1</span>
           </button>
 
+          <button class="hud-icon-btn" id="btn-pilot-mass" title="Cycle Pilot Mass / Weight [U]" style="padding: 0 10px; font-size: 13px; font-weight: 700; width: auto; gap: 4px; background: rgba(59, 130, 246, 0.22); border-color: rgba(59, 130, 246, 0.5); color: #dbeafe;">
+            <span>⚖️</span>
+            <span id="hud-mass-label">95KG</span>
+          </button>
+
+          <div class="hud-paramotor-pill" id="hud-paramotor-pill" style="display: none; align-items: center; gap: 6px; background: rgba(245, 158, 11, 0.25); border: 1px solid rgba(245, 158, 11, 0.5); border-radius: 9999px; padding: 4px 10px; font-size: 12px; font-weight: 700; color: #fef3c7;">
+            <span>🚁</span>
+            <span id="hud-rpm">2200</span><small>RPM</small>
+            <span class="hud-sep">•</span>
+            <span id="hud-thrust">35</span><small>N</small>
+            <span class="hud-sep">•</span>
+            <span id="hud-throttle">0%</span>
+          </div>
+
           <button class="hud-icon-btn" id="btn-ln-style" title="Switch Style [L]">
             <span>📐</span>
             <span id="hud-ln-label" style="display: none;">PLOTTER</span>
@@ -350,12 +376,20 @@ export class FlightHUD {
         </div>
       </div>
 
+      <!-- Visible Paramotor & Propeller Control Dock -->
+      <div class="hud-paramotor-dock" id="hud-paramotor-dock" style="display: none; position: fixed; bottom: 24px; right: 24px; z-index: 1000; gap: 10px; align-items: center; pointer-events: auto;">
+        <button id="btn-dock-throttle" class="hud-icon-btn" title="Hold to Throttle Up [Space / Shift]" style="padding: 12px 18px; font-size: 14px; font-weight: 800; background: rgba(245, 158, 11, 0.35); border: 1px solid rgba(245, 158, 11, 0.7); color: #fff; border-radius: 12px; box-shadow: 0 4px 14px rgba(0,0,0,0.4); touch-action: none; cursor: pointer; display: flex; align-items: center; gap: 6px; user-select: none;">
+          <span>⚡ THROTTLE</span>
+          <span id="dock-throttle-sub" style="font-size: 11px; opacity: 0.85;">[SPACE]</span>
+        </button>
+        <button id="btn-dock-cruise" class="hud-icon-btn" title="Toggle Level Cruise Lock [C]" style="padding: 12px 14px; font-size: 13px; font-weight: 700; background: rgba(30, 41, 59, 0.85); border: 1px solid rgba(255,255,255,0.25); color: #fff; border-radius: 12px; cursor: pointer; user-select: none;">
+          <span id="dock-cruise-label">🔒 CRUISE [C]</span>
+        </button>
+      </div>
+
       <!-- Hidden Legacy DOM Elements for Compatibility -->
       <div style="display: none;" aria-hidden="true">
         <div id="hud-weather"><span id="hud-weather-text"></span></div>
-        <div id="hud-paramotor-pill">
-          <span id="hud-rpm"></span><span id="hud-thrust"></span><span id="hud-throttle"></span>
-        </div>
         <button id="btn-ctrl-mode"><span id="hud-ctrl-icon"></span><span id="hud-ctrl-label"></span></button>
         <button id="btn-ir-goggles"><span id="hud-ir-label"></span></button>
         <button id="btn-ghost"></button>
@@ -378,7 +412,6 @@ export class FlightHUD {
         <div id="hud-touch-layer"></div>
         <div id="hud-riser-dock">
           <button id="btn-dock-a"></button><button id="btn-dock-b"></button>
-          <button id="btn-dock-throttle"><span id="dock-throttle-sub"></span></button>
         </div>
         <div id="hud-bottom-hints"><span id="hint-throttle"></span></div>
       </div>
@@ -518,12 +551,32 @@ export class FlightHUD {
     this.xcProgressPctEl = document.getElementById('xc-task-pct')
 
     this.paramotorPillEl = document.getElementById('hud-paramotor-pill')
+    this.paramotorDockEl = document.getElementById('hud-paramotor-dock')
     this.rpmEl = document.getElementById('hud-rpm')
     this.thrustEl = document.getElementById('hud-thrust')
     this.throttleEl = document.getElementById('hud-throttle')
     this.dockBtnThrottle = document.getElementById('btn-dock-throttle')
     this.dockThrottleSubEl = document.getElementById('dock-throttle-sub')
+    this.dockCruiseBtn = document.getElementById('btn-dock-cruise')
+    this.dockCruiseLabelEl = document.getElementById('dock-cruise-label')
     this.hintThrottleEl = document.getElementById('hint-throttle')
+
+    this.massBtnEl = document.getElementById('btn-pilot-mass')
+    this.massEl = document.getElementById('hud-mass-label')
+
+    if (this.massBtnEl) {
+      this.massBtnEl.addEventListener('click', (e) => {
+        e.stopPropagation()
+        this.onCyclePilotMassCallback()
+      })
+    }
+
+    if (this.dockCruiseBtn) {
+      this.dockCruiseBtn.addEventListener('click', (e) => {
+        e.stopPropagation()
+        this.onToggleCruiseCallback()
+      })
+    }
 
     if (this.wingBtnEl) {
       this.wingBtnEl.addEventListener('click', (e) => {
@@ -915,10 +968,18 @@ export class FlightHUD {
       }
     }
 
+    // Pilot Mass Update
+    if (this.massEl) {
+      this.massEl.innerText = `${telemetry.pilotMassKg ?? 95}KG`
+    }
+
     // Paramotor HUD & Throttle Dock Update
     const isParamotor = telemetry.wingType === 'paramotor'
     if (this.paramotorPillEl) {
       this.paramotorPillEl.style.display = isParamotor ? 'inline-flex' : 'none'
+    }
+    if (this.paramotorDockEl) {
+      this.paramotorDockEl.style.display = isParamotor ? 'flex' : 'none'
     }
     if (this.dockBtnThrottle) {
       this.dockBtnThrottle.style.display = isParamotor ? 'flex' : 'none'
@@ -939,6 +1000,16 @@ export class FlightHUD {
           this.dockBtnThrottle.classList.add('active')
         } else {
           this.dockBtnThrottle.classList.remove('active')
+        }
+      }
+      if (this.dockCruiseBtn) {
+        const isCruising = Math.abs((telemetry.throttlePercent ?? 0) - 35) <= 2
+        if (isCruising) {
+          this.dockCruiseBtn.classList.add('active')
+          if (this.dockCruiseLabelEl) this.dockCruiseLabelEl.innerText = '🔒 LEVEL CRUISE'
+        } else {
+          this.dockCruiseBtn.classList.remove('active')
+          if (this.dockCruiseLabelEl) this.dockCruiseLabelEl.innerText = '🔒 CRUISE [C]'
         }
       }
     }

@@ -131,6 +131,8 @@ export type FlightTelemetry = {
   throttlePercent?: number
   engineRpm?: number
   thrustNewtons?: number
+  pilotMassKg?: number
+  wingLoadingKgPerM2?: number
   staticChargeField?: number
   thermalFluidVx?: number
   thermalFluidVy?: number
@@ -138,3 +140,4 @@ export type FlightTelemetry = {
   thermalTempAnomalyC?: number
   isDraftingZone?: boolean
 }
+

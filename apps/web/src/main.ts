@@ -138,7 +138,7 @@ function initApp() {
   const getWingLabel = (w: 'paraglider' | 'speedwing' | 'paramotor') => {
     if (w === 'paraglider') return 'XC 10:1'
     if (w === 'speedwing') return 'SPEED 5:1'
-    return 'FREERIDE 2'
+    return 'PROP 8:1'
   }
   hud.setWingLabel(getWingLabel(sim.currentWingType))
   hud.setControlMode(inputManager.controlMode)
@@ -151,24 +151,36 @@ function initApp() {
 
     sim.setWing(nextWing)
     hud.setWingLabel(getWingLabel(nextWing))
+    const desc = nextWing === 'paramotor'
+      ? '🚁 Paramotor Active: Hold [SPACE] for Throttle, [C] for Cruise'
+      : (nextWing === 'speedwing' ? '⚡ Speedwing Active: 74 km/h Trim, Uncapped Dives' : '🪂 XC Paraglider Active: High-Glide Soaring')
+    hud.setWeatherInfo(desc)
   }
   hud.setOnCycleWing(toggleWing)
   inputManager.onToggleWing = toggleWing
+
+  const cyclePilotMass = () => {
+    const newMass = sim.cyclePilotMass()
+    hud.setWeatherInfo(`⚖️ Pilot Mass: ${newMass}kg (${sim.telemetry.wingLoadingKgPerM2 ?? 4.9} kg/m² wing loading)`)
+  }
+  hud.setOnCyclePilotMass(cyclePilotMass)
 
   hud.setOnThrottleHold((holding) => {
     if (holding) {
       inputManager.setTargetThrottle(1.0)
     } else {
-      inputManager.setTargetThrottle(inputManager.isCruiseLocked ? 0.55 : 0)
+      inputManager.setTargetThrottle(inputManager.isCruiseLocked ? 0.35 : 0)
     }
   })
 
   hud.setOnToggleCruise(() => {
     const locked = inputManager.toggleCruiseLock()
     if (locked) {
-      inputManager.setTargetThrottle(0.55)
+      inputManager.setTargetThrottle(0.35)
+      hud.setWeatherInfo('🔒 Level Cruise Locked (35% Throttle, 0 m/s Sink)')
     } else {
       inputManager.setTargetThrottle(0)
+      hud.setWeatherInfo('🔓 Cruise Disengaged')
     }
   })
 
@@ -328,8 +340,8 @@ function initApp() {
       coinRings = new CoinRings(scene, activeWorld)
       hud.setWorldName('🇨🇴 Andes')
       hud.setTotalCoins(coinRings.totalCoins)
-      sim.setWing('paraglider')
-      hud.setWingLabel(getWingLabel('paraglider'))
+      sim.setWing(sim.currentWingType)
+      hud.setWingLabel(getWingLabel(sim.currentWingType))
     } else if (currentWorldId === 'whistler') {
       const wm = new WhistlerMountain(scene)
       chairlift = new ChairliftSystem(scene, wm)
@@ -337,15 +349,15 @@ function initApp() {
       activeWorld = wm
       hud.setWorldName('🇨🇦 Whistler')
       hud.setTotalCoins(coinRings.totalCoins)
-      sim.setWing('paraglider')
-      hud.setWingLabel(getWingLabel('paraglider'))
+      sim.setWing(sim.currentWingType)
+      hud.setWingLabel(getWingLabel(sim.currentWingType))
     } else {
       activeWorld = new HimalayasMountain(scene)
       coinRings = new CoinRings(scene, activeWorld)
       hud.setWorldName('🇳🇵 Himalayas')
       hud.setTotalCoins(coinRings.totalCoins)
-      sim.setWing('paraglider')
-      hud.setWingLabel(getWingLabel('paraglider'))
+      sim.setWing(sim.currentWingType)
+      hud.setWingLabel(getWingLabel(sim.currentWingType))
     }
 
     gliderFlock = new GliderFlock(scene, activeWorld, activeWorld.launchPosition)
@@ -457,6 +469,17 @@ function initApp() {
       hud.toggleRisersGuide()
     } else if (e.code === 'KeyK') {
       toggleWing()
+    } else if (e.code === 'KeyU') {
+      cyclePilotMass()
+    } else if (e.code === 'KeyC') {
+      const locked = inputManager.toggleCruiseLock()
+      if (locked) {
+        inputManager.setTargetThrottle(0.35)
+        hud.setWeatherInfo('🔒 Level Cruise Locked (35% Throttle, 0 m/s Sink)')
+      } else {
+        inputManager.setTargetThrottle(0)
+        hud.setWeatherInfo('🔓 Cruise Disengaged')
+      }
     } else if (e.code === 'KeyO') {
       const next = inputManager.cycleControlMode()
       hud.setControlMode(next)

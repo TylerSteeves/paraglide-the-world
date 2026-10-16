@@ -724,6 +724,25 @@ body {
   }
 }
 
+.hud-paramotor-dock {
+  transition: opacity 0.25s ease, transform 0.25s ease;
+}
+#btn-dock-throttle {
+  transition: transform 0.08s ease, background 0.15s ease, box-shadow 0.15s ease;
+}
+#btn-dock-throttle:active,
+#btn-dock-throttle.active {
+  background: rgba(245, 158, 11, 0.75) !important;
+  border-color: #f59e0b !important;
+  transform: scale(0.96);
+  box-shadow: 0 0 25px rgba(245, 158, 11, 0.9) !important;
+}
+#btn-dock-cruise.active {
+  background: rgba(16, 185, 129, 0.45) !important;
+  border-color: #10b981 !important;
+  color: #a7f3d0 !important;
+}
+
 .dock-text {
   display: flex;
   flex-direction: column;
