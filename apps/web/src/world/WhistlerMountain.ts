@@ -14,8 +14,8 @@ export class WhistlerMountain implements FlightWorld {
   public terrainMesh: Mesh
   public waterMesh: Mesh | null = null
   public thermals: ThermalZone[] = []
-  // Launch right at the lip of the Whistler Summit alpine ski piste (ground is at ~1759m, launching ~9m over the snow!)
-  public readonly launchPosition = new Vector3(0, 1774, 20)
+  // Launch high into the big open alpine sky (ground is at ~1759m, launching 101m into the big sky!)
+  public readonly launchPosition = new Vector3(0, 1860, 20)
   public readonly launchHeadingDeg = 5.0 // Aim straight down the ski piste fall-line (Z+)
   private spawnedMeshes: (Mesh | any)[] = []
   private scene: Scene
@@ -134,6 +134,9 @@ export class WhistlerMountain implements FlightWorld {
 
     // 5. High Alpine Boulders along Ridge Ridges
     this.scatterBoulders()
+
+    // 5b. Alpine Ski Chalets, Olympic Village Lodges, Clock Tower & Bridge to Deek Around
+    this.scatterAlpineChaletsAndVillage()
 
     // 6. Updraft Thermals over Sun-Facing Headwalls
     this.thermals = [
@@ -397,5 +400,175 @@ export class WhistlerMountain implements FlightWorld {
     }
 
     if (boulder) boulder.isVisible = false
+  }
+
+  private scatterAlpineChaletsAndVillage() {
+    // Materials for Alpine Resort Architecture
+    const woodWallMat = new StandardMaterial('chalet-wood-mat', this.scene)
+    woodWallMat.diffuseColor = new Color3(0.38, 0.28, 0.20) // Rich cedar timber logs
+    woodWallMat.specularColor = new Color3(0.1, 0.1, 0.1)
+
+    const snowRoofMat = new StandardMaterial('chalet-snow-roof-mat', this.scene)
+    snowRoofMat.diffuseColor = new Color3(0.96, 0.98, 1.0) // Pristine snow-capped roof
+    snowRoofMat.specularColor = new Color3(0.3, 0.35, 0.4)
+
+    const stoneMat = new StandardMaterial('chalet-stone-mat', this.scene)
+    stoneMat.diffuseColor = new Color3(0.36, 0.38, 0.42) // Mountain river stone foundation & chimney
+    stoneMat.specularColor = new Color3(0.15, 0.15, 0.15)
+
+    const windowGlowMat = new StandardMaterial('chalet-window-glow-mat', this.scene)
+    windowGlowMat.diffuseColor = new Color3(1.0, 0.88, 0.45)
+    windowGlowMat.emissiveColor = new Color3(0.85, 0.65, 0.20) // Warm cozy hearth glow
+    windowGlowMat.specularColor = new Color3(0.8, 0.8, 0.8)
+
+    this.spawnedMeshes.push(woodWallMat, snowRoofMat, stoneMat, windowGlowMat)
+
+    // Helper to spawn an authentic alpine chalet
+    const createChalet = (name: string, x: number, z: number, scale: number = 1.0, rotY: number = 0) => {
+      const y = this.sampleHeight(x, z)
+      const w = 11.0 * scale
+      const h = 6.0 * scale
+      const d = 14.0 * scale
+
+      // Main Timber Log Cabin Body
+      const cabin = MeshBuilder.CreateBox(`${name}-body`, { width: w, height: h, depth: d }, this.scene)
+      cabin.position.set(x, y + h * 0.5, z)
+      cabin.rotation.y = rotY
+      cabin.material = woodWallMat
+      this.spawnedMeshes.push(cabin)
+
+      // Pitched Snow Roof (A-Frame)
+      const roofH = 4.5 * scale
+      const roof = MeshBuilder.CreateCylinder(
+        `${name}-roof`,
+        { height: d * 1.08, diameterTop: 0.2, diameterBottom: w * 1.35, tessellation: 3 },
+        this.scene,
+      )
+      roof.position.set(x, y + h + roofH * 0.4, z)
+      roof.rotation.x = Math.PI / 2
+      roof.rotation.y = rotY
+      roof.material = snowRoofMat
+      this.spawnedMeshes.push(roof)
+
+      // Stone Fireplace Chimney
+      const chimney = MeshBuilder.CreateBox(
+        `${name}-chimney`,
+        { width: 1.6 * scale, height: (h + roofH + 1.8) * scale, depth: 1.6 * scale },
+        this.scene,
+      )
+      chimney.position.set(x + w * 0.38, y + (h + roofH) * 0.5, z + d * 0.25)
+      chimney.rotation.y = rotY
+      chimney.material = stoneMat
+      this.spawnedMeshes.push(chimney)
+
+      // Illuminated Window Glow
+      const win = MeshBuilder.CreateBox(`${name}-win`, { width: 2.4 * scale, height: 1.8 * scale, depth: 0.3 }, this.scene)
+      win.position.set(x, y + h * 0.55, z + d * 0.51)
+      win.rotation.y = rotY
+      win.material = windowGlowMat
+      this.spawnedMeshes.push(win)
+    }
+
+    // A. Mid-Mountain Chalet Hamlet (z = 1060 to 1420)
+    // 8 ski cabins on the left and right flanks of the bowl that the player can deek between!
+    const hamletZ = [1060, 1140, 1220, 1300, 1380]
+    hamletZ.forEach((z, idx) => {
+      const pc = Math.sin(z * 0.0028) * 32.0
+      createChalet(`chalet-l-${idx}`, pc - (45.0 + (idx % 2) * 16.0), z - 10, 1.1 + (idx % 3) * 0.2, 0.25)
+      createChalet(`chalet-r-${idx}`, pc + (48.0 + ((idx + 1) % 2) * 14.0), z + 15, 1.05 + ((idx + 1) % 3) * 0.2, -0.3)
+    })
+
+    // B. Olympic Village Complex (z = 2100 to 2420)
+    // 1. Alpine Clock Tower at z = 2260
+    const towerX = 22.0
+    const towerZ = 2260.0
+    const towerGroundY = this.sampleHeight(towerX, towerZ)
+    const towerBaseH = 18.0
+    const towerBase = MeshBuilder.CreateBox(
+      'village-clock-base',
+      { width: 6.5, height: towerBaseH, depth: 6.5 },
+      this.scene,
+    )
+    towerBase.position.set(towerX, towerGroundY + towerBaseH * 0.5, towerZ)
+    towerBase.material = stoneMat
+
+    const spireH = 8.0
+    const towerSpire = MeshBuilder.CreateCylinder(
+      'village-clock-spire',
+      { height: spireH, diameterTop: 0.1, diameterBottom: 7.2, tessellation: 4 },
+      this.scene,
+    )
+    towerSpire.position.set(towerX, towerGroundY + towerBaseH + spireH * 0.5, towerZ)
+    towerSpire.rotation.y = Math.PI / 4
+    towerSpire.material = snowRoofMat
+
+    // 4 Glowing Clock Faces
+    for (let f = 0; f < 4; f++) {
+      const clockFace = MeshBuilder.CreateDisc(`clock-face-${f}`, { radius: 1.8, tessellation: 20 }, this.scene)
+      const angle = (f * Math.PI) / 2
+      clockFace.position.set(
+        towerX + Math.sin(angle) * 3.3,
+        towerGroundY + towerBaseH - 3.2,
+        towerZ + Math.cos(angle) * 3.3,
+      )
+      clockFace.rotation.y = angle
+      clockFace.material = windowGlowMat
+      this.spawnedMeshes.push(clockFace)
+    }
+    this.spawnedMeshes.push(towerBase, towerSpire)
+
+    // 2. Grand Mountain Ski Lodge at z = 2210, x = -48
+    const lodgeX = -48.0
+    const lodgeZ = 2210.0
+    const lodgeY = this.sampleHeight(lodgeX, lodgeZ)
+    const lodgeBody = MeshBuilder.CreateBox(
+      'village-grand-lodge',
+      { width: 32.0, height: 10.0, depth: 18.0 },
+      this.scene,
+    )
+    lodgeBody.position.set(lodgeX, lodgeY + 5.0, lodgeZ)
+    lodgeBody.material = woodWallMat
+
+    const lodgeRoof = MeshBuilder.CreateCylinder(
+      'village-lodge-roof',
+      { height: 20.0, diameterTop: 0.4, diameterBottom: 35.0, tessellation: 3 },
+      this.scene,
+    )
+    lodgeRoof.position.set(lodgeX, lodgeY + 13.0, lodgeZ)
+    lodgeRoof.rotation.x = Math.PI / 2
+    lodgeRoof.material = snowRoofMat
+    this.spawnedMeshes.push(lodgeBody, lodgeRoof)
+
+    // 3. Timber Ski Bridge spanning the course at z = 2140
+    // Spans 42m across the ski piste with a 7.5m clearance arch to fly under or deek around!
+    const bridgeZ = 2140.0
+    const bridgePc = Math.sin(bridgeZ * 0.0028) * 32.0
+    const bridgeY = this.sampleHeight(bridgePc, bridgeZ)
+    const bridgeDeck = MeshBuilder.CreateBox(
+      'village-bridge-deck',
+      { width: 42.0, height: 2.2, depth: 7.0 },
+      this.scene,
+    )
+    bridgeDeck.position.set(bridgePc, bridgeY + 8.5, bridgeZ)
+    bridgeDeck.material = woodWallMat
+
+    const bridgeRoof = MeshBuilder.CreateBox(
+      'village-bridge-roof',
+      { width: 44.0, height: 1.2, depth: 8.5 },
+      this.scene,
+    )
+    bridgeRoof.position.set(bridgePc, bridgeY + 12.0, bridgeZ)
+    bridgeRoof.material = snowRoofMat
+
+    // Left and Right Stone Piers
+    const pierL = MeshBuilder.CreateBox('bridge-pier-l', { width: 3.5, height: 12.0, depth: 7.0 }, this.scene)
+    pierL.position.set(bridgePc - 19.0, bridgeY + 6.0, bridgeZ)
+    pierL.material = stoneMat
+
+    const pierR = MeshBuilder.CreateBox('bridge-pier-r', { width: 3.5, height: 12.0, depth: 7.0 }, this.scene)
+    pierR.position.set(bridgePc + 19.0, bridgeY + 6.0, bridgeZ)
+    pierR.material = stoneMat
+
+    this.spawnedMeshes.push(bridgeDeck, bridgeRoof, pierL, pierR)
   }
 }

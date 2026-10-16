@@ -52,6 +52,8 @@ export class MobileInputManager {
   public tiltParallaxPitch: number = 0
   public leftLagFrac: number = 0
   public rightLagFrac: number = 0
+  public touchSteer: number = 0
+  public isTouchSteering: boolean = false
 
   // Control mode & settings
   public controlMode: ControlMode = 'direct-tilt'
@@ -116,12 +118,12 @@ export class MobileInputManager {
   }
 
   public calibrateNeutral(forceAngle?: number, forceRoll?: number) {
-    if (typeof forceAngle === 'number' && forceAngle >= 45.0 && forceAngle <= 75.0) {
+    if (typeof forceAngle === 'number' && forceAngle >= 32.0 && forceAngle <= 82.0) {
       this.neutralElevationDeg = forceAngle
-    } else if (this.phoneElevationDeg >= 45.0 && this.phoneElevationDeg <= 75.0) {
+    } else if (this.phoneElevationDeg >= 32.0 && this.phoneElevationDeg <= 82.0) {
       this.neutralElevationDeg = this.phoneElevationDeg
     } else {
-      this.neutralElevationDeg = 62.0
+      this.neutralElevationDeg = 56.0
     }
 
     if (typeof forceRoll === 'number') {
@@ -238,16 +240,56 @@ export class MobileInputManager {
     window.addEventListener(
       'pointerdown',
       (e) => {
+        const target = e.target as HTMLElement | null
+        if (target && target.closest && target.closest('button, .hud-pill, .guide-card, a')) {
+          return
+        }
         touchStartX = e.clientX
         touchStartY = e.clientY
         touchStartTime = performance.now()
+
+        const w = window.innerWidth || 400
+        if (e.clientX < w * 0.44) {
+          const depth = clamp((w * 0.44 - e.clientX) / (w * 0.36), 0.35, 1.0)
+          this.touchSteer = -depth
+          this.isTouchSteering = true
+        } else if (e.clientX > w * 0.56) {
+          const depth = clamp((e.clientX - w * 0.56) / (w * 0.36), 0.35, 1.0)
+          this.touchSteer = depth
+          this.isTouchSteering = true
+        }
       },
       { passive: true },
     )
 
     window.addEventListener(
+      'pointermove',
+      (e) => {
+        if (!this.isTouchSteering) return
+        const w = window.innerWidth || 400
+        if (e.clientX < w * 0.44) {
+          const depth = clamp((w * 0.44 - e.clientX) / (w * 0.36), 0.35, 1.0)
+          this.touchSteer = -depth
+        } else if (e.clientX > w * 0.56) {
+          const depth = clamp((e.clientX - w * 0.56) / (w * 0.36), 0.35, 1.0)
+          this.touchSteer = depth
+        } else {
+          this.touchSteer = 0
+        }
+      },
+      { passive: true },
+    )
+
+    const stopTouchSteer = () => {
+      this.isTouchSteering = false
+      this.touchSteer = 0
+    }
+    window.addEventListener('pointercancel', stopTouchSteer, { passive: true })
+
+    window.addEventListener(
       'pointerup',
       (e) => {
+        stopTouchSteer()
         // Ignore if clicking on UI interactive buttons
         const target = e.target as HTMLElement | null
         if (target && target.closest && target.closest('button, .hud-pill, .guide-card, a')) {
@@ -307,7 +349,7 @@ export class MobileInputManager {
     this.phoneElevationDeg = this.smoothedElevationDeg
 
     // Capture resting neutral angle on initial steady frames after launch
-    if (this.needAutoCalibration && this.smoothedElevationDeg >= 48.0 && this.smoothedElevationDeg <= 74.0) {
+    if (this.needAutoCalibration && this.smoothedElevationDeg >= 35.0 && this.smoothedElevationDeg <= 78.0) {
       this.autoCalibrateSampleCount++
       if (this.autoCalibrateSampleCount === 1) {
         this.neutralElevationDeg = this.smoothedElevationDeg
@@ -326,28 +368,26 @@ export class MobileInputManager {
     // 1. Roll Steering & Rock-Solid Stability in Neutrality:
     // Natural human phone holding has slight resting asymmetry and tremor.
     // 1. Roll is measured relative to calibrated neutral resting posture (neutralRollDeg).
-    // 2. Wide 5.5° deadband gives a firm, confident center detent (zero drift or wobble).
-    // 3. Smoothstep Hermite curve (3x^2 - 2x^3) ensures zero slope discontinuity at deadband boundary.
+    // 2. Firm 4.2° deadband gives a confident center detent (zero drift or wobble).
+    // 3. Smoothstep Hermite curve (3x^2 - 2x^3) ensures velvety smooth departure from neutral.
     // 4. Subtle auto-trim slowly adapts neutralRollDeg when resting steadily in center.
     const rollDelta = this.smoothedRollDeg - this.neutralRollDeg
     const absRoll = Math.abs(rollDelta)
 
-    if (absRoll < 3.5 && !this.needAutoCalibration) {
+    if (absRoll < 3.2 && !this.needAutoCalibration) {
       // Gentle auto-trim while holding phone steady in the middle
       this.neutralRollDeg += (this.smoothedRollDeg - this.neutralRollDeg) * Math.min(1.0, 0.35 * dt)
     }
 
-    const DEADBAND_ROLL = 5.5
-    const MAX_ROLL = 26.0
+    const DEADBAND_ROLL = 4.2
+    const MAX_ROLL = 22.0
 
     if (absRoll < DEADBAND_ROLL) {
       this.tiltWeightShift = 0
     } else {
       const sign = Math.sign(rollDelta)
       const norm = clamp((absRoll - DEADBAND_ROLL) / (MAX_ROLL - DEADBAND_ROLL), 0, 1)
-      // Smoothstep curve (3x^2 - 2x^3) gives zero derivative at 0 for a velvety smooth departure from neutral
       const mag = norm * norm * (3.0 - 2.0 * norm)
-      // Natural steering: tilt left turns left, tilt right turns right
       const steerSign = this.invertRollSteering ? -sign : sign
       this.tiltWeightShift = steerSign * mag
     }
@@ -355,13 +395,11 @@ export class MobileInputManager {
     this.instantTwistRad = (this.tiltWeightShift * 0.12)
 
     // 2. Pitch & Wing Envelope:
-    // - Upright resting angle (~62°): pure level trim glide (85 km/h down the slope)
-    // - Deadband ±4.0° around neutral
-    // - Tilt back / up (> neutral + deadband): flare, hover & float
-    // - Point straight up (>= 90°): wing collapses into freefall plunge
-    // - Lean forward (< neutral - deadband down to -25°): dive & spiral fast down to the ground!
-    const neutral = clamp(this.neutralElevationDeg, 52.0, 72.0)
-    const deadband = 4.0
+    // Generous ±8.5° deadband around neutral prevents unintentional dive/sink while steering!
+    // Leaning forwards (> 8.5° forward) deliberately dives and speeds up.
+    // Tilting back (> 8.5° back) flares and floats.
+    const neutral = clamp(this.neutralElevationDeg, 42.0, 72.0)
+    const deadband = 8.5
 
     if (this.smoothedElevationDeg >= 90.0) {
       this.isWingCollapsed = true
@@ -374,23 +412,22 @@ export class MobileInputManager {
       this.flareDemand = 0
       this.pitchDemand = 0
     } else if (this.smoothedElevationDeg < neutral - deadband) {
-      // Leaning forwards from (neutral - deadband) down through flat (0°) to -25°
-      // Over 80° of pure forward lean freedom to spiral and dive fast down to the ground!
+      // Leaning forwards from (neutral - deadband) down through flat to -25°
       const maxDownAngle = -25.0
       const diveTravel = (neutral - deadband) - maxDownAngle
-      const norm = clamp((neutral - deadband - this.smoothedElevationDeg) / Math.max(12.0, diveTravel), 0, 1)
-      this.diveDemand = Math.pow(norm, 1.15)
+      const norm = clamp((neutral - deadband - this.smoothedElevationDeg) / Math.max(15.0, diveTravel), 0, 1)
+      this.diveDemand = Math.pow(norm, 1.25)
       this.flareDemand = 0
       this.pitchDemand = this.diveDemand
     } else if (this.smoothedElevationDeg > neutral + deadband) {
-      // Looking slightly upwards: flares, hovers and floats
+      // Looking upwards: flares, hovers and floats
       const flareTravel = 88.0 - (neutral + deadband)
-      const norm = clamp((this.smoothedElevationDeg - (neutral + deadband)) / Math.max(6.0, flareTravel), 0, 1)
-      this.flareDemand = Math.pow(norm, 1.15)
+      const norm = clamp((this.smoothedElevationDeg - (neutral + deadband)) / Math.max(8.0, flareTravel), 0, 1)
+      this.flareDemand = Math.pow(norm, 1.25)
       this.diveDemand = 0
       this.pitchDemand = -this.flareDemand
     } else {
-      // Level Trim Glide
+      // Level Trim Glide in Big Sky
       this.diveDemand = 0
       this.flareDemand = 0
       this.pitchDemand = 0
@@ -400,7 +437,9 @@ export class MobileInputManager {
   public update(dt: number, ..._rest: any[]): void {
     // 1. Steering & Roll:
     let netRoll = 0
-    if (this.isMotionActive) {
+    if (this.isTouchSteering && Math.abs(this.touchSteer) > 0.05) {
+      netRoll = this.touchSteer
+    } else if (this.isMotionActive) {
       netRoll = this.tiltWeightShift
     } else {
       // Desktop keyboard fallback
@@ -446,8 +485,8 @@ export class MobileInputManager {
     // When returning to center, faster recovery (14.0) firmly locks into neutral stability.
     // When rolling into a turn, a progressive rate (5.5) feels like a physical human weight shift, not a twitch.
     const isReturningToCenter = Math.abs(netRoll) < Math.abs(this.controls.weightShift || 0)
-    const steerRate = isReturningToCenter ? 14.0 : 5.5
-    const brakeRate = isReturningToCenter ? 12.0 : 6.5
+    const steerRate = isReturningToCenter ? 24.0 : 18.0
+    const brakeRate = isReturningToCenter ? 20.0 : 16.0
     const barRate = speedBarTarget > (this.controls.speedBar || 0) ? 14.0 : 10.0
 
     this.controls.weightShift += (netRoll - this.controls.weightShift) * Math.min(1.0, steerRate * dt)

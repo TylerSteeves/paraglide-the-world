@@ -115,45 +115,50 @@ export class CoinRings {
         }
       }
     } else {
-      // --- 🇨🇦 WHISTLER OLYMPIC 7-STAGE FLIGHT MECHANICS COURSE ---
+      // --- 🇨🇦 WHISTLER OLYMPIC 7-STAGE BIG SKY & ALPINE ARCHITECTURE FLIGHT COURSE ---
       const pisteCenter = (z: number) => Math.sin(z * 0.0028) * 32.0
 
-      // Stage 1: Summit Chute & Speed Dive (z = 45 to 330)
-      // Plunging down the 34° alpine headwall. Prompts leaning forward into a speed dive!
-      for (let z = 45; z <= 330; z += 35) {
-        const x = pisteCenter(z)
-        const gy = world.sampleHeight(x, z)
+      // Stage 1: Summit Launch & Big Sky Speed Dive (z = 65 to 330)
+      // Suspended high in the big open alpine sky (>95m clearance over summit headwall)
+      const stage1 = [
+        { z: 65, x: 0, y: 1845 },
+        { z: 130, x: 10, y: 1815 },
+        { z: 195, x: 22, y: 1775 },
+        { z: 260, x: 28, y: 1730 },
+        { z: 330, x: 26, y: 1680 },
+      ]
+      stage1.forEach((w) =>
         rawWaypoints.push({
-          x,
-          y: gy + 7.5,
-          z,
+          x: w.x,
+          y: w.y,
+          z: w.z,
           category: 'dive',
-          radius: 4.5,
+          radius: 6.0,
           points: 100,
-        })
-      }
+        }),
+      )
 
-      // Stage 2: High-G Centrifugal Sling Slalom (z = 360 to 780)
-      // Wide S-turns carving back and forth. Tests the slow initiation into centrifugal sling whip!
-      for (let z = 360; z <= 780; z += 35) {
-        const u = (z - 360) / (780 - 360)
-        const sTurn = Math.sin(u * Math.PI * 2.0) * 44.0
-        const driftToThermal = u * -120.0
-        const x = pisteCenter(z) + sTurn + driftToThermal
-        const gy = world.sampleHeight(x, z)
+      // Stage 2: High-Alpine Centrifugal Slalom (z = 375 to 775)
+      // Sweeping S-turns carving back and forth across the big sky bowl (80m-120m clearance)
+      for (let z = 375; z <= 775; z += 50) {
+        const u = (z - 375) / (775 - 375)
+        const sTurn = Math.sin(u * Math.PI * 2.0) * 52.0
+        const drift = u * -115.0
+        const x = pisteCenter(z) + sTurn + drift
+        const y = 1640 - u * 180
         rawWaypoints.push({
           x,
-          y: gy + 8.0,
+          y,
           z,
           category: 'carve',
-          radius: 4.8,
+          radius: 6.2,
           points: 120,
         })
       }
 
-      // Stage 3: Thermal Elevator Corkscrew & Dynamic Flare (z = 810 to 970)
-      // Located at Whistler Thermal #2 (-120, 1340, 850).
-      // Climbs in a buoyant 360° updraft spiral!
+      // Stage 3: Whistler Peak Thermal Elevator Corkscrew (z = 810 to 970)
+      // Located at Whistler Thermal #2 (-100, 1340, 880).
+      // Climbs in a buoyant 360° updraft spiral from 1460m up to 1555m!
       const thCenter = { x: -100, z: 880 }
       const thR = 65.0
       for (let i = 0; i <= 8; i++) {
@@ -162,88 +167,102 @@ export class CoinRings {
         const zDrift = t * 90
         const x = thCenter.x + Math.cos(angle) * thR
         const z = thCenter.z + Math.sin(angle) * thR * 0.7 + zDrift
-        const gy = world.sampleHeight(x, z)
+        const y = 1460 + t * 95
         rawWaypoints.push({
           x,
-          y: gy + 14.0 + t * 24.0, // Ascends +24m above terrain inside thermal!
+          y,
           z,
           category: 'thermal',
-          radius: 5.4,
+          radius: 6.5,
           points: 150,
         })
       }
 
-      // Stage 4: Couloir & Chairlift Weave (z = 1000 to 1480)
-      // Carving along the natural ravine corridor flanking the chairlift towers!
-      for (let z = 1000; z <= 1480; z += 36) {
-        const u = Math.min(1.0, (z - 1000) / 180)
-        const targetX = pisteCenter(z) - 34.0
-        const x = -100 * (1 - u) + targetX * u
-        const gy = world.sampleHeight(x, z)
+      // Stage 4: Alpine Chalet Hamlet Proximity Deek (z = 1030 to 1430)
+      // Weaving between the 10 cedar chalets, buzzing just above the pitched snow roofs!
+      const chalets = [
+        { z: 1050, dx: -28, dy: 28 },
+        { z: 1130, dx: 26, dy: 26 },
+        { z: 1210, dx: -24, dy: 25 },
+        { z: 1290, dx: 25, dy: 24 },
+        { z: 1370, dx: -22, dy: 24 },
+        { z: 1430, dx: 0, dy: 30 },
+      ]
+      chalets.forEach((c) => {
+        const pc = pisteCenter(c.z)
+        const x = pc + c.dx
+        const gy = world.sampleHeight(x, c.z)
         rawWaypoints.push({
           x,
-          y: gy + 6.5,
-          z,
+          y: gy + c.dy,
+          z: c.z,
           category: 'couloir',
-          radius: 4.6,
-          points: 120,
+          radius: 6.0,
+          points: 150,
         })
-      }
+      })
 
-      // Stage 5: Acro Bowl Arena (z = 1520 to 1920)
-      // Deep alpine amphitheater. Large elevated hoops for barrel rolls, loops, and wingovers!
-      for (let z = 1520; z <= 1920; z += 36) {
+      // Stage 5: Acro Bowl Arena (z = 1490 to 1930)
+      // Soaring over the massive alpine amphitheater in elevated acrobatic waves!
+      for (let z = 1490; z <= 1930; z += 55) {
         const pc = pisteCenter(z)
-        const x = pc + Math.sin(z * 0.015) * 22.0
+        const x = pc + Math.sin(z * 0.015) * 26.0
         const gy = world.sampleHeight(x, z)
-        const wave = Math.sin(((z - 1520) / 400) * Math.PI * 2) * 10.0
+        const wave = Math.sin(((z - 1490) / 440) * Math.PI * 2) * 12.0
         rawWaypoints.push({
           x,
-          y: gy + 18.0 + wave,
+          y: gy + 62.0 + wave,
           z,
           category: 'acro',
-          radius: 5.8,
+          radius: 7.2,
           points: 200,
         })
       }
 
-      // Stage 6: Olympic Village Ground Swoop Highway (z = 1960 to 2440)
-      // Flat corduroy runout skimming 3.8m above the snow! Ride the 120+ km/h kinetic dive energy!
-      for (let z = 1960; z <= 2440; z += 36) {
-        const pc = pisteCenter(z)
-        const gy = world.sampleHeight(pc, z)
+      // Stage 6: Olympic Village, Bridge Archway & Clock Tower (z = 1980 to 2420)
+      // High-speed proximity carve under the timber bridge and past the clock tower!
+      const village = [
+        { z: 1980, x: pisteCenter(1980), yRel: 32, rad: 6.0 },
+        { z: 2060, x: pisteCenter(2060), yRel: 18, rad: 5.5 },
+        { z: 2140, x: pisteCenter(2140), yRel: 4.8, rad: 3.4 }, // Under Timber Ski Bridge arch!
+        { z: 2210, x: -16, yRel: 12, rad: 5.8 },                 // Past Grand Lodge balcony!
+        { z: 2260, x: 0, yRel: 14, rad: 5.8 },                   // Past Alpine Clock Tower!
+        { z: 2340, x: pisteCenter(2340), yRel: 10, rad: 6.0 },
+        { z: 2420, x: pisteCenter(2420), yRel: 8, rad: 6.0 },
+      ]
+      village.forEach((v) => {
+        const gy = world.sampleHeight(v.x, v.z)
         rawWaypoints.push({
-          x: pc,
-          y: gy + 4.2,
-          z,
+          x: v.x,
+          y: gy + v.yRel,
+          z: v.z,
           category: 'swoop',
-          radius: 4.5,
+          radius: v.rad,
           points: 150,
         })
-      }
+      })
 
-      // Stage 7: Frozen Green Lake Flare & Grand Finish Arch (z = 2480 to 2800)
-      // Touch-and-go glide over frozen lake, culminating in a giant golden finish arch!
-      for (let z = 2480; z <= 2740; z += 45) {
-        const gy = world.sampleHeight(0, z)
+      // Stage 7: Frozen Green Lake Flare & Grand Finish Arch (z = 2500 to 2800)
+      // Flat skimming across the frozen lake to the majestic victory arch!
+      const lakeZ = [2500, 2580, 2660, 2740]
+      lakeZ.forEach((z) => {
         rawWaypoints.push({
           x: 0,
-          y: gy + 4.5,
+          y: 646 - ((z - 2500) / 240) * 3,
           z,
           category: 'finish',
-          radius: 5.0,
+          radius: 6.2,
           points: 150,
         })
-      }
+      })
 
       // Grand Finish Arch at z = 2800
-      const finalGy = world.sampleHeight(0, 2800)
       rawWaypoints.push({
         x: 0,
-        y: finalGy + 8.5,
+        y: 648,
         z: 2800,
         category: 'finish',
-        radius: 7.5,
+        radius: 11.0,
         points: 500,
       })
     }
@@ -275,12 +294,12 @@ export class CoinRings {
 
       // Outer Torus Gate (Hoop)
       const isGrandFinish = i === totalWp - 1
-      const torusDiameter = isGrandFinish ? 13.0 : wp.radius * 2.0
-      const torusThickness = isGrandFinish ? 1.1 : (wp.category === 'acro' ? 0.75 : 0.60)
+      const torusDiameter = isGrandFinish ? 22.0 : wp.radius * 2.0
+      const torusThickness = isGrandFinish ? 1.35 : 0.70
 
       const ringMesh = MeshBuilder.CreateTorus(
         `gate-hoop-${i}`,
-        { diameter: torusDiameter, thickness: torusThickness, tessellation: isGrandFinish ? 32 : 24 },
+        { diameter: torusDiameter, thickness: torusThickness, tessellation: isGrandFinish ? 36 : 28 },
         scene,
       )
       ringMesh.parent = rootNode
@@ -288,8 +307,37 @@ export class CoinRings {
       ringMesh.material = matPair.ringMat
       this.spawnedMeshes.push(ringMesh)
 
+      // Inner Concentric Luminous Guide Ring
+      const innerTorusDiameter = isGrandFinish ? 16.0 : wp.radius * 1.35
+      const innerRingMesh = MeshBuilder.CreateTorus(
+        `gate-inner-ring-${i}`,
+        { diameter: innerTorusDiameter, thickness: 0.22, tessellation: isGrandFinish ? 32 : 24 },
+        scene,
+      )
+      innerRingMesh.parent = rootNode
+      innerRingMesh.rotation.x = Math.PI / 2
+      innerRingMesh.material = matPair.ringMat
+      this.spawnedMeshes.push(innerRingMesh)
+
+      // 4 Holographic Inward Alignment Fins
+      const finLen = isGrandFinish ? 3.0 : 1.5
+      for (let f = 0; f < 4; f++) {
+        const finAngle = (f * Math.PI) / 2
+        const finDist = (torusDiameter * 0.5 + innerTorusDiameter * 0.5) * 0.5
+        const fin = MeshBuilder.CreateBox(
+          `gate-fin-${i}-${f}`,
+          { width: 0.3, height: finLen, depth: 0.2 },
+          scene,
+        )
+        fin.position.set(Math.sin(finAngle) * finDist, Math.cos(finAngle) * finDist, 0)
+        fin.rotation.z = -finAngle
+        fin.parent = rootNode
+        fin.material = matPair.ringMat
+        this.spawnedMeshes.push(fin)
+      }
+
       // Inner Spinning Star/Shimmer Disc
-      const discRadius = wp.radius * 0.45
+      const discRadius = wp.radius * 0.40
       const coreDisc = MeshBuilder.CreateDisc(
         `gate-core-${i}`,
         { radius: discRadius, tessellation: 16 },
@@ -391,10 +439,11 @@ export class CoinRings {
     pilotPos: Vector3,
     dt: number,
     airspeedKmh: number = 0,
-  ): { ringCollected: boolean; points: number; speedBonus: boolean; category?: RingCategory } {
+  ): { ringCollected: boolean; points: number; speedBonus: boolean; category?: RingCategory; liftBoost?: boolean } {
     let ringCollected = false
     let points = 0
     let speedBonus = false
+    let liftBoost = false
     let hitCategory: RingCategory | undefined
 
     for (const ring of this.rings) {
@@ -423,11 +472,12 @@ export class CoinRings {
       const dz = pilotPos.z - ring.position.z
       const distSq = dx * dx + dy * dy + dz * dz
 
-      // Collection radius (generous 7.5m - 9.0m)
-      const collectDist = ring.radius + 3.2
+      // Collection radius (generous 7.5m - 10.0m)
+      const collectDist = ring.radius + 3.8
       if (distSq < collectDist * collectDist) {
         ring.collecting = true
         ringCollected = true
+        liftBoost = true
         hitCategory = ring.category
         this.comboStreak++
 
@@ -443,7 +493,7 @@ export class CoinRings {
       }
     }
 
-    return { ringCollected, points, speedBonus, category: hitCategory }
+    return { ringCollected, points, speedBonus, category: hitCategory, liftBoost }
   }
 
   public dispose(): void {
