@@ -226,11 +226,12 @@ export class FlightSoundscape {
     this.wasCollapsedLastFrame = isCollapsed
 
     // 1. Modulate Wind Noise: Clean laminar rush; exhilarating roar on surges & G-turns; quiet float on zero-G; screaming roar on freefall
-    const speedRatio = Math.max(0.1, Math.min(3.5, airspeedKmh / 58.0))
+    const isSpeedwing = wingType === 'speedwing'
+    const speedRatio = Math.max(0.1, Math.min(4.5, airspeedKmh / (isSpeedwing ? 70.0 : 45.0)))
     const gHeaviness = Math.max(0, gForce - 1.0)
     const zeroGFloat = Math.max(0, 1.0 - gForce)
-    let targetGain = (0.08 + Math.pow(speedRatio, 1.4) * 0.16 + gHeaviness * 0.18) * (1.0 - zeroGFloat * 0.35)
-    let targetFreq = (340 + Math.pow(speedRatio, 1.5) * 920 + gHeaviness * 550) * (1.0 - zeroGFloat * 0.25)
+    let targetGain = (0.08 + Math.pow(speedRatio, 1.45) * (isSpeedwing ? 0.28 : 0.16) + gHeaviness * 0.22) * (1.0 - zeroGFloat * 0.35)
+    let targetFreq = (340 + Math.pow(speedRatio, 1.55) * (isSpeedwing ? 1450 : 920) + gHeaviness * 650) * (1.0 - zeroGFloat * 0.25)
 
     if (isCollapsed || collapseFrac > 0.05) {
       // Freefall plunge: screaming wind roar as pilot plummets downward!
@@ -242,20 +243,21 @@ export class FlightSoundscape {
       targetFreq = 220
     }
 
-    this.windGain.gain.setTargetAtTime(Math.min(0.75, targetGain), this.ctx.currentTime, 0.06)
-    this.windFilter.frequency.setTargetAtTime(Math.min(2700, targetFreq), this.ctx.currentTime, 0.06)
+    this.windGain.gain.setTargetAtTime(Math.min(0.88, targetGain), this.ctx.currentTime, 0.05)
+    this.windFilter.frequency.setTargetAtTime(Math.min(4200, targetFreq), this.ctx.currentTime, 0.05)
 
     // 2. Aeolian Line Whistle (Singing Lines)
     // Resonates when lines are taut and fast; cuts out when lines go slack or wing collapses
     const isSlack = lineTensionN < 250 || isStalled || isCollapsed || collapseFrac > 0.05
-    if (isSlack || airspeedKmh < 34) {
+    if (isSlack || airspeedKmh < 28) {
       this.lineWhistleGain.gain.setTargetAtTime(0, this.ctx.currentTime, 0.05)
     } else {
-      const tensionFrac = Math.min(2.5, lineTensionN / 860.0)
-      const whistleFreq = 1500 + (airspeedKmh / 60.0) * 850 + (tensionFrac - 1.0) * 850
-      const whistleGain = Math.min(0.10, 0.018 * speedRatio * Math.min(1.8, tensionFrac))
-      this.lineWhistleOsc.frequency.setTargetAtTime(whistleFreq, this.ctx.currentTime, 0.05)
-      this.lineWhistleGain.gain.setTargetAtTime(whistleGain, this.ctx.currentTime, 0.06)
+      const tensionFrac = Math.min(3.0, lineTensionN / 860.0)
+      const baseWhistle = isSpeedwing ? 2100 : 1500
+      const whistleFreq = baseWhistle + (airspeedKmh / 50.0) * (isSpeedwing ? 1400 : 850) + (tensionFrac - 1.0) * 950
+      const whistleGain = Math.min(isSpeedwing ? 0.22 : 0.10, 0.022 * speedRatio * Math.min(2.0, tensionFrac))
+      this.lineWhistleOsc.frequency.setTargetAtTime(whistleFreq, this.ctx.currentTime, 0.04)
+      this.lineWhistleGain.gain.setTargetAtTime(whistleGain, this.ctx.currentTime, 0.05)
     }
 
     // 3. Trailing Edge Flutter & High-G Line Tension Groan & Deflated Canopy Buffeting
@@ -286,32 +288,31 @@ export class FlightSoundscape {
       this.stallBuffetGain.gain.setTargetAtTime(0, this.ctx.currentTime, 0.06)
     }
 
-    // 5. Variometer Logic: Climb = Beeping Tones; Sink = Low Growl
+    // 5. Variometer Logic: Hyper-sensitive paraglider thermalling
+    if (wingType !== 'speedwing' && verticalSpeedMps > 0.08) {
+      // Climbing in thermal updraft! (Threshold lowered to +0.08 m/s for instant feedback)
+      const climbRate = Math.min(8.0, verticalSpeedMps)
+      const pitchHz = 520 + climbRate * 195
+      const beepInterval = Math.max(0.08, 0.45 - climbRate * 0.065)
 
-    if (verticalSpeedMps > 0.15) {
-      // Climbing in thermal updraft!
-      const climbRate = Math.min(6.0, verticalSpeedMps)
-      const pitchHz = 620 + climbRate * 180
-      const beepInterval = Math.max(0.10, 0.42 - climbRate * 0.055)
-
-      this.varioOsc.frequency.setTargetAtTime(pitchHz, this.ctx.currentTime, 0.03)
+      this.varioOsc.frequency.setTargetAtTime(pitchHz, this.ctx.currentTime, 0.025)
 
       this.varioTimer += dt
       if (this.varioTimer > beepInterval * 2) {
         this.varioTimer = 0
       }
 
-      // Beep on/off pulse
+      // Musical Beep on/off pulse
       const isBeeping = this.varioTimer < beepInterval && !this.varioMuted
-      this.varioGain.gain.setTargetAtTime(isBeeping ? 0.09 : 0, this.ctx.currentTime, 0.015)
-    } else if (verticalSpeedMps < -1.8 && !this.varioMuted && wingType !== 'speedwing') {
-      // Moderate to strong sink tone for paraglider XC mode
-      const sinkPitch = Math.max(200, 380 + (verticalSpeedMps + 1.8) * 35)
-      this.varioOsc.frequency.setTargetAtTime(sinkPitch, this.ctx.currentTime, 0.05)
-      this.varioGain.gain.setTargetAtTime(0.045, this.ctx.currentTime, 0.05)
+      this.varioGain.gain.setTargetAtTime(isBeeping ? 0.11 : 0, this.ctx.currentTime, 0.012)
+    } else if (verticalSpeedMps < -1.25 && !this.varioMuted && wingType !== 'speedwing') {
+      // Sinking air warning for paraglider XC mode
+      const sinkPitch = Math.max(160, 360 + (verticalSpeedMps + 1.25) * 42)
+      this.varioOsc.frequency.setTargetAtTime(sinkPitch, this.ctx.currentTime, 0.04)
+      this.varioGain.gain.setTargetAtTime(0.05, this.ctx.currentTime, 0.04)
     } else {
       // Quiet laminar float in neutral glide
-      this.varioGain.gain.setTargetAtTime(0, this.ctx.currentTime, 0.05)
+      this.varioGain.gain.setTargetAtTime(0, this.ctx.currentTime, 0.04)
     }
 
     // 6. Triboelectric RF Static Crackle at Thermal Shear Margin

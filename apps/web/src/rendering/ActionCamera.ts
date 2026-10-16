@@ -328,12 +328,21 @@ export class ActionCamera {
     this.elasticLag += (targetElasticLag - this.elasticLag) * Math.min(1.0, 10.0 * dt)
 
     // Visceral Aerodynamic Micro-Vibration & High-Speed Airframe Shake
-    this.shakeTimer += dt * 36.0
-    const buffetingIntensity = Math.min(1.0, Math.max(0, (speedKmh - 48.0) / 45.0))
+    this.shakeTimer += dt * 42.0
+    const isSpeedwing = sim.currentWingType === 'speedwing'
+    // Ground proximity boost for adrenaline rush:
+    const agl = sim.telemetry.groundClearanceMeters || 100
+    const proximityBoost = Math.max(0, 1.0 - agl / 25.0) // 1.0 at terrain deck, 0 at 25m+
+    const speedRatio = Math.max(0, (speedKmh - 60.0) / 70.0)
+    const buffetingIntensity = isSpeedwing
+      ? Math.min(1.0, speedRatio * 0.85 + proximityBoost * 0.45 * Math.min(1.0, speedKmh / 80.0))
+      : Math.min(1.0, Math.max(0, (speedKmh - 48.0) / 45.0) * 0.5)
+
+    const shakeAmp = isSpeedwing ? 0.055 : 0.018
     const shake = new Vector3(
-      Math.sin(this.shakeTimer * 1.3) * 0.016 * buffetingIntensity,
-      Math.cos(this.shakeTimer * 1.7) * 0.022 * buffetingIntensity,
-      Math.sin(this.shakeTimer * 2.1) * 0.014 * buffetingIntensity,
+      Math.sin(this.shakeTimer * 1.3) * shakeAmp * buffetingIntensity,
+      Math.cos(this.shakeTimer * 1.7) * (shakeAmp * 1.25) * buffetingIntensity,
+      Math.sin(this.shakeTimer * 2.1) * (shakeAmp * 0.85) * buffetingIntensity,
     )
 
     const speedSurge = Math.max(0, speedKmh - (trimSpeed - 4.0))
@@ -503,12 +512,13 @@ export class ActionCamera {
 
     // Dynamic speed-tunnel FOV dilation: expands peripheral vision and creates forward speed rush
     const effectiveBaseFov = isPortrait ? 1.25 : this.baseFov
-    const speedDelta = Math.max(0, speedKmh - 42.0)
-    const fovBoost = Math.min(0.42, Math.pow(speedDelta / 50.0, 1.15) * 0.38)
+    const fovBoost = isSpeedwing
+      ? Math.min(0.55, Math.pow(Math.max(0, speedKmh - 65.0) / 60.0, 1.1) * 0.48)
+      : Math.min(0.32, Math.pow(Math.max(0, speedKmh - 38.0) / 45.0, 1.15) * 0.26)
     const snapFovBoost = snapIntensity * 0.08
     const loopFovBoost = (sim.isLooping || sim.isRolling) ? 0.12 : 0
     const gTunnelFov = Math.max(0, gForce - 1.2) * 0.025
-    const targetFov = Math.min(1.52, effectiveBaseFov * (1.0 + fovBoost + snapFovBoost + loopFovBoost - gTunnelFov))
+    const targetFov = Math.min(1.65, effectiveBaseFov * (1.0 + fovBoost + snapFovBoost + loopFovBoost - gTunnelFov))
     this.camera.fov += (targetFov - this.camera.fov) * Math.min(1.0, 12.0 * dt)
   }
 }
