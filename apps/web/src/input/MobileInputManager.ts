@@ -32,9 +32,9 @@ export class MobileInputManager {
   public isPortrait: boolean = true
 
   public smoothedRollDeg: number = 0
-  public smoothedElevationDeg: number = 62.0
-  public phoneElevationDeg: number = 62.0
-  public neutralElevationDeg: number = 62.0
+  public smoothedElevationDeg: number = 78.0
+  public phoneElevationDeg: number = 78.0
+  public neutralElevationDeg: number = 78.0
   public neutralRollDeg: number = 0.0
   public needAutoCalibration: boolean = true
   private autoCalibrateSampleCount: number = 0
@@ -124,17 +124,17 @@ export class MobileInputManager {
   }
 
   public calibrateNeutral(forceAngle?: number, forceRoll?: number) {
-    if (typeof forceAngle === 'number' && forceAngle >= 32.0 && forceAngle <= 82.0) {
+    if (typeof forceAngle === 'number' && forceAngle >= 25.0 && forceAngle <= 105.0) {
       this.neutralElevationDeg = forceAngle
-    } else if (this.phoneElevationDeg >= 32.0 && this.phoneElevationDeg <= 82.0) {
+    } else if (this.phoneElevationDeg >= 25.0 && this.phoneElevationDeg <= 105.0) {
       this.neutralElevationDeg = this.phoneElevationDeg
     } else {
-      this.neutralElevationDeg = 56.0
+      this.neutralElevationDeg = 78.0
     }
 
     if (typeof forceRoll === 'number') {
       this.neutralRollDeg = forceRoll
-    } else if (Math.abs(this.smoothedRollDeg) < 22.0) {
+    } else if (Math.abs(this.smoothedRollDeg) < 25.0) {
       this.neutralRollDeg = this.smoothedRollDeg
     } else {
       this.neutralRollDeg = 0
@@ -201,7 +201,7 @@ export class MobileInputManager {
           (typeof window.orientation === 'number' ? window.orientation : (isPortrait ? 0 : 90))
 
         let rawRoll = 0
-        let rawElev = 40.0
+        let rawElev = 78.0
 
         if (screenAngle === 0 || screenAngle === 180 || isPortrait) {
           rawRoll = e.gamma
@@ -372,16 +372,17 @@ export class MobileInputManager {
     this.smoothedElevationDeg += (rawElev - this.smoothedElevationDeg) * elevFactor
     this.phoneElevationDeg = this.smoothedElevationDeg
 
-    // Capture resting neutral angle on initial steady frames after launch
-    if (this.needAutoCalibration && this.smoothedElevationDeg >= 35.0 && this.smoothedElevationDeg <= 78.0) {
+    // Capture resting neutral angle on initial steady frames after launch:
+    // Allows players holding phone comfortably anywhere from 30° to 105° (upright or relaxed)
+    if (this.needAutoCalibration && this.smoothedElevationDeg >= 30.0 && this.smoothedElevationDeg <= 105.0) {
       this.autoCalibrateSampleCount++
       if (this.autoCalibrateSampleCount === 1) {
         this.neutralElevationDeg = this.smoothedElevationDeg
-        this.neutralRollDeg = Math.abs(this.smoothedRollDeg) < 20.0 ? this.smoothedRollDeg : 0
+        this.neutralRollDeg = Math.abs(this.smoothedRollDeg) < 22.0 ? this.smoothedRollDeg : 0
       } else {
-        this.neutralElevationDeg += (this.smoothedElevationDeg - this.neutralElevationDeg) * 0.25
-        if (Math.abs(this.smoothedRollDeg) < 20.0) {
-          this.neutralRollDeg += (this.smoothedRollDeg - this.neutralRollDeg) * 0.25
+        this.neutralElevationDeg += (this.smoothedElevationDeg - this.neutralElevationDeg) * 0.20
+        if (Math.abs(this.smoothedRollDeg) < 22.0) {
+          this.neutralRollDeg += (this.smoothedRollDeg - this.neutralRollDeg) * 0.20
         }
       }
       if (this.autoCalibrateSampleCount >= 18) {
@@ -391,8 +392,7 @@ export class MobileInputManager {
 
     // 1. Roll Steering & Rock-Solid Stability in Neutrality:
     // Natural human phone holding has slight resting asymmetry and tremor.
-    // 1. Roll is measured relative to calibrated neutral resting posture (neutralRollDeg).
-    // 1. Roll Steering: Snappy, direct response with tight center detent
+    // Roll is measured relative to calibrated neutral resting posture (neutralRollDeg).
     const rollDelta = this.smoothedRollDeg - this.neutralRollDeg
     const absRoll = Math.abs(rollDelta)
 
@@ -412,39 +412,34 @@ export class MobileInputManager {
     this.instantTwistRad = (this.tiltWeightShift * 0.12)
 
     // 2. Pitch & Wing Envelope:
-    // Natural tight deadband (1.8°) prevents drift in neutral posture.
-    // Leaning forward just 8° from neutral reaches full deep dive effortlessly without straining hands!
-    const neutral = clamp(this.neutralElevationDeg, 42.0, 72.0)
-    const deadband = 1.8
+    // Natural, rock-solid stability in neutral posture (looking straight at screen).
+    // Neutral elevation is the player's comfortable resting posture (typically 75°-85° upright).
+    const neutral = clamp(this.neutralElevationDeg, 30.0, 105.0)
+    const deadband = 2.0 // +/- 2.0° deadband around neutral for tremor-free resting stability
 
-    if (this.smoothedElevationDeg >= 90.0) {
-      this.isWingCollapsed = true
-    } else if (this.smoothedElevationDeg <= 84.0 && this.isWingCollapsed) {
-      this.isWingCollapsed = false
-    }
+    // Looking straight at the screen or looking up at the sky must NEVER collapse the wing!
+    this.isWingCollapsed = false
 
-    if (this.isWingCollapsed) {
-      this.diveDemand = 0
-      this.flareDemand = 0
-      this.pitchDemand = 0
-    } else if (this.smoothedElevationDeg < neutral - deadband) {
-      // Natural, ergonomic forward tilt travel:
-      // A gentle 8° forward tilt reaches 100% full dive!
-      const forwardLean = (neutral - deadband) - this.smoothedElevationDeg
-      const fullDiveTravel = 8.0 // 8° forward tilt reaches max dive
+    const deltaElev = this.smoothedElevationDeg - neutral
+
+    if (deltaElev < -deadband) {
+      // Leaning forward (tipping top of phone away from user) = DIVE / ACCELERATE
+      const forwardLean = (-deltaElev) - deadband
+      const fullDiveTravel = 11.0 // 11° forward tilt reaches 100% full dive
       const norm = clamp(forwardLean / fullDiveTravel, 0, 1)
-      this.diveDemand = Math.pow(norm, 1.0) // Direct 1:1 forward dive response
+      this.diveDemand = Math.pow(norm, 1.0)
       this.flareDemand = 0
       this.pitchDemand = this.diveDemand
-    } else if (this.smoothedElevationDeg > neutral + deadband) {
-      // Looking upwards: flares, hovers and floats
-      const flareTravel = 86.0 - (neutral + deadband)
-      const norm = clamp((this.smoothedElevationDeg - (neutral + deadband)) / Math.max(8.0, flareTravel), 0, 1)
-      this.flareDemand = Math.pow(norm, 1.1)
+    } else if (deltaElev > deadband) {
+      // Leaning backward (tipping top of phone towards user / looking up at sky) = FLARE / MINIMUM SINK / CLIMB
+      const backwardLean = deltaElev - deadband
+      const fullFlareTravel = 15.0 // 15° backward tilt reaches 100% flare
+      const norm = clamp(backwardLean / fullFlareTravel, 0, 1)
+      this.flareDemand = Math.pow(norm, 1.05)
       this.diveDemand = 0
       this.pitchDemand = -this.flareDemand
     } else {
-      // Level Trim Glide in Big Sky
+      // Pure Trim Glide in Big Sky (neutral posture)
       this.diveDemand = 0
       this.flareDemand = 0
       this.pitchDemand = 0
