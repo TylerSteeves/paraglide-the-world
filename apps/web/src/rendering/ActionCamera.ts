@@ -258,7 +258,7 @@ export class ActionCamera {
     sim: ParagliderSimulation,
     dt: number,
     _parallaxRoll: number = 0,
-    _parallaxPitch: number = 0,
+    parallaxPitch: number = 0,
     _instantTwistRad: number = 0,
     snapIntensity: number = 0,
   ) {
@@ -416,10 +416,11 @@ export class ActionCamera {
 
       // Forward flight path line-of-sight: look target projects along the true flight vector
       const lookDist = 50.0 + (speedKmh / trimSpeed) * 20.0
-      const slopeDip = downhillDescend * 2.8 - thermalClimb * 2.0 + 1.2
+      const slopeDip = downhillDescend * 3.2 - thermalClimb * 2.0 + 1.2
+      const tiltDip = -parallaxPitch * (lookDist * 0.40)
       const forwardLook = this.targetCamPos
         .add(vDir.scale(lookDist))
-        .subtract(Vector3.Up().scale(slopeDip))
+        .subtract(Vector3.Up().scale(slopeDip + tiltDip))
         .add(turnLookAhead)
 
       const flyerCenter = pilotPos.add(tetherDiff.scale(0.5))
@@ -437,10 +438,11 @@ export class ActionCamera {
         .add(shake)
 
       const lookDist = 45.0 + (speedKmh / trimSpeed) * 18.0
-      const slopeDip = downhillDescend * 2.0 - thermalClimb * 1.8 + 1.0
+      const slopeDip = downhillDescend * 2.6 - thermalClimb * 1.8 + 1.0
+      const tiltDip = -parallaxPitch * (lookDist * 0.40)
       this.lookTarget = this.targetCamPos
         .add(vDir.scale(lookDist))
-        .subtract(Vector3.Up().scale(slopeDip))
+        .subtract(Vector3.Up().scale(slopeDip + tiltDip))
         .add(turnLookAhead)
     } else if (this.vantage === 'pilot-fpv') {
       // 3. Cockpit First-Person Pilot View:
@@ -449,10 +451,11 @@ export class ActionCamera {
         .add(bodyFwd.scale(0.18))
         .add(shake)
 
-      const slopeDip = downhillDescend * 1.5 - thermalClimb * 1.5
+      const slopeDip = downhillDescend * 2.2 - thermalClimb * 1.5
+      const tiltDip = -parallaxPitch * 22.0
       this.lookTarget = this.targetCamPos
         .add(vDir.scale(50.0))
-        .subtract(uTether.scale(slopeDip))
+        .subtract(uTether.scale(slopeDip + tiltDip))
         .add(turnLookAhead)
     } else if (this.vantage === 'front-selfie') {
       // 4. Action Selfie Pole:

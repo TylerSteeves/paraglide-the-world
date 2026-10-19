@@ -425,9 +425,13 @@ export class ParagliderSimulation {
     // Paramotor: 52.0 km/h base trim. Full throttle: +5.2 m/s zoom climb, 70+ km/h cruise!
     const baseTrimSpeed = (isSpeedwing ? 74.0 : (isParamotor ? 52.0 : 38.5)) * massRatio
     const baseTrimSink = (isSpeedwing ? -4.10 : (isParamotor ? -1.40 : -1.12)) * massRatio
-    const maxDiveSink = (isSpeedwing ? -16.5 : (isParamotor ? -4.8 : -6.4)) * massRatio
-    const maxDiveSpeed = (isSpeedwing ? 135.0 : (isParamotor ? 76.0 : 70.0)) * massRatio
-    const maxDivePitch = isSpeedwing ? 26.0 : (isParamotor ? 14.0 : 16.0)
+    // Straight downhill dive plunges aggressively toward the ground!
+    // Paraglider: steep 42° nose-down dive reaching -15.5 m/s sink (56 km/h downward) and 80 km/h total airspeed.
+    // Speedwing: screaming 58° nose-down dive reaching -26.5 m/s sink (95 km/h downward) and 142 km/h total airspeed.
+    // Paramotor: 32° nose-down dive reaching -11.0 m/s sink and 84 km/h total airspeed.
+    const maxDiveSink = (isSpeedwing ? -26.5 : (isParamotor ? -11.0 : -15.5)) * massRatio
+    const maxDiveSpeed = (isSpeedwing ? 142.0 : (isParamotor ? 84.0 : 80.0)) * massRatio
+    const maxDivePitch = isSpeedwing ? 58.0 : (isParamotor ? 32.0 : 42.0)
     const minFlareSpeed = (isSpeedwing ? 36.0 : (isParamotor ? 24.0 : 18.0)) * massRatio
 
     const spiralFrac = clamp(Math.min(absSteer * 1.25, (speedBar + 0.35 * Math.abs(brakeDiff)) * 1.25), 0, 1)
@@ -497,7 +501,7 @@ export class ParagliderSimulation {
       // Linear-progressive response engages immediately from subtle forward tilt or thumb swipe
       const diveCurve = Math.pow(speedBar, 0.90)
       targetAirspeedKmh = baseTrimSpeed + diveCurve * (maxDiveSpeed - baseTrimSpeed)
-      targetSinkMps = baseTrimSink + diveCurve * (maxDiveSink - baseTrimSink) - spiralFrac * 12.0
+      targetSinkMps = baseTrimSink + diveCurve * (maxDiveSink - baseTrimSink) - spiralFrac * (isSpeedwing ? 12.0 : 8.0)
       targetPitchDeg = 1.0 + diveCurve * (maxDivePitch - 1.0)
     } else if (dualBrake > 0.02) {
       // Symmetrical Dual Brake:
@@ -595,7 +599,7 @@ export class ParagliderSimulation {
     // 3. Vertical Acceleration & Gravitational Plunge (ay):
     const g = 9.81
     const massPunchFactor = Math.min(1.55, Math.max(0.70, totalMassKg / 95.0))
-    const extraSpiralSink = spiralFrac * (isSpeedwing ? 14.0 : 9.5)
+    const extraSpiralSink = spiralFrac * (isSpeedwing ? 12.0 : 8.0)
     const targetTerminalSink = isCollapsing
       ? -45.0 * massPunchFactor
       : (speedBar > 0.01
@@ -604,10 +608,10 @@ export class ParagliderSimulation {
 
     if (this.currentSinkMps > targetTerminalSink && (speedBar > 0.01 || isCollapsing)) {
       // Gravity Plunge with non-linear aerodynamic drag opposition:
-      const pitchFactor = Math.max(0.35, Math.sin(Math.max(0.20, pitchRad)))
+      const pitchFactor = Math.max(0.40, Math.sin(Math.max(0.20, pitchRad)))
       const sinkRatio = clamp(Math.abs(this.currentSinkMps) / Math.max(1.0, Math.abs(targetTerminalSink)), 0, 1)
-      const dragOpposition = Math.pow(sinkRatio, 2.0) // Quadratic aerodynamic drag
-      const netGravityAcc = g * pitchFactor * (1.0 - dragOpposition) * (1.0 - unloadFactor * 0.4) * (isSpeedwing ? 1.45 : 1.15) * massPunchFactor
+      const dragOpposition = Math.pow(sinkRatio, 1.8) // Aerodynamic drag opposition
+      const netGravityAcc = g * pitchFactor * (1.0 - dragOpposition) * (1.0 - unloadFactor * 0.35) * (isSpeedwing ? 1.55 : 1.30) * massPunchFactor
       this.currentSinkMps -= netGravityAcc * frameDt
       this.currentSinkMps = Math.max(targetTerminalSink, this.currentSinkMps)
     } else {

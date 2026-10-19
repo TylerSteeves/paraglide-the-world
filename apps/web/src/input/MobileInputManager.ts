@@ -149,6 +149,7 @@ export class MobileInputManager {
     this.flareDemand = 0
     this.tiltWeightShift = 0
     this.pitchDemand = 0
+    this.tiltParallaxPitch = 0
     this.controls.leftBrake = 0
     this.controls.rightBrake = 0
     this.controls.speedBar = 0
@@ -425,24 +426,27 @@ export class MobileInputManager {
     if (deltaElev < -deadband) {
       // Leaning forward (tipping top of phone away from user) = DIVE / ACCELERATE
       const forwardLean = (-deltaElev) - deadband
-      const fullDiveTravel = 11.0 // 11° forward tilt reaches 100% full dive
+      const fullDiveTravel = 10.0 // 10° forward tilt reaches 100% full dive
       const norm = clamp(forwardLean / fullDiveTravel, 0, 1)
       this.diveDemand = Math.pow(norm, 1.0)
       this.flareDemand = 0
       this.pitchDemand = this.diveDemand
+      this.tiltParallaxPitch = -this.diveDemand * 0.22 // Camera gaze tilts down into the dive
     } else if (deltaElev > deadband) {
       // Leaning backward (tipping top of phone towards user / looking up at sky) = FLARE / MINIMUM SINK / CLIMB
       const backwardLean = deltaElev - deadband
-      const fullFlareTravel = 15.0 // 15° backward tilt reaches 100% flare
+      const fullFlareTravel = 14.0 // 14° backward tilt reaches 100% flare
       const norm = clamp(backwardLean / fullFlareTravel, 0, 1)
       this.flareDemand = Math.pow(norm, 1.05)
       this.diveDemand = 0
       this.pitchDemand = -this.flareDemand
+      this.tiltParallaxPitch = this.flareDemand * 0.16 // Camera gaze tilts up toward sky
     } else {
       // Pure Trim Glide in Big Sky (neutral posture)
       this.diveDemand = 0
       this.flareDemand = 0
       this.pitchDemand = 0
+      this.tiltParallaxPitch = 0
     }
   }
 
