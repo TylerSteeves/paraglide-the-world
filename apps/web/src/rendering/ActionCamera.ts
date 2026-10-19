@@ -385,9 +385,9 @@ export class ActionCamera {
     if (this.vantage === 'chase-360' || this.vantage === 'orbit-360') {
       // 1. Forward Driver & 360° Rotating Orbit Perspective:
       // Perfectly frames the flyer from any angle, rotating 360° around the pilot and canopy!
-      const diveTighten = Math.min(0.75, (Math.max(0, -verticalMps) / 25.0) * (isSpeedwing ? 0.70 : 0.55))
-      const dist = (2.35 * portraitDistMult) + this.elasticLag * 0.40 + Math.min(0.35, speedSurge * 0.012) - diveTighten
-      const height = (0.78 * portraitHeightMult) + Math.min(0.18, speedSurge * 0.008) + downhillDescend * 0.20 - gHeavinessComp + stomachDropFloat
+      const diveTighten = Math.min(0.65, (Math.max(0, -verticalMps) / 25.0) * (isSpeedwing ? 0.70 : 0.55))
+      const dist = (2.15 * portraitDistMult) + this.elasticLag * 0.35 + Math.min(0.35, speedSurge * 0.012) - diveTighten
+      const height = (0.78 * portraitHeightMult) + Math.min(0.16, speedSurge * 0.008) + downhillDescend * 0.18 - gHeavinessComp + stomachDropFloat
 
       const cosY = Math.cos(effectiveYaw)
       const sinY = Math.sin(effectiveYaw)
@@ -414,10 +414,9 @@ export class ActionCamera {
         .add(upRef.scale(height * Math.max(0.2, 1.0 - Math.abs(sinP))))
         .add(shake)
 
-      // Forward flight path line-of-sight: look target projects ahead down the slope,
-      // blended smoothly towards flyer center as orbit angle rotates to side/front
-      const lookDist = 55.0 + (speedKmh / trimSpeed) * 25.0
-      const slopeDip = downhillDescend * 3.4 - thermalClimb * 2.2
+      // Forward flight path line-of-sight: look target projects along the true flight vector
+      const lookDist = 50.0 + (speedKmh / trimSpeed) * 20.0
+      const slopeDip = downhillDescend * 2.8 - thermalClimb * 2.0 + 1.2
       const forwardLook = this.targetCamPos
         .add(vDir.scale(lookDist))
         .subtract(Vector3.Up().scale(slopeDip))
@@ -429,7 +428,7 @@ export class ActionCamera {
       this.lookTarget = Vector3.Lerp(forwardLook, flyerCenter, lookFlyerWeight)
     } else if (this.vantage === 'shoulder-chase') {
       // 2. Over-the-Shoulder Action Chase:
-      const dist = (2.15 * portraitDistMult) + this.elasticLag * 0.45
+      const dist = (2.05 * portraitDistMult) + this.elasticLag * 0.40
       const height = (0.75 * portraitHeightMult) + Math.min(0.12, speedSurge * 0.006) + downhillDescend * 0.15 - gHeavinessComp * 0.8
       this.targetCamPos = pilotPos
         .subtract(uFwdH.scale(dist))
@@ -437,8 +436,8 @@ export class ActionCamera {
         .add(Vector3.Up().scale(height))
         .add(shake)
 
-      const lookDist = 50.0 + (speedKmh / trimSpeed) * 20.0
-      const slopeDip = downhillDescend * 2.0 - thermalClimb * 1.8
+      const lookDist = 45.0 + (speedKmh / trimSpeed) * 18.0
+      const slopeDip = downhillDescend * 2.0 - thermalClimb * 1.8 + 1.0
       this.lookTarget = this.targetCamPos
         .add(vDir.scale(lookDist))
         .subtract(Vector3.Up().scale(slopeDip))

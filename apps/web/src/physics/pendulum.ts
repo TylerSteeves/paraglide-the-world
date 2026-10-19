@@ -424,7 +424,7 @@ export class ParagliderSimulation {
     // Heavy pilot (125kg): Paraglider 44.0 km/h trim, -1.20 m/s sink (+14% faster penetration!).
     // Paramotor: 52.0 km/h base trim. Full throttle: +5.2 m/s zoom climb, 70+ km/h cruise!
     const baseTrimSpeed = (isSpeedwing ? 74.0 : (isParamotor ? 52.0 : 38.5)) * massRatio
-    const baseTrimSink = (isSpeedwing ? -2.45 : (isParamotor ? -1.40 : -1.05)) * massRatio
+    const baseTrimSink = (isSpeedwing ? -4.10 : (isParamotor ? -1.40 : -1.12)) * massRatio
     const maxDiveSink = (isSpeedwing ? -16.5 : (isParamotor ? -4.8 : -6.4)) * massRatio
     const maxDiveSpeed = (isSpeedwing ? 135.0 : (isParamotor ? 76.0 : 70.0)) * massRatio
     const maxDivePitch = isSpeedwing ? 26.0 : (isParamotor ? 14.0 : 16.0)
@@ -466,7 +466,7 @@ export class ParagliderSimulation {
       this.turnRateDegPerSec += (targetTurnRate - this.turnRateDegPerSec) * Math.min(1.0, turnFollow * frameDt)
 
       // Direct Instant Trailing-Edge Micro-Yaw (zero-lag fine motor precision for coins & hoops):
-      const microYaw = steerDemand * (isSpeedwing ? 42.0 : 28.0) * frameDt
+      const microYaw = steerDemand * (isSpeedwing ? 54.0 : 36.0) * frameDt
       this.headingDeg = (this.headingDeg + microYaw + this.turnRateDegPerSec * frameDt + 360) % 360
     }
 
@@ -493,9 +493,9 @@ export class ParagliderSimulation {
       targetSinkMps = -38.0 * Math.pow(this.collapseFrac, 0.75)
       targetPitchDeg = 65.0 * this.collapseFrac
     } else if (speedBar > 0.01) {
-      // Speed Bar & Deep Dive Accelerator:
-      // Snappy progressive curve: small bar nudges trim; deep push drops nose into high-speed gravity fall-line!
-      const diveCurve = Math.pow(speedBar, 1.15)
+      // Speed Bar & Downhill Dive Accelerator:
+      // Linear-progressive response engages immediately from subtle forward tilt or thumb swipe
+      const diveCurve = Math.pow(speedBar, 0.90)
       targetAirspeedKmh = baseTrimSpeed + diveCurve * (maxDiveSpeed - baseTrimSpeed)
       targetSinkMps = baseTrimSink + diveCurve * (maxDiveSink - baseTrimSink) - spiralFrac * 12.0
       targetPitchDeg = 1.0 + diveCurve * (maxDivePitch - 1.0)
@@ -580,11 +580,11 @@ export class ParagliderSimulation {
     const pitchRad = Math.max(0, this.pitchDeg) * DEG
 
     // 1. Canopy Pitch Rotation follows aerodynamic control lines:
-    const pitchLerp = isCollapsing ? 16.0 : (speedBar > 0.05 ? 24.0 : 12.0)
+    const pitchLerp = isCollapsing ? 16.0 : (speedBar > 0.02 ? 26.0 : 14.0)
     this.pitchDeg += (targetPitchDeg - this.pitchDeg) * Math.min(1.0, pitchLerp * frameDt)
 
     // 2. Wing Aerodynamic Lift Unload Factor:
-    const diveCurve = Math.pow(speedBar, 1.15)
+    const diveCurve = Math.pow(speedBar, 0.90)
     const unloadFactor = isCollapsing
       ? 0.04
       : (speedBar > 0.01

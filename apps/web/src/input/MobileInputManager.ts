@@ -332,7 +332,6 @@ export class MobileInputManager {
     let maxSpeedBar = 0
     const h = window.innerHeight || 800
     const dragTravel = Math.max(90.0, Math.min(180.0, h * 0.18))
-    const speedBarTravel = Math.max(65.0, Math.min(115.0, h * 0.12))
 
     for (const ptr of this.activePointers.values()) {
       const dy = ptr.curY - ptr.startY
@@ -345,9 +344,10 @@ export class MobileInputManager {
         } else {
           rightBrake = Math.max(rightBrake, pull)
         }
-      } else if (dy < -8.0) {
-        // Dragging up: pushes speed bar / deep dive accelerator!
-        const barPull = clamp((-dy - 8.0) / speedBarTravel, 0.0, 1.0)
+      } else if (dy < -4.0) {
+        // Dragging up: pushes speed bar / deep dive accelerator with immediate thumb flick!
+        const speedBarTravel = Math.max(40.0, Math.min(65.0, h * 0.07))
+        const barPull = clamp((-dy - 4.0) / speedBarTravel, 0.0, 1.0)
         maxSpeedBar = Math.max(maxSpeedBar, barPull)
       }
     }
@@ -392,21 +392,19 @@ export class MobileInputManager {
     // 1. Roll Steering & Rock-Solid Stability in Neutrality:
     // Natural human phone holding has slight resting asymmetry and tremor.
     // 1. Roll is measured relative to calibrated neutral resting posture (neutralRollDeg).
-    // 2. Firm 4.2° deadband gives a confident center detent (zero drift or wobble).
-    // 3. Smoothstep Hermite curve (3x^2 - 2x^3) ensures velvety smooth departure from neutral.
-    // 4. Subtle auto-trim slowly adapts neutralRollDeg when resting steadily in center.
+    // 1. Roll Steering: Snappy, direct response with tight center detent
     const rollDelta = this.smoothedRollDeg - this.neutralRollDeg
     const absRoll = Math.abs(rollDelta)
 
-    const DEADBAND_ROLL = 1.0
-    const MAX_ROLL = 24.0
+    const DEADBAND_ROLL = 1.2
+    const MAX_ROLL = 16.0
 
     if (absRoll < DEADBAND_ROLL) {
       this.tiltWeightShift = 0
     } else {
       const sign = Math.sign(rollDelta)
       const norm = clamp((absRoll - DEADBAND_ROLL) / (MAX_ROLL - DEADBAND_ROLL), 0, 1)
-      const mag = norm * norm * (3.0 - 2.0 * norm)
+      const mag = Math.pow(norm, 1.05) // Immediate linear-crisp bite
       const steerSign = this.invertRollSteering ? -sign : sign
       this.tiltWeightShift = steerSign * mag
     }
@@ -414,11 +412,10 @@ export class MobileInputManager {
     this.instantTwistRad = (this.tiltWeightShift * 0.12)
 
     // 2. Pitch & Wing Envelope:
-    // Natural ±5.5° deadband around neutral prevents unintentional dive/sink while steering!
-    // Leaning forwards reaching down to 18° (held flat in hands) gives full 100% screaming dive.
-    // Tilting back gives buoyant flare hover.
+    // Natural tight deadband (1.8°) prevents drift in neutral posture.
+    // Leaning forward just 8° from neutral reaches full deep dive effortlessly without straining hands!
     const neutral = clamp(this.neutralElevationDeg, 42.0, 72.0)
-    const deadband = 3.5
+    const deadband = 1.8
 
     if (this.smoothedElevationDeg >= 90.0) {
       this.isWingCollapsed = true
@@ -432,18 +429,18 @@ export class MobileInputManager {
       this.pitchDemand = 0
     } else if (this.smoothedElevationDeg < neutral - deadband) {
       // Natural, ergonomic forward tilt travel:
-      // A comfortable 15° forward tilt from neutral reaches 100% full deep dive!
+      // A gentle 8° forward tilt reaches 100% full dive!
       const forwardLean = (neutral - deadband) - this.smoothedElevationDeg
-      const fullDiveTravel = 15.0 // 15° forward tilt reaches max dive
+      const fullDiveTravel = 8.0 // 8° forward tilt reaches max dive
       const norm = clamp(forwardLean / fullDiveTravel, 0, 1)
-      this.diveDemand = Math.pow(norm, 1.1)
+      this.diveDemand = Math.pow(norm, 1.0) // Direct 1:1 forward dive response
       this.flareDemand = 0
       this.pitchDemand = this.diveDemand
     } else if (this.smoothedElevationDeg > neutral + deadband) {
       // Looking upwards: flares, hovers and floats
       const flareTravel = 86.0 - (neutral + deadband)
       const norm = clamp((this.smoothedElevationDeg - (neutral + deadband)) / Math.max(8.0, flareTravel), 0, 1)
-      this.flareDemand = Math.pow(norm, 1.15)
+      this.flareDemand = Math.pow(norm, 1.1)
       this.diveDemand = 0
       this.pitchDemand = -this.flareDemand
     } else {
@@ -500,11 +497,11 @@ export class MobileInputManager {
       }
     }
 
-    // 3. Smooth Physical Control Actuation:
-    const brakeFollow = 22.0
-    const steerFollow = 24.0
-    const barFollow = 16.0
-    const throttleFollow = 14.0
+    // 3. Crisp Physical Control Actuation:
+    const brakeFollow = 34.0
+    const steerFollow = 38.0
+    const barFollow = 30.0
+    const throttleFollow = 16.0
 
     // Throttle input from keyboard (Space, Shift, or X), or touch/cruise dock:
     const isThrottleKeyDown =
