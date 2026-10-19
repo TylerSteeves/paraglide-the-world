@@ -385,9 +385,9 @@ export class ActionCamera {
     if (this.vantage === 'chase-360' || this.vantage === 'orbit-360') {
       // 1. Forward Driver & 360° Rotating Orbit Perspective:
       // Perfectly frames the flyer from any angle, rotating 360° around the pilot and canopy!
-      const diveTighten = Math.min(0.65, (Math.max(0, -verticalMps) / 25.0) * (isSpeedwing ? 0.70 : 0.55))
-      const dist = (2.15 * portraitDistMult) + this.elasticLag * 0.35 + Math.min(0.35, speedSurge * 0.012) - diveTighten
-      const height = (0.78 * portraitHeightMult) + Math.min(0.16, speedSurge * 0.008) + downhillDescend * 0.18 - gHeavinessComp + stomachDropFloat
+      const diveTighten = Math.min(0.75, (Math.max(0, -verticalMps) / 25.0) * (isSpeedwing ? 0.70 : 0.55))
+      const dist = (3.4 * portraitDistMult) + this.elasticLag * 0.35 + Math.min(0.35, speedSurge * 0.012) - diveTighten
+      const height = (1.35 * portraitHeightMult) + Math.min(0.16, speedSurge * 0.008) + downhillDescend * 0.20 - gHeavinessComp + stomachDropFloat
 
       const cosY = Math.cos(effectiveYaw)
       const sinY = Math.sin(effectiveYaw)
@@ -404,9 +404,8 @@ export class ActionCamera {
       const uOrbitDir = uH.scale(cosP).add(upRef.scale(sinP)).normalize()
 
       // Centrifugal lateral camera swing during high-G turns:
-      // When carving hard on the sling, centrifugal force pushes the chase camera outward on the turn radius,
-      // giving an authentic physical sensation of speed and power as the turn whips into the ground!
-      const centLag = Math.max(-0.65, Math.min(0.65, (sim.bankDeg / 45.0) * (gForce - 0.9) * 0.28))
+      // Subtle, authentic physical sensation without wild jerky swings
+      const centLag = Math.max(-0.35, Math.min(0.35, (sim.bankDeg / 45.0) * (gForce - 0.9) * 0.16))
 
       this.targetCamPos = pilotPos
         .add(uOrbitDir.scale(dist))
@@ -429,11 +428,11 @@ export class ActionCamera {
       this.lookTarget = Vector3.Lerp(forwardLook, flyerCenter, lookFlyerWeight)
     } else if (this.vantage === 'shoulder-chase') {
       // 2. Over-the-Shoulder Action Chase:
-      const dist = (2.05 * portraitDistMult) + this.elasticLag * 0.40
-      const height = (0.75 * portraitHeightMult) + Math.min(0.12, speedSurge * 0.006) + downhillDescend * 0.15 - gHeavinessComp * 0.8
+      const dist = (3.1 * portraitDistMult) + this.elasticLag * 0.40
+      const height = (1.25 * portraitHeightMult) + Math.min(0.12, speedSurge * 0.006) + downhillDescend * 0.15 - gHeavinessComp * 0.8
       this.targetCamPos = pilotPos
         .subtract(uFwdH.scale(dist))
-        .add(uRight.scale(0.70))
+        .add(uRight.scale(0.85))
         .add(Vector3.Up().scale(height))
         .add(shake)
 

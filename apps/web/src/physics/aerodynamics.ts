@@ -62,7 +62,7 @@ export const SPEEDWING_13M: WingGeometry = {
   chordMeters: 1.45,
   aspectRatio: 3.8,
   arcAngleDeg: 26.0,
-  tetherLengthMeters: 3.2,
+  tetherLengthMeters: 5.2, // Real-world speedwing lines (~5.2m)
   riggingAngleDeg: -3.8,
   speedBarAngleDeg: 9.5,
   weightShiftMeters: 0.16,
@@ -85,7 +85,7 @@ export const PARAGLIDER_XC_24M: WingGeometry = {
   chordMeters: 2.10,
   aspectRatio: 6.1,
   arcAngleDeg: 18.0,
-  tetherLengthMeters: 4.8,
+  tetherLengthMeters: 7.2, // Real-world 7.2m lines + risers for standard 24m² EN-B XC glider
   riggingAngleDeg: -2.2,
   speedBarAngleDeg: 9.5,
   weightShiftMeters: 0.14,
@@ -108,7 +108,7 @@ export const PARAMOTOR_FREERIDE_18M: WingGeometry = {
   chordMeters: 1.75,
   aspectRatio: 5.1,
   arcAngleDeg: 20.0,
-  tetherLengthMeters: 4.0,
+  tetherLengthMeters: 6.4, // Real-world 6.4m lines for 18m freeride paramotor wing
   riggingAngleDeg: -2.8,
   speedBarAngleDeg: 8.5,
   weightShiftMeters: 0.16,

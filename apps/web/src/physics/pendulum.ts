@@ -206,8 +206,8 @@ export class ParagliderSimulation {
     this.cVel = v3(Math.sin(headingRad) * trimSpeedMps, this.currentSinkMps, Math.cos(headingRad) * trimSpeedMps)
     this.cQ = qFromYawPitchRoll(initialHeadingDeg, this.pitchDeg, 0)
 
-    const tetherL = this.wing.tetherLengthMeters || 3.8
-    const pilotOffset = v3(0, -tetherL, -0.42)
+    const tetherL = this.wing.tetherLengthMeters || 7.2
+    const pilotOffset = v3(0, -tetherL, -0.52)
     this.pPos = vAdd(this.cPos, qRotate(this.cQ, pilotOffset))
     this.pVel = vCopy(this.cVel)
 
@@ -336,7 +336,7 @@ export class ParagliderSimulation {
     startPos?: { x: number; y: number; z: number },
   ) {
     let spawn = startPos ?? { x: 0, y: initialAltitude, z: 0 }
-    const tetherL = this.wing.tetherLengthMeters || 3.8
+    const tetherL = this.wing.tetherLengthMeters || 7.2
     if (this.world && typeof this.world.sampleHeight === 'function') {
       const terrainH = this.world.sampleHeight(spawn.x, spawn.z)
       const minCanopyY = terrainH + tetherL + 9.0 // Guaranteed 9m clean-air launch clearance
@@ -435,16 +435,18 @@ export class ParagliderSimulation {
     const minFlareSpeed = (isSpeedwing ? 36.0 : (isParamotor ? 24.0 : 18.0)) * massRatio
 
     const spiralFrac = clamp(Math.min(absSteer * 1.25, (speedBar + 0.35 * Math.abs(brakeDiff)) * 1.25), 0, 1)
-    const maxBankDeg = isSpeedwing ? (64.0 + spiralFrac * 14.0) : (44.0 + spiralFrac * 16.0)
+    // Dignified, realistic bank angles: 26° in standard soaring/thermalling flight; up to 48° in intentional spiral dives
+    const maxBankDeg = isSpeedwing ? (46.0 + spiralFrac * 22.0) : (26.0 + spiralFrac * 22.0)
 
     // Continuous, finite bank angle:
     const targetBankDeg = steerDemand * maxBankDeg + (this.thermalRollTorqueDeg || 0)
 
-    // Dynamic Roll Response (first-principles roll damping):
+    // Dynamic Roll Response (Critically-damped 7.2m pendulum roll dynamics):
+    // Smooth, luxurious roll rate without wild swinging or pendulum twitching
     const rollError = targetBankDeg - this.bankDeg
     const isReturningRoll = Math.abs(targetBankDeg) < Math.abs(this.bankDeg) || absSteer < 0.005
-    const springK = isSpeedwing ? 52.0 : (isReturningRoll ? (absSteer < 0.005 ? 44.0 : 32.0) : 28.0)
-    const dampC = isSpeedwing ? 12.5 : (isReturningRoll ? (absSteer < 0.005 ? 14.0 : 11.5) : 9.5)
+    const springK = isSpeedwing ? 38.0 : (isReturningRoll ? (absSteer < 0.005 ? 30.0 : 22.0) : 18.0)
+    const dampC = isSpeedwing ? 12.0 : (isReturningRoll ? (absSteer < 0.005 ? 12.0 : 10.5) : 8.5)
 
     const rollAccel = rollError * springK - this.rollRateDegPerSec * dampC
     this.rollRateDegPerSec += rollAccel * frameDt
@@ -453,24 +455,32 @@ export class ParagliderSimulation {
     const absBank = Math.abs(this.bankDeg)
 
     // Solid Heading Lock when neutral; Proportional, finite turn rate when commanding:
-    if (absSteer < 0.005 && absBank < 0.45 && Math.abs(this.thermalRollTorqueDeg || 0) < 0.05) {
+    if (absSteer < 0.005 && absBank < 0.35 && Math.abs(this.thermalRollTorqueDeg || 0) < 0.05) {
       this.turnRateDegPerSec = 0
       this.bankDeg = 0
       this.rollRateDegPerSec = 0
     } else {
-      const speedScale = Math.min(1.45, Math.max(0.70, this.airspeedKmh / baseTrimSpeed))
-      // Coordinated turn: centripetal acceleration a_c = g * tan(bank)
+      // Flexible Wing Aerodynamics:
+      // At low airspeed or when pulling brakes (slow-flight / minimum sink regime),
+      // trailing-edge differential brake authority is at its peak!
+      // This gives surgical, millimeter-level flat turn control without wild roll oscillations.
+      const lowSpeedBrakeBoost = 1.0 + Math.max(0, 1.0 - this.airspeedKmh / baseTrimSpeed) * 0.95
+      const brakeScale = (isSpeedwing ? 18.0 : 12.5) * lowSpeedBrakeBoost
+
+      // Coordinated turn: centripetal acceleration a_c = g * tan(bank) / V
       const bankRad = this.bankDeg * DEG
-      const centripetalTurnRate = (9.81 * Math.tan(bankRad) / Math.max(4.0, this.airspeedKmh / 3.6)) * (180.0 / Math.PI)
+      const speedMps = Math.max(4.0, this.airspeedKmh / 3.6)
+      const centripetalTurnRate = (9.81 * Math.tan(bankRad) / speedMps) * (180.0 / Math.PI)
+
       // Direct aerodynamic yaw from trailing-edge brake deflection:
-      const brakeYaw = brakeDiff * (isSpeedwing ? 38.0 : 22.0) * speedScale
-      const spiralYaw = Math.sign(this.bankDeg) * spiralFrac * 28.0
+      const brakeYaw = brakeDiff * brakeScale
+      const spiralYaw = Math.sign(this.bankDeg) * spiralFrac * (isSpeedwing ? 32.0 : 20.0)
       const targetTurnRate = centripetalTurnRate + brakeYaw + spiralYaw
-      const turnFollow = isSpeedwing ? 36.0 : (isReturningRoll ? 26.0 : 20.0)
+      const turnFollow = isSpeedwing ? 24.0 : (isReturningRoll ? 18.0 : 14.0)
       this.turnRateDegPerSec += (targetTurnRate - this.turnRateDegPerSec) * Math.min(1.0, turnFollow * frameDt)
 
-      // Direct Instant Trailing-Edge Micro-Yaw (zero-lag fine motor precision for coins & hoops):
-      const microYaw = steerDemand * (isSpeedwing ? 54.0 : 36.0) * frameDt
+      // Subtle, tactile trailing-edge micro-yaw bite (zero-lag precision without jarring jump):
+      const microYaw = steerDemand * (isSpeedwing ? 10.0 : 5.5) * lowSpeedBrakeBoost * frameDt
       this.headingDeg = (this.headingDeg + microYaw + this.turnRateDegPerSec * frameDt + 360) % 360
     }
 
@@ -739,7 +749,7 @@ export class ParagliderSimulation {
 
     // 4. Pilot Position: First-Principles Paraglider Flight Mechanics
     // The pilot is ALWAYS underslung beneath the canopy on taut suspension lines.
-    const tetherL = this.wing.tetherLengthMeters || 3.8
+    const tetherL = this.wing.tetherLengthMeters || 7.2
 
     // Forward/Aft Aerodynamic Trail in canopy body space:
     const massInertiaScale = this.pilotMassKg / 95.0

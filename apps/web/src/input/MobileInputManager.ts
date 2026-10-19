@@ -397,15 +397,18 @@ export class MobileInputManager {
     const rollDelta = this.smoothedRollDeg - this.neutralRollDeg
     const absRoll = Math.abs(rollDelta)
 
-    const DEADBAND_ROLL = 1.2
-    const MAX_ROLL = 16.0
+    const DEADBAND_ROLL = 1.4
+    const MAX_ROLL = 26.0
 
     if (absRoll < DEADBAND_ROLL) {
       this.tiltWeightShift = 0
     } else {
       const sign = Math.sign(rollDelta)
       const norm = clamp((absRoll - DEADBAND_ROLL) / (MAX_ROLL - DEADBAND_ROLL), 0, 1)
-      const mag = Math.pow(norm, 1.05) // Immediate linear-crisp bite
+      // Smooth progressive exponential power curve (1.55):
+      // Minute wrist micro-corrections give silky, surgical control around center (zero huge swings),
+      // while deep intentional banking smoothly delivers full carving authority!
+      const mag = Math.pow(norm, 1.55)
       const steerSign = this.invertRollSteering ? -sign : sign
       this.tiltWeightShift = steerSign * mag
     }
@@ -483,11 +486,13 @@ export class MobileInputManager {
       // If not overriding with active thumb touch, tilt provides direct weight shift + coordinated brake assist:
       if (!this.isTouchSteering) {
         targetWeightShift = this.tiltWeightShift
-        if (Math.abs(this.tiltWeightShift) > 0.05) {
+        const absTilt = Math.abs(this.tiltWeightShift)
+        if (absTilt > 0.40) {
+          const deepTurnAssist = ((absTilt - 0.40) / 0.60) * 0.35
           if (this.tiltWeightShift < 0) {
-            targetLeftBrake = Math.max(targetLeftBrake, Math.abs(this.tiltWeightShift) * 0.45)
+            targetLeftBrake = Math.max(targetLeftBrake, deepTurnAssist)
           } else {
-            targetRightBrake = Math.max(targetRightBrake, this.tiltWeightShift * 0.45)
+            targetRightBrake = Math.max(targetRightBrake, deepTurnAssist)
           }
         }
       } else {
