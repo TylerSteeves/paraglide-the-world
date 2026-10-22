@@ -5,6 +5,51 @@ function clamp(v: number, lo: number, hi: number): number {
   return Math.max(lo, Math.min(hi, v))
 }
 
+/**
+ * Fastest the brakes can be moved, in fractions of full travel per second.
+ *
+ * A hand is not a switch. Full travel in a bit under half a second is a quick,
+ * decisive pull; a keypress or a flick of the phone would otherwise arrive in
+ * about fifty milliseconds, which is an order of magnitude faster than any arm
+ * can move. That matters now that the flight model has a pendulum: an input
+ * that fast spikes the angle of attack as the canopy pitches back, and stalls
+ * the wing at brake settings it should fly happily at. The EN test standard
+ * applies brake over about five seconds for the same reason.
+ */
+const MAX_BRAKE_RATE_PER_SEC = 2.2
+
+/** Moves a brake toward its target, smoothed and then rate-limited. */
+function moveBrake(current: number, target: number, follow: number, dt: number): number {
+  const smoothed = current + (target - current) * Math.min(1, follow * dt)
+  const maxStep = MAX_BRAKE_RATE_PER_SEC * dt
+  return clamp(smoothed, current - maxStep, current + maxStep)
+}
+
+/** Backward tilt, in degrees, that reaches full brake travel. */
+const FULL_BRAKE_TILT_DEG = 22.0
+
+/** Forward tilt, in degrees, that reaches full speed bar. */
+const FULL_BAR_TILT_DEG = 14.0
+
+/** Roll, in degrees, that reaches full weight shift. */
+const FULL_SHIFT_TILT_DEG = 26.0
+
+/**
+ * Shapes tilt onto brake travel.
+ *
+ * Two thirds of the tilt covers the first 60% of brake travel -- hands-up
+ * through minimum sink to slow flight, which is where a pilot lives -- and the
+ * remaining third covers the last 40%, where the wing approaches and then
+ * passes the stall. Fine control where it is needed, and a deliberate reach
+ * for the part that bites.
+ */
+function shapeBrakeTravel(norm: number): number {
+  const KNEE = 2 / 3
+  const USEFUL = 0.6
+  if (norm <= KNEE) return (norm / KNEE) * USEFUL
+  return USEFUL + ((norm - KNEE) / (1 - KNEE)) * (1 - USEFUL)
+}
+
 export type ActiveTouchVisual = {
   id: number
   side: 'left' | 'right'
@@ -398,7 +443,7 @@ export class MobileInputManager {
     const absRoll = Math.abs(rollDelta)
 
     const DEADBAND_ROLL = 1.4
-    const MAX_ROLL = 26.0
+    const MAX_ROLL = FULL_SHIFT_TILT_DEG
 
     if (absRoll < DEADBAND_ROLL) {
       this.tiltWeightShift = 0
@@ -426,26 +471,38 @@ export class MobileInputManager {
 
     const deltaElev = this.smoothedElevationDeg - neutral
 
+    // 2b. Phone pitch maps to the speed system and the brakes.
+    //
+    //   tip the phone away from you  ->  speed bar
+    //   tip it back toward you       ->  brakes
+    //
+    // The brake mapping is shaped, not linear, and the reason is that the
+    // brakes can now genuinely stall the wing. Brake travel on a real glider
+    // runs about three quarters of a metre from hands-up to the stall, and a
+    // pilot spends almost all of their time in the first half of it. Mapping
+    // a phone's small comfortable tilt range linearly onto that travel would
+    // put the stall a couple of degrees of wrist movement away.
+    //
+    // So the first two thirds of the tilt cover the useful range, hands-up
+    // through minimum sink to slow flight, with fine resolution. Reaching the
+    // last of the travel, where the wing actually lets go, takes a deliberate
+    // deep lean. You can still stall it. You just have to mean it.
     if (deltaElev < -deadband) {
-      // Leaning forward (tipping top of phone away from user) = DIVE / ACCELERATE
-      const forwardLean = (-deltaElev) - deadband
-      const fullDiveTravel = 10.0 // 10° forward tilt reaches 100% full dive
-      const norm = clamp(forwardLean / fullDiveTravel, 0, 1)
-      this.diveDemand = Math.pow(norm, 1.0)
+      const forwardLean = -deltaElev - deadband
+      const norm = clamp(forwardLean / FULL_BAR_TILT_DEG, 0, 1)
+      this.diveDemand = norm
       this.flareDemand = 0
-      this.pitchDemand = this.diveDemand
-      this.tiltParallaxPitch = -this.diveDemand * 0.22 // Camera gaze tilts down into the dive
+      this.pitchDemand = norm
+      this.tiltParallaxPitch = -norm * 0.22
     } else if (deltaElev > deadband) {
-      // Leaning backward (tipping top of phone towards user / looking up at sky) = FLARE / MINIMUM SINK / CLIMB
       const backwardLean = deltaElev - deadband
-      const fullFlareTravel = 14.0 // 14° backward tilt reaches 100% flare
-      const norm = clamp(backwardLean / fullFlareTravel, 0, 1)
-      this.flareDemand = Math.pow(norm, 1.05)
+      const norm = clamp(backwardLean / FULL_BRAKE_TILT_DEG, 0, 1)
+      this.flareDemand = shapeBrakeTravel(norm)
       this.diveDemand = 0
       this.pitchDemand = -this.flareDemand
-      this.tiltParallaxPitch = this.flareDemand * 0.16 // Camera gaze tilts up toward sky
+      this.tiltParallaxPitch = this.flareDemand * 0.16
     } else {
-      // Pure Trim Glide in Big Sky (neutral posture)
+      // Neutral posture: hands up, trim glide.
       this.diveDemand = 0
       this.flareDemand = 0
       this.pitchDemand = 0
@@ -459,18 +516,30 @@ export class MobileInputManager {
     let targetSpeedBar = this.touchSpeedBar
     let targetWeightShift = 0
 
-    // 1. Desktop Keyboard Controls:
+    // 1. Desktop keyboard controls.
+    //
+    // Brake values stop short of the stall. An EN-B wing lets go somewhere
+    // around three quarters of its brake travel, and a key is a step input: a
+    // tap that buries the brakes spikes the angle of attack and stalls the
+    // wing, which is correct behaviour and a miserable way to lose a flight.
+    // Holding shift reaches the rest of the travel for anyone who wants it.
+    const deepBrake = this.keysDown.has('ShiftLeft') || this.keysDown.has('ShiftRight')
+    // Enough inside brake for a positive turn, short of the amount that winds
+    // an EN-B up into a spiral if you simply hold it. Shift gives the rest.
+    const turnBrake = deepBrake ? 0.75 : 0.38
+    const bothBrake = deepBrake ? 1.0 : 0.55
+
     if (this.keysDown.has('ArrowLeft') || this.keysDown.has('KeyA')) {
-      targetLeftBrake = Math.max(targetLeftBrake, 0.55)
+      targetLeftBrake = Math.max(targetLeftBrake, turnBrake)
       targetWeightShift = -0.85
     }
     if (this.keysDown.has('ArrowRight') || this.keysDown.has('KeyD')) {
-      targetRightBrake = Math.max(targetRightBrake, 0.55)
+      targetRightBrake = Math.max(targetRightBrake, turnBrake)
       targetWeightShift = 0.85
     }
     if (this.keysDown.has('ArrowDown') || this.keysDown.has('KeyS')) {
-      targetLeftBrake = Math.max(targetLeftBrake, 0.70)
-      targetRightBrake = Math.max(targetRightBrake, 0.70)
+      targetLeftBrake = Math.max(targetLeftBrake, bothBrake)
+      targetRightBrake = Math.max(targetRightBrake, bothBrake)
     }
     if (this.keysDown.has('ArrowUp') || this.keysDown.has('KeyW')) {
       targetSpeedBar = Math.max(targetSpeedBar, 1.0)
@@ -483,16 +552,23 @@ export class MobileInputManager {
         targetLeftBrake = Math.max(targetLeftBrake, this.flareDemand)
         targetRightBrake = Math.max(targetRightBrake, this.flareDemand)
       }
-      // If not overriding with active thumb touch, tilt provides direct weight shift + coordinated brake assist:
+      // Tilt is a coordinated turn input, not just weight shift.
+      //
+      // Weight shift alone is worth only seven or eight degrees of bank on an
+      // EN-B wing -- that is what the validation suite measures, and it is
+      // what a real one does. A pilot turns with weight shift and inside
+      // brake together, so leaning the phone does both: the shift leads, and
+      // inside brake comes in progressively past a quarter of the travel.
+      // Without it, leaning the phone over would barely turn the glider.
       if (!this.isTouchSteering) {
         targetWeightShift = this.tiltWeightShift
         const absTilt = Math.abs(this.tiltWeightShift)
-        if (absTilt > 0.40) {
-          const deepTurnAssist = ((absTilt - 0.40) / 0.60) * 0.35
+        if (absTilt > 0.25) {
+          const insideBrake = ((absTilt - 0.25) / 0.75) * 0.45
           if (this.tiltWeightShift < 0) {
-            targetLeftBrake = Math.max(targetLeftBrake, deepTurnAssist)
+            targetLeftBrake = Math.max(targetLeftBrake, insideBrake)
           } else {
-            targetRightBrake = Math.max(targetRightBrake, deepTurnAssist)
+            targetRightBrake = Math.max(targetRightBrake, insideBrake)
           }
         }
       } else {
@@ -501,18 +577,22 @@ export class MobileInputManager {
       }
     }
 
-    // 3. Crisp Physical Control Actuation:
-    const brakeFollow = 34.0
+    // 3. Control actuation rates.
+    //
+    // These are the hand, not the wing. The lag that matters -- the canopy
+    // pitching back as you brake, and surging when you release -- now comes
+    // from the flight model's pendulum, so these only need to be quick enough
+    // not to feel mushy and slow enough that a flick of the wrist is not a
+    // step input. A step input to the brakes provokes a real pitch surge,
+    // which is correct, but it should take an actual movement to cause one.
+    const brakeFollow = 22.0
     const steerFollow = 38.0
     const barFollow = 30.0
     const throttleFollow = 16.0
 
     // Throttle input from keyboard (Space, Shift, or X), or touch/cruise dock:
-    const isThrottleKeyDown =
-      this.keysDown.has('Space') ||
-      this.keysDown.has('ShiftLeft') ||
-      this.keysDown.has('ShiftRight') ||
-      this.keysDown.has('KeyX')
+    // Shift is the deep-brake modifier, so throttle keeps Space and X.
+    const isThrottleKeyDown = this.keysDown.has('Space') || this.keysDown.has('KeyX')
     let desiredThrottle = this.targetThrottle
     if (isThrottleKeyDown) {
       desiredThrottle = 1.0
@@ -520,10 +600,30 @@ export class MobileInputManager {
       desiredThrottle = Math.max(desiredThrottle, 0.35)
     }
 
-    this.controls.weightShift += (targetWeightShift - this.controls.weightShift) * Math.min(1.0, steerFollow * dt)
-    this.controls.leftBrake += (targetLeftBrake - this.controls.leftBrake) * Math.min(1.0, brakeFollow * dt)
-    this.controls.rightBrake += (targetRightBrake - this.controls.rightBrake) * Math.min(1.0, brakeFollow * dt)
-    this.controls.speedBar += (targetSpeedBar - this.controls.speedBar) * Math.min(1.0, barFollow * dt)
+    const previousLeftBrake = this.controls.leftBrake
+    const previousRightBrake = this.controls.rightBrake
+
+    this.controls.weightShift +=
+      (targetWeightShift - this.controls.weightShift) * Math.min(1.0, steerFollow * dt)
+    this.controls.leftBrake = moveBrake(this.controls.leftBrake, targetLeftBrake, brakeFollow, dt)
+    this.controls.rightBrake = moveBrake(
+      this.controls.rightBrake,
+      targetRightBrake,
+      brakeFollow,
+      dt,
+    )
+    this.controls.speedBar +=
+      (targetSpeedBar - this.controls.speedBar) * Math.min(1.0, barFollow * dt)
+
+    // How fast the hands are moving, which the harness animation uses.
+    const safeDt = Math.max(1e-4, dt)
+    this.controls.leftBrakeRate = (this.controls.leftBrake - previousLeftBrake) / safeDt
+    this.controls.rightBrakeRate = (this.controls.rightBrake - previousRightBrake) / safeDt
+
+    // Speed bar and A-riser pull are one physical action: the bar shortens the
+    // A risers through the pulleys. Mirrored here so the riser animation
+    // follows the bar; the flight model treats them as the same input and
+    // takes the larger rather than adding them.
     this.controls.pullingA = this.controls.speedBar
     const curThrottle = this.controls.throttle ?? 0
     this.controls.throttle = curThrottle + (desiredThrottle - curThrottle) * Math.min(1.0, throttleFollow * dt)

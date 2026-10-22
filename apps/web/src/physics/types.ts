@@ -13,6 +13,9 @@ export type FlightControls = {
   speedBar: number // 0 to 1
   pullingA: number // 0 to 1 (A-risers / Speed bar leading edge pull)
   pullingB: number // 0 to 1 (B-risers / B-line stall)
+  earsLeft?: number // 0 to 1 (outer A-line pull, folds the left tip under)
+  earsRight?: number // 0 to 1 (outer A-line pull, folds the right tip under)
+  rearRiser?: number // 0 to 1 (C-riser pull: raises incidence without brake drag)
   throttle?: number // 0 (idle) to 1 (full power) for Paramotor / PPG
   trimmers?: number // 0 (slow trim) to 1 (fast reflex) for Paramotor / Slalom
   reverseStance: boolean // Pilot flipped 180° in harness facing wing for ground-handling / kiting
