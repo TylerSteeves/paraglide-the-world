@@ -1,4 +1,4 @@
-import { Color3 } from '@babylonjs/core/Maths/math.color'
+import { Color3, Color4 } from '@babylonjs/core/Maths/math.color'
 import { Vector3 } from '@babylonjs/core/Maths/math.vector'
 import { VertexBuffer } from '@babylonjs/core/Buffers/buffer'
 import { MeshBuilder } from '@babylonjs/core/Meshes/meshBuilder'
@@ -19,7 +19,7 @@ export interface SkyPalette {
   sunColor: Color3
 }
 
-export const SKY_PRESETS: Record<WorldId, SkyPalette> = {
+export const SKY_PRESETS: Record<string, SkyPalette> = {
   // 🇨🇴 Roldanillo: Warm tropical valley atmosphere, golden thermal haze
   roldanillo: {
     zenith: new Color3(0.08, 0.32, 0.72),
@@ -50,6 +50,36 @@ export const SKY_PRESETS: Record<WorldId, SkyPalette> = {
     fogDensity: 0.00008,
     sunColor: new Color3(1.0, 0.98, 0.92),
   },
+  // 🇧🇷 Rio de Janeiro: Warm Atlantic coastal sky
+  rio: {
+    zenith: new Color3(0.06, 0.36, 0.78),
+    midSky: new Color3(0.32, 0.68, 0.92),
+    horizon: new Color3(0.86, 0.91, 0.88),
+    hazeGround: new Color3(0.52, 0.68, 0.74),
+    fogColor: new Color3(0.76, 0.86, 0.90),
+    fogDensity: 0.00009,
+    sunColor: new Color3(1.0, 0.94, 0.80),
+  },
+  // 🇺🇸 Manhattan: Crisp East Coast urban golden hour sky
+  manhattan: {
+    zenith: new Color3(0.06, 0.24, 0.58),
+    midSky: new Color3(0.34, 0.56, 0.82),
+    horizon: new Color3(0.88, 0.82, 0.76),
+    hazeGround: new Color3(0.48, 0.52, 0.58),
+    fogColor: new Color3(0.78, 0.80, 0.84),
+    fogDensity: 0.00010,
+    sunColor: new Color3(1.0, 0.92, 0.78),
+  },
+  // 🇦🇪 Dubai: Warm desert coastal azure sky
+  dubai: {
+    zenith: new Color3(0.08, 0.34, 0.74),
+    midSky: new Color3(0.42, 0.68, 0.88),
+    horizon: new Color3(0.92, 0.86, 0.78),
+    hazeGround: new Color3(0.72, 0.68, 0.60),
+    fogColor: new Color3(0.86, 0.82, 0.76),
+    fogDensity: 0.00010,
+    sunColor: new Color3(1.0, 0.94, 0.82),
+  },
 }
 
 export class AtmosphericSky {
@@ -61,6 +91,7 @@ export class AtmosphericSky {
   private celestialGridMesh: LinesMesh | null = null
   private cloudbaseGridMesh: LinesMesh | null = null
   private currentWorldId: WorldId = 'roldanillo'
+  private isGlobeOverlay = false
   private unsubscribeStyle: () => void
 
   constructor(scene: Scene, initialWorld: WorldId = 'roldanillo') {
@@ -262,14 +293,36 @@ export class AtmosphericSky {
     }
   }
 
+  public setGlobeOverlayMode(enabled: boolean): void {
+    this.isGlobeOverlay = enabled
+    this.applyWorld(this.currentWorldId)
+  }
+
   public applyWorld(worldId: WorldId) {
     this.currentWorldId = worldId
     const pal = LnStyleManager.getInstance().palette
 
-    if (pal.isLineMode) {
+    if (pal.isLineMode || pal.isIrVision) {
+      this.skyDome.setEnabled(true)
+      this.sunBillboard.setEnabled(true)
+      this.scene.fogMode = Scene.FOGMODE_EXP2
       this.applyPalette(pal)
       return
     }
+
+    if (this.isGlobeOverlay) {
+      this.skyDome.setEnabled(false)
+      this.sunBillboard.setEnabled(false)
+      if (this.celestialGridMesh) this.celestialGridMesh.setEnabled(false)
+      if (this.cloudbaseGridMesh) this.cloudbaseGridMesh.setEnabled(false)
+      this.scene.fogMode = Scene.FOGMODE_NONE
+      this.scene.clearColor = new Color4(0, 0, 0, 0)
+      return
+    }
+
+    this.skyDome.setEnabled(true)
+    this.sunBillboard.setEnabled(true)
+    this.scene.fogMode = Scene.FOGMODE_EXP2
 
     const palette = SKY_PRESETS[worldId] || SKY_PRESETS.roldanillo
 

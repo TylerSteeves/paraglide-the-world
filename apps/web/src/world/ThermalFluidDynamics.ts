@@ -37,6 +37,32 @@ export function calculateToroidalThermalFluid(
     const groundH = sampleGroundH(t.center.x, t.center.z)
     const cloudbase = t.topAltitude ?? (t.center.y + 1500)
 
+    if (t.columnLift) {
+      const reach = t.topAltitude ?? groundH + 900
+      if (y < groundH - 20 || y > reach + 30) continue
+      const dxC = x - t.center.x
+      const dzC = z - t.center.z
+      const distC = Math.hypot(dxC, dzC)
+      if (distC < t.radius) {
+        const radialFrac = distC / t.radius
+        const core =
+          radialFrac <= 0.72 ? 1 : Math.max(0, 1 - (radialFrac - 0.72) / 0.28)
+        const agl = y - groundH
+        const bottom = Math.min(1, Math.max(0, agl / 30))
+        const topFade = Math.min(1, Math.max(0, (reach - y) / 90))
+        const vy = t.strengthMps * core * bottom * topFade
+        result.velocity.y += vy
+        if (distC > 0.001 && agl < reach - groundH) {
+          const pull = -0.05 * t.strengthMps * (1 - radialFrac)
+          result.velocity.x += pull * (dxC / distC)
+          result.velocity.z += pull * (dzC / distC)
+        }
+        if (radialFrac < 0.72) result.isDraftingZone = true
+        result.temperatureAnomalyC += 4.5 * core
+      }
+      continue
+    }
+
     if (y < groundH - 50 || y > cloudbase + 120) continue
 
     const hOffset = Math.max(0, y - groundH)

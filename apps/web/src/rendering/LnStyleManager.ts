@@ -166,7 +166,7 @@ export type StyleChangeListener = (palette: LnPalette) => void
 
 export class LnStyleManager {
   private static instance: LnStyleManager | null = null
-  private currentStyleId: LnStyleId = 'cyber-vector' // Default to Cyber Vector (Radar Void Warp Grid)!
+  private currentStyleId: LnStyleId = 'photoreal' // Default to Full Daylight Atmospheric Photoreal Mode!
   private listeners: Set<StyleChangeListener> = new Set()
 
   private constructor() {}

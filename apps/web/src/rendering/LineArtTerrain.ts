@@ -12,6 +12,7 @@ import type { WorldId } from '../world/types'
 export class LineArtTerrain {
   private scene: Scene
   private terrainMesh: Mesh
+  private originalMaterial: any = null
   private topoMaterial: TopographicLineMaterial
   private ridgeLinesMesh: LinesMesh | null = null
   private triggerOutlinesMesh: LinesMesh | null = null
@@ -20,22 +21,29 @@ export class LineArtTerrain {
   constructor(scene: Scene, terrainMesh: Mesh, worldId: WorldId) {
     this.scene = scene
     this.terrainMesh = terrainMesh
+    this.originalMaterial = terrainMesh ? terrainMesh.material : null
 
-    // Attach Topographic Line Shader Material
+    // Attach Topographic Line Shader Material (only override when in line mode or if no custom material exists)
     this.topoMaterial = new TopographicLineMaterial('terrain-topo-mat', scene)
-    this.terrainMesh.material = this.topoMaterial.material
+    const initPal = LnStyleManager.getInstance().palette
+    if (!this.originalMaterial || initPal.isLineMode) {
+      this.terrainMesh.material = this.topoMaterial.material
+    }
 
-    // Enable sharp geometric crease edge rendering on the terrain mesh
-    try {
-      this.terrainMesh.enableEdgesRendering(0.92) // Angle threshold for ridge creases
-      this.terrainMesh.edgesWidth = 1.8
-    } catch (e) {
-      console.warn('Terrain edges renderer warning:', e)
+    // Only enable wireframe crease edges when in line-art mode
+    if (initPal.isLineMode) {
+      try {
+        this.terrainMesh.enableEdgesRendering(0.92)
+        this.terrainMesh.edgesWidth = 1.8
+      } catch (e) {
+        console.warn('Terrain edges renderer warning:', e)
+      }
     }
 
     // Generate physical vector line systems (Ridge crests and thermal trigger outlines)
     this.buildRidgeCrestLines(worldId)
     this.buildTriggerOutlines(worldId)
+    this.applyPalette(initPal)
 
     // Subscribe to style changes
     this.unsubscribeStyle = LnStyleManager.getInstance().subscribe((palette) => {
@@ -163,12 +171,24 @@ export class LineArtTerrain {
 
   public applyPalette(pal: LnPalette): void {
     this.topoMaterial.applyPalette(pal)
+    if (this.terrainMesh) {
+      if (pal.isLineMode || !this.originalMaterial) {
+        this.terrainMesh.material = this.topoMaterial.material
+      } else {
+        this.terrainMesh.material = this.originalMaterial
+      }
+    }
 
-    // Update edge rendering color
+    // Update edge rendering color (disable completely in photoreal mode!)
     try {
-      const edgeCol = pal.ridgeEdgeRgb
-      this.terrainMesh.edgesColor = new Color4(edgeCol.r, edgeCol.g, edgeCol.b, pal.isLineMode ? 0.95 : 0.4)
-      this.terrainMesh.edgesWidth = pal.isLineMode ? 2.2 : 1.2
+      if (pal.isLineMode) {
+        const edgeCol = pal.ridgeEdgeRgb
+        this.terrainMesh.enableEdgesRendering(0.92)
+        this.terrainMesh.edgesColor = new Color4(edgeCol.r, edgeCol.g, edgeCol.b, 0.95)
+        this.terrainMesh.edgesWidth = 2.2
+      } else {
+        this.terrainMesh.disableEdgesRendering()
+      }
     } catch {}
 
     if (this.ridgeLinesMesh) {

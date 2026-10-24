@@ -46,7 +46,9 @@ export class FlightHUD {
   private irSpotStatusEl: HTMLElement | null = null
 
   private wingBtnEl: HTMLElement | null = null
+  private wingIconEl: HTMLElement | null = null
   private wingLabelEl: HTMLElement | null = null
+  private objectiveEl: HTMLElement | null = null
   private ctrlModeBtnEl: HTMLElement | null = null
   private ctrlModeIconEl: HTMLElement | null = null
   private ctrlModeLabelEl: HTMLElement | null = null
@@ -71,6 +73,13 @@ export class FlightHUD {
   private dockCruiseBtn: HTMLElement | null = null
   private dockCruiseLabelEl: HTMLElement | null = null
   private hintThrottleEl: HTMLElement | null = null
+  private throttleRailEl: HTMLElement | null = null
+  private throttleTrackEl: HTMLElement | null = null
+  private throttleFillEl: HTMLElement | null = null
+  private throttleKnobEl: HTMLElement | null = null
+  private throttleReadoutEl: HTMLElement | null = null
+  private throttleDragging = false
+  private onThrottleCallback: (value: number) => void = () => {}
 
   // Pilot Mass Elements
   private massEl: HTMLElement | null = null
@@ -87,6 +96,10 @@ export class FlightHUD {
   private onRelaunchCallback: () => void = () => {}
   private onCycleCameraCallback: () => void = () => {}
   private onCycleWorldCallback: () => void = () => {}
+  private onSelectWorldCallback: (worldId: string) => void = () => {}
+  private onTeleportCustomGpsCallback: (lat: number, lon: number, headingDeg: number, name: string) => void = () => {}
+  private onSaveGoogleApiKeyCallback: (apiKey: string) => void = () => {}
+  private worldModalEl: HTMLElement | null = null
   private onToggleGhostCallback: () => void = () => {}
   private onCalibrateNeutralCallback: () => void = () => {}
   private onPullACallback: (active: boolean) => void = () => {}
@@ -94,9 +107,70 @@ export class FlightHUD {
   private onCycleLnStyleCallback: () => void = () => {}
   private onToggleIrGogglesCallback: () => void = () => {}
   private onTriggerFlipCallback: () => void = () => {}
+  private onTriggerRollCallback: (dir: number) => void = () => {}
+  private onBailoutCollapseCallback: (active: boolean) => void = () => {}
+  private onSelectSkinCallback: (skinId: string) => void = () => {}
+  private onOpenLockerCallback: () => void = () => {}
+
+  private wastedOverlayEl: HTMLElement | null = null
+  private wastedReasonEl: HTMLElement | null = null
+  private wastedSpeedEl: HTMLElement | null = null
+  private wastedBonesEl: HTMLElement | null = null
+  private wastedBillEl: HTMLElement | null = null
 
   public setOnTriggerFlip(cb: () => void) {
     this.onTriggerFlipCallback = cb
+  }
+
+  public setOnTriggerRoll(cb: (dir: number) => void) {
+    this.onTriggerRollCallback = cb
+  }
+
+  public setOnBailoutCollapse(cb: (active: boolean) => void) {
+    this.onBailoutCollapseCallback = cb
+  }
+
+  public setOnSelectSkin(cb: (skinId: string) => void) {
+    this.onSelectSkinCallback = cb
+  }
+
+  public setOnOpenLocker(cb: () => void) {
+    this.onOpenLockerCallback = cb
+  }
+
+  public setSkinLabel(name: string) {
+    const el = document.getElementById('hud-skin-label')
+    if (el) el.textContent = name
+  }
+
+  public renderLocker(state: {
+    skins: Array<{ id: string; name: string; blurb: string; priceLabel: string | null; owned: boolean; equipped: boolean }>
+    souvenirs: Array<{ name: string }>
+  }) {
+    const body = document.getElementById('locker-body')
+    if (!body) return
+    const cards = state.skins.map((skin) => {
+      const swatch = skin.equipped ? 'rgba(56, 189, 248, 0.35)' : 'rgba(30, 41, 59, 0.9)'
+      const status = skin.equipped ? 'WEARING' : skin.owned ? 'OWNED' : (skin.priceLabel || 'LOCKED')
+      return `<button class="skin-card-btn" data-skin-id="${skin.id}" style="text-align: left; width: 100%; background: ${swatch}; border: 1px solid rgba(255,255,255,0.16); border-radius: 12px; padding: 10px; color: #fff; cursor: pointer; margin-bottom: 8px;">
+        <div style="display: flex; justify-content: space-between; gap: 8px;">
+          <span style="font-size: 14px; font-weight: 800;">${skin.name}</span>
+          <span style="font-size: 11px; color: ${skin.owned ? '#86efac' : '#fbbf24'}; font-weight: 800;">${status}</span>
+        </div>
+        <div style="font-size: 11px; color: #94a3b8; margin-top: 2px;">${skin.blurb}</div>
+      </button>`
+    }).join('')
+    const items = state.souvenirs.length
+      ? state.souvenirs.map((item) => `<div style="font-size: 12px; color: #e2e8f0; padding: 4px 0;">• ${item.name}</div>`).join('')
+      : `<div style="font-size: 12px; color: #64748b;">No souvenirs yet. Fly through a city's glowing ring.</div>`
+    body.innerHTML = `${cards}<div style="font-size: 10px; font-weight: 800; color: #7dd3fc; letter-spacing: 1.2px; margin: 10px 0 6px;">PACK</div>${items}`
+    body.querySelectorAll('.skin-card-btn').forEach((btn) => {
+      btn.addEventListener('click', (e) => {
+        e.stopPropagation()
+        const id = (btn as HTMLElement).getAttribute('data-skin-id')
+        if (id) this.onSelectSkinCallback(id)
+      })
+    })
   }
 
   public setOnCyclePilotMass(cb: () => void) {
@@ -127,6 +201,24 @@ export class FlightHUD {
     this.onCycleWorldCallback = callback
   }
 
+  public setOnSelectWorld(callback: (worldId: string) => void) {
+    this.onSelectWorldCallback = callback
+  }
+
+  public setOnTeleportCustomGps(callback: (lat: number, lon: number, headingDeg: number, name: string) => void) {
+    this.onTeleportCustomGpsCallback = callback
+  }
+
+  public setOnSaveGoogleApiKey(callback: (apiKey: string) => void) {
+    this.onSaveGoogleApiKeyCallback = callback
+  }
+
+  public toggleWorldModal() {
+    if (!this.worldModalEl) return
+    const isOpen = this.worldModalEl.style.display === 'flex'
+    this.worldModalEl.style.display = isOpen ? 'none' : 'flex'
+  }
+
   public setOnToggleGhost(callback: () => void) {
     this.onToggleGhostCallback = callback
   }
@@ -155,6 +247,58 @@ export class FlightHUD {
     this.onThrottleHoldCallback = callback
   }
 
+  public setOnThrottle(callback: (value: number) => void) {
+    this.onThrottleCallback = callback
+  }
+
+  public setThrottleVisible(on: boolean) {
+    if (this.throttleRailEl) this.throttleRailEl.style.display = on ? 'flex' : 'none'
+  }
+
+  public setThrottlePosition(value: number) {
+    if (this.throttleDragging) return
+    this.paintThrottle(value)
+  }
+
+  private paintThrottle(value: number) {
+    const v = Math.max(0, Math.min(1, value))
+    if (this.throttleFillEl) this.throttleFillEl.style.height = `${v * 100}%`
+    if (this.throttleKnobEl) this.throttleKnobEl.style.bottom = `${v * 100}%`
+    if (this.throttleReadoutEl) this.throttleReadoutEl.textContent = `${Math.round(v * 100)}`
+  }
+
+  private bindThrottleSlider() {
+    const rail = this.throttleRailEl
+    const track = this.throttleTrackEl
+    if (!rail || !track) return
+    const apply = (e: PointerEvent) => {
+      const rect = track.getBoundingClientRect()
+      const v = Math.max(0, Math.min(1, (rect.bottom - e.clientY) / Math.max(1, rect.height)))
+      this.paintThrottle(v)
+      this.onThrottleCallback(v)
+    }
+    rail.addEventListener('pointerdown', (e) => {
+      e.stopPropagation()
+      e.preventDefault()
+      this.throttleDragging = true
+      rail.setPointerCapture(e.pointerId)
+      apply(e)
+    })
+    rail.addEventListener('pointermove', (e) => {
+      if (!this.throttleDragging) return
+      e.stopPropagation()
+      e.preventDefault()
+      apply(e)
+    })
+    const end = (e: PointerEvent) => {
+      if (!this.throttleDragging) return
+      this.throttleDragging = false
+      e.stopPropagation()
+    }
+    rail.addEventListener('pointerup', end)
+    rail.addEventListener('pointercancel', end)
+  }
+
   public setOnToggleCruise(callback: () => void) {
     this.onToggleCruiseCallback = callback
   }
@@ -163,10 +307,21 @@ export class FlightHUD {
     this.onCycleControlModeCallback = callback
   }
 
-  public setWingLabel(label: string) {
+  public setWingLabel(label: string, icon?: string) {
     if (this.wingLabelEl) {
       this.wingLabelEl.innerText = label
     }
+    if (icon && this.wingIconEl) {
+      this.wingIconEl.innerText = icon
+    }
+    if (this.wingBtnEl) {
+      this.wingBtnEl.classList.toggle('power-on', label === 'POWER')
+    }
+  }
+
+  public setObjective(text: string) {
+    if (!this.objectiveEl || this.objectiveEl.innerText === text) return
+    this.objectiveEl.innerText = text
   }
 
   public setControlMode(mode: ControlMode) {
@@ -283,6 +438,25 @@ export class FlightHUD {
 
   public hideRelaunch() {
     if (this.relaunchOverlayEl) this.relaunchOverlayEl.style.display = 'none'
+    this.hideWasted()
+  }
+
+  public showWasted(
+    reason: string,
+    speedKmh: number,
+    gForce: number,
+    bonesBroken: number,
+    hospitalBill: number,
+  ) {
+    if (this.wastedReasonEl) this.wastedReasonEl.innerText = reason || 'OBLITERATED ON MOUNTAIN'
+    if (this.wastedSpeedEl) this.wastedSpeedEl.innerText = `${speedKmh} KM/H (${gForce}G)`
+    if (this.wastedBonesEl) this.wastedBonesEl.innerText = `${bonesBroken} / 206`
+    if (this.wastedBillEl) this.wastedBillEl.innerText = `$${hospitalBill.toLocaleString()}`
+    if (this.wastedOverlayEl) this.wastedOverlayEl.style.display = 'flex'
+  }
+
+  public hideWasted() {
+    if (this.wastedOverlayEl) this.wastedOverlayEl.style.display = 'none'
   }
 
   public hidePortraitGuard() {
@@ -295,6 +469,7 @@ export class FlightHUD {
   private render() {
     this.container.innerHTML = `
       <!-- Clean Minimalist Top Bar -->
+      <div class="hud-top-stack">
       <div class="top-bar">
         <div class="top-bar-left">
           <div class="hud-pill hud-coin-pill">
@@ -329,17 +504,17 @@ export class FlightHUD {
           </div>
 
           <button class="hud-icon-btn" id="btn-world" title="Switch Location [M]" style="padding: 0 10px; font-size: 13px; font-weight: 600; width: auto;">
-            <span id="hud-world-label">🇨🇴 Andes</span>
+            <span id="hud-world-label">🇨🇦 Whistler</span>
           </button>
 
-          <button class="hud-icon-btn btn-wing-active" id="btn-wing" title="Switch Wing [K]" style="padding: 0 10px; font-size: 13px; font-weight: 700; width: auto; gap: 4px;">
-            <span>🪂</span>
+          <button class="hud-icon-btn btn-wing-active" id="btn-wing" title="Wing [K]" style="padding: 0 10px; font-size: 13px; font-weight: 700; width: auto; gap: 4px;">
+            <span id="hud-wing-icon">🪂</span>
             <span id="hud-wing-label">XC 10:1</span>
           </button>
 
-          <button class="hud-icon-btn" id="btn-pilot-mass" title="Cycle Pilot Mass / Weight [U]" style="padding: 0 10px; font-size: 13px; font-weight: 700; width: auto; gap: 4px; background: rgba(59, 130, 246, 0.22); border-color: rgba(59, 130, 246, 0.5); color: #dbeafe;">
-            <span>⚖️</span>
-            <span id="hud-mass-label">95KG</span>
+          <button class="hud-icon-btn" id="btn-locker" title="Pilot suits" style="padding: 0 10px; font-size: 13px; font-weight: 700; width: auto; gap: 4px;">
+            <span>👕</span>
+            <span id="hud-skin-label">Slate</span>
           </button>
 
           <div class="hud-paramotor-pill" id="hud-paramotor-pill" style="display: none; align-items: center; gap: 6px; background: rgba(245, 158, 11, 0.25); border: 1px solid rgba(245, 158, 11, 0.5); border-radius: 9999px; padding: 4px 10px; font-size: 12px; font-weight: 700; color: #fef3c7;">
@@ -351,18 +526,8 @@ export class FlightHUD {
             <span id="hud-throttle">0%</span>
           </div>
 
-          <button class="hud-icon-btn" id="btn-ln-style" title="Switch Style [L]">
-            <span>📐</span>
-            <span id="hud-ln-label" style="display: none;">PLOTTER</span>
-          </button>
-
           <button class="hud-icon-btn" id="btn-camera" title="Cycle Camera [C]">
             <span>🎥</span>
-          </button>
-
-          <button class="hud-icon-btn" id="btn-acro-flip" title="Acro Flip / Loop [Space / Double-Tap]" style="padding: 0 10px; font-size: 13px; font-weight: 700; width: auto; gap: 4px; background: rgba(239, 68, 68, 0.28); border-color: rgba(239, 68, 68, 0.55); color: #fee2e2;">
-            <span>🔥</span>
-            <span>FLIP</span>
           </button>
 
           <button class="hud-icon-btn" id="btn-gyro" title="Tilt Steering & Calibrate [Z]" style="padding: 0 10px; font-size: 13px; font-weight: 700; width: auto; gap: 4px;">
@@ -370,10 +535,78 @@ export class FlightHUD {
             <span id="hud-gyro-label">TILT</span>
           </button>
 
-          <button class="hud-icon-btn" id="btn-risers-guide" title="Controls Guide [H]">
-            <span>ℹ️</span>
-          </button>
+          <!-- Secondary buttons hidden to keep top HUD ultra-clean on phone screens -->
+          <button class="hud-icon-btn" id="btn-pilot-mass" style="display: none;"><span id="hud-mass-label">95KG</span></button>
+          <button class="hud-icon-btn" id="btn-ln-style" style="display: none;"><span id="hud-ln-label">PLOTTER</span></button>
+          <button class="hud-icon-btn" id="btn-risers-guide" style="display: none;"><span>ℹ️</span></button>
+          <button id="btn-roll-left" style="display: none;"></button>
+          <button id="btn-acro-flip" style="display: none;"></button>
+          <button id="btn-bailout" style="display: none;"></button>
+          <button id="btn-roll-right" style="display: none;"></button>
         </div>
+      </div>
+      <div id="hud-objective" class="hud-objective">Follow the rings. Grab the amber wing on the tower line.</div>
+      </div>
+
+      <!-- Pilot locker: owned suits equip now. Priced suits stay locked until a shop exists. -->
+      <div id="hud-locker-modal" style="display: none; position: fixed; inset: 0; z-index: 2700; background: rgba(2, 6, 23, 0.82); backdrop-filter: blur(14px); justify-content: center; align-items: center; padding: 14px; pointer-events: auto;">
+        <div style="background: rgba(15, 23, 42, 0.96); border: 1px solid rgba(56, 189, 248, 0.35); border-radius: 20px; width: min(95vw, 440px); max-height: 86vh; overflow-y: auto; padding: 18px; color: #f8fafc; box-shadow: 0 24px 60px rgba(0,0,0,0.85); font-family: system-ui, -apple-system, sans-serif;">
+          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+            <div>
+              <div style="font-size: 10px; font-weight: 800; color: #38bdf8; letter-spacing: 1.5px;">PILOT LOCKER</div>
+              <div style="font-size: 18px; font-weight: 900;">Suits &amp; souvenirs</div>
+            </div>
+            <button id="btn-locker-close" style="background: rgba(255,255,255,0.1); border: 1px solid rgba(255,255,255,0.2); color: #fff; border-radius: 999px; width: 32px; height: 32px; font-size: 14px; font-weight: 800; cursor: pointer;">✕</button>
+          </div>
+          <p style="font-size: 12px; color: #94a3b8; margin: 0 0 12px;">Fly the glowing ring in a city to earn that suit. Priced suits are visible for later, and they do not equip yet.</p>
+          <div id="locker-body"></div>
+        </div>
+      </div>
+
+      <!-- GTA-Style WASTED Carnage Overlay (leaves center-top clear to watch the bloody ragdoll tumble!) -->
+      <div id="hud-wasted-overlay" style="display: none; position: fixed; inset: 0; z-index: 2500; flex-direction: column; justify-content: space-between; align-items: center; padding: 28px 18px 34px; background: radial-gradient(circle at center, rgba(220, 38, 38, 0.10) 0%, rgba(153, 27, 27, 0.55) 75%, rgba(69, 10, 10, 0.85) 100%); pointer-events: auto;">
+        <div style="text-align: center; margin-top: 12px; pointer-events: none;">
+          <div style="font-size: clamp(46px, 11vw, 78px); font-weight: 900; letter-spacing: 6px; color: #ef4444; text-transform: uppercase; text-shadow: 0 4px 0 #450a0a, 0 0 36px rgba(239, 68, 68, 0.95); font-family: Impact, 'Arial Black', sans-serif; transform: rotate(-2deg);">
+            WASTED
+          </div>
+          <div id="wasted-reason" style="margin-top: 6px; display: inline-block; background: rgba(15, 23, 42, 0.88); border: 1px solid rgba(248, 113, 113, 0.6); color: #fecaca; font-size: 13px; font-weight: 800; letter-spacing: 1.4px; padding: 6px 16px; border-radius: 9999px; text-transform: uppercase;">
+            IMPALED ON ALPINE SPRUCE
+          </div>
+        </div>
+
+        <div style="background: rgba(15, 23, 42, 0.88); backdrop-filter: blur(12px); border: 1px solid rgba(239, 68, 68, 0.5); border-radius: 18px; padding: 16px 22px; width: min(92vw, 390px); text-align: center; box-shadow: 0 12px 36px rgba(0,0,0,0.65);">
+          <div style="display: flex; justify-content: space-around; gap: 10px; margin-bottom: 14px; border-bottom: 1px solid rgba(255,255,255,0.12); padding-bottom: 12px;">
+            <div>
+              <div style="font-size: 10px; color: #94a3b8; font-weight: 700;">IMPACT</div>
+              <div id="wasted-speed" style="font-size: 15px; color: #f8fafc; font-weight: 900;">74 KM/H (5.8G)</div>
+            </div>
+            <div>
+              <div style="font-size: 10px; color: #94a3b8; font-weight: 700;">BONES BROKEN</div>
+              <div id="wasted-bones" style="font-size: 15px; color: #f87171; font-weight: 900;">16 / 206</div>
+            </div>
+            <div>
+              <div style="font-size: 10px; color: #94a3b8; font-weight: 700;">HOSPITAL BILL</div>
+              <div id="wasted-bill" style="font-size: 15px; color: #fbbf24; font-weight: 900;">$84,200</div>
+            </div>
+          </div>
+          <div style="display: flex; gap: 8px;">
+            <button id="btn-wasted-relaunch" style="flex: 1; background: linear-gradient(135deg, #dc2626, #991b1b); color: #fff; border: 1px solid rgba(254, 202, 202, 0.45); border-radius: 9999px; padding: 13px 18px; font-size: 14px; font-weight: 900; letter-spacing: 0.8px; cursor: pointer; box-shadow: 0 4px 20px rgba(220, 38, 38, 0.65);">
+              🪂 RESPAWN ABOVE
+            </button>
+            <button id="btn-wasted-world" style="background: rgba(30, 41, 59, 0.92); color: #38bdf8; border: 1px solid rgba(56, 189, 248, 0.45); border-radius: 9999px; padding: 13px 16px; font-size: 13px; font-weight: 800; cursor: pointer;">
+              🌍 3D MAPS
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <div id="hud-throttle-slider" class="throttle-rail" style="display: none;">
+        <div class="throttle-rail-label">POWER</div>
+        <div class="throttle-track" id="throttle-track">
+          <div class="throttle-fill" id="throttle-fill"></div>
+          <div class="throttle-knob" id="throttle-knob"></div>
+        </div>
+        <div class="throttle-readout" id="throttle-readout">0</div>
       </div>
 
       <!-- Visible Paramotor & Propeller Control Dock -->
@@ -477,10 +710,15 @@ export class FlightHUD {
         <div class="relaunch-card">
           <div style="font-size: 11px; font-weight: 800; color: #38bdf8; letter-spacing: 1.5px; margin-bottom: 8px;">🪂 PARAGLIDE THE WORLD</div>
           <h2 id="relaunch-title">TRUE PARAGLIDER FLIGHT</h2>
-          <p id="relaunch-sub" style="margin-bottom: 16px;">Left & Right Thumbs Pull Brakes • Both Down to Float & Flare • Phone Tilt for Harness Weight Shift • Soar in Thermals</p>
-          <button id="btn-play-portrait" style="background: linear-gradient(135deg, #0284c7, #0369a1); color: #fff; border: 1px solid rgba(255,255,255,0.3); border-radius: 9999px; padding: 14px 32px; font-size: 16px; font-weight: 800; box-shadow: 0 4px 24px rgba(2,132,199,0.6); pointer-events: auto; cursor: pointer; display: inline-block;">
-            TAP TO FLY (DUAL TOGGLE & TILT)
-          </button>
+          <p id="relaunch-sub" style="margin-bottom: 16px;">Tilt and the wing banks into the turn first, then pulls you around. A level phone holds altitude. Look up and the wing climbs. Look down and the wing dives right away. Hold the steep dive and the speed builds into it. Each ring boosts your speed, and hitting the next one keeps the boost. Drift off that line into a building and you explode. The amber ring on the tower line is a powered wing. Grab it and a throttle appears on the right — drag up to accelerate, drag down to idle.</p>
+          <div style="display: flex; flex-direction: column; gap: 10px; align-items: center;">
+            <button id="btn-play-portrait" style="background: linear-gradient(135deg, #0284c7, #0369a1); color: #fff; border: 1px solid rgba(255,255,255,0.3); border-radius: 9999px; padding: 14px 32px; font-size: 16px; font-weight: 800; box-shadow: 0 4px 24px rgba(2,132,199,0.6); pointer-events: auto; cursor: pointer; display: inline-block;">
+              TAP TO FLY (DUAL TOGGLE & TILT)
+            </button>
+            <button id="btn-relaunch-world" style="background: rgba(15, 23, 42, 0.85); color: #38bdf8; border: 1px solid rgba(56, 189, 248, 0.5); border-radius: 9999px; padding: 10px 22px; font-size: 13px; font-weight: 800; pointer-events: auto; cursor: pointer;">
+              🌍 CHOOSE 3D CITY / WORLD MAP
+            </button>
+          </div>
           <div style="margin-top: 16px; font-size: 12px; color: #94a3b8; line-height: 1.4; max-width: 320px; margin-left: auto; margin-right: auto;">
             🔒 <b>Tip:</b> Turn on <b>Portrait Orientation Lock</b> in iPhone Control Center so your phone stays vertical when tilting!
           </div>
@@ -491,6 +729,108 @@ export class FlightHUD {
       <div class="landscape-lock-alert">
         <span>🔒</span>
         <span>Turn on <b>Portrait Orientation Lock</b> in Control Center to lock screen vertical!</span>
+      </div>
+
+      <!-- 🌍 PARAGLIDE THE WORLD — Google Earth 3D & Global Teleport Modal -->
+      <div id="hud-world-modal" style="display: none; position: fixed; inset: 0; z-index: 2800; background: rgba(2, 6, 23, 0.82); backdrop-filter: blur(14px); justify-content: center; align-items: center; padding: 14px; pointer-events: auto;">
+        <div style="background: rgba(15, 23, 42, 0.96); border: 1px solid rgba(56, 189, 248, 0.35); border-radius: 20px; width: min(95vw, 480px); max-height: 88vh; overflow-y: auto; padding: 18px; color: #f8fafc; box-shadow: 0 24px 60px rgba(0,0,0,0.85); font-family: system-ui, -apple-system, sans-serif;">
+          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
+            <div>
+              <div style="font-size: 10px; font-weight: 800; color: #38bdf8; letter-spacing: 1.5px;">🌍 GOOGLE EARTH 3D TILES + REAL DEM</div>
+              <div style="font-size: 18px; font-weight: 900; color: #fff;">Paraglide the World</div>
+            </div>
+            <div style="display: flex; gap: 8px;">
+              <button id="btn-world-next-quick" style="background: rgba(56, 189, 248, 0.2); border: 1px solid rgba(56, 189, 248, 0.5); color: #bae6fd; border-radius: 999px; padding: 6px 12px; font-size: 12px; font-weight: 800; cursor: pointer;">⏭️ NEXT</button>
+              <button id="btn-world-modal-close" style="background: rgba(255,255,255,0.1); border: 1px solid rgba(255,255,255,0.2); color: #fff; border-radius: 999px; width: 32px; height: 32px; font-size: 14px; font-weight: 800; cursor: pointer;">✕</button>
+            </div>
+          </div>
+
+          <div style="font-size: 10px; font-weight: 800; color: #fdba74; letter-spacing: 1.2px; margin-bottom: 8px;">CITY RUNS · SOLID BUILDINGS</div>
+          <div style="display: grid; grid-template-columns: repeat(2, 1fr); gap: 8px; margin-bottom: 12px;">
+            <button class="world-card-btn" data-world-id="manhattan" style="text-align: left; background: rgba(30, 41, 59, 0.92); border: 1px solid rgba(251, 146, 60, 0.65); border-radius: 12px; padding: 10px; color: #fff; cursor: pointer;">
+              <div style="font-size: 14px; font-weight: 800;">🇺🇸 Downtown NYC</div>
+              <div style="font-size: 11px; color: #fdba74; margin-top: 2px;">One World Trade &amp; Wall Street</div>
+            </button>
+            <button class="world-card-btn" data-world-id="rio" style="text-align: left; background: rgba(30, 41, 59, 0.85); border: 1px solid rgba(56, 189, 248, 0.35); border-radius: 12px; padding: 10px; color: #fff; cursor: pointer;">
+              <div style="font-size: 14px; font-weight: 800;">🇧🇷 Rio de Janeiro</div>
+              <div style="font-size: 11px; color: #94a3b8; margin-top: 2px;">Christ the Redeemer &amp; Sugarloaf</div>
+            </button>
+            <button class="world-card-btn" data-world-id="paris" style="text-align: left; background: rgba(30, 41, 59, 0.85); border: 1px solid rgba(56, 189, 248, 0.35); border-radius: 12px; padding: 10px; color: #fff; cursor: pointer;">
+              <div style="font-size: 14px; font-weight: 800;">🇫🇷 Paris</div>
+              <div style="font-size: 11px; color: #94a3b8; margin-top: 2px;">Eiffel Tower &amp; Champ de Mars</div>
+            </button>
+            <button class="world-card-btn" data-world-id="egypt" style="text-align: left; background: rgba(30, 41, 59, 0.85); border: 1px solid rgba(56, 189, 248, 0.35); border-radius: 12px; padding: 10px; color: #fff; cursor: pointer;">
+              <div style="font-size: 14px; font-weight: 800;">🇪🇬 Egypt</div>
+              <div style="font-size: 11px; color: #94a3b8; margin-top: 2px;">Giza Pyramids &amp; Sphinx</div>
+            </button>
+            <button class="world-card-btn" data-world-id="rome" style="text-align: left; background: rgba(30, 41, 59, 0.85); border: 1px solid rgba(56, 189, 248, 0.35); border-radius: 12px; padding: 10px; color: #fff; cursor: pointer;">
+              <div style="font-size: 14px; font-weight: 800;">🇮🇹 Rome</div>
+              <div style="font-size: 11px; color: #94a3b8; margin-top: 2px;">Colosseum &amp; Roman Forum</div>
+            </button>
+            <button class="world-card-btn" data-world-id="london" style="text-align: left; background: rgba(30, 41, 59, 0.85); border: 1px solid rgba(56, 189, 248, 0.35); border-radius: 12px; padding: 10px; color: #fff; cursor: pointer;">
+              <div style="font-size: 14px; font-weight: 800;">🇬🇧 London</div>
+              <div style="font-size: 11px; color: #94a3b8; margin-top: 2px;">Shard, Tower Bridge &amp; City</div>
+            </button>
+            <button class="world-card-btn" data-world-id="toronto" style="text-align: left; background: rgba(30, 41, 59, 0.85); border: 1px solid rgba(56, 189, 248, 0.35); border-radius: 12px; padding: 10px; color: #fff; cursor: pointer;">
+              <div style="font-size: 14px; font-weight: 800;">🇨🇦 Toronto</div>
+              <div style="font-size: 11px; color: #94a3b8; margin-top: 2px;">CN Tower &amp; Financial District</div>
+            </button>
+            <button class="world-card-btn" data-world-id="sf" style="text-align: left; background: rgba(30, 41, 59, 0.85); border: 1px solid rgba(56, 189, 248, 0.35); border-radius: 12px; padding: 10px; color: #fff; cursor: pointer;">
+              <div style="font-size: 14px; font-weight: 800;">🌉 San Francisco</div>
+              <div style="font-size: 11px; color: #94a3b8; margin-top: 2px;">Golden Gate Bridge &amp; Bay</div>
+            </button>
+          </div>
+          <div style="font-size: 10px; font-weight: 800; color: #7dd3fc; letter-spacing: 1.2px; margin-bottom: 8px;">MOUNTAINS &amp; RESORTS</div>
+          <div style="display: grid; grid-template-columns: repeat(2, 1fr); gap: 8px; margin-bottom: 14px;">
+            <button class="world-card-btn" data-world-id="dubai" style="text-align: left; background: rgba(30, 41, 59, 0.85); border: 1px solid rgba(56, 189, 248, 0.35); border-radius: 12px; padding: 10px; color: #fff; cursor: pointer;">
+              <div style="font-size: 14px; font-weight: 800;">🇦🇪 Dubai 3D</div>
+              <div style="font-size: 11px; color: #94a3b8; margin-top: 2px;">Burj Khalifa (828m) &amp; Supertalls</div>
+            </button>
+            <button class="world-card-btn" data-world-id="matterhorn" style="text-align: left; background: rgba(30, 41, 59, 0.85); border: 1px solid rgba(56, 189, 248, 0.35); border-radius: 12px; padding: 10px; color: #fff; cursor: pointer;">
+              <div style="font-size: 14px; font-weight: 800;">🇨🇭 Matterhorn 3D</div>
+              <div style="font-size: 11px; color: #94a3b8; margin-top: 2px;">Zermatt East Face &amp; Glacier</div>
+            </button>
+            <button class="world-card-btn" data-world-id="chamonix" style="text-align: left; background: rgba(30, 41, 59, 0.85); border: 1px solid rgba(56, 189, 248, 0.35); border-radius: 12px; padding: 10px; color: #fff; cursor: pointer;">
+              <div style="font-size: 14px; font-weight: 800;">🇫🇷 Chamonix 3D</div>
+              <div style="font-size: 11px; color: #94a3b8; margin-top: 2px;">Aiguille du Midi &amp; Needles</div>
+            </button>
+            <button class="world-card-btn" data-world-id="yosemite" style="text-align: left; background: rgba(30, 41, 59, 0.85); border: 1px solid rgba(56, 189, 248, 0.35); border-radius: 12px; padding: 10px; color: #fff; cursor: pointer;">
+              <div style="font-size: 14px; font-weight: 800;">🇺🇸 Yosemite 3D</div>
+              <div style="font-size: 11px; color: #94a3b8; margin-top: 2px;">Half Dome Sheer Granite Dive</div>
+            </button>
+            <button class="world-card-btn" data-world-id="whistler" style="text-align: left; background: rgba(30, 41, 59, 0.85); border: 1px solid rgba(255,255,255,0.16); border-radius: 12px; padding: 10px; color: #fff; cursor: pointer;">
+              <div style="font-size: 14px; font-weight: 800;">🇨🇦 Whistler Resort</div>
+              <div style="font-size: 11px; color: #94a3b8; margin-top: 2px;">Olympic Ski Run &amp; Chairlift</div>
+            </button>
+            <button class="world-card-btn" data-world-id="himalayas" style="text-align: left; background: rgba(30, 41, 59, 0.85); border: 1px solid rgba(255,255,255,0.16); border-radius: 12px; padding: 10px; color: #fff; cursor: pointer;">
+              <div style="font-size: 14px; font-weight: 800;">🇳🇵 Himalayas</div>
+              <div style="font-size: 11px; color: #94a3b8; margin-top: 2px;">Big-mountain XC &amp; thermals</div>
+            </button>
+          </div>
+
+          <!-- Custom GPS Coordinate Teleport -->
+          <div style="background: rgba(2, 6, 23, 0.65); border: 1px solid rgba(255,255,255,0.12); border-radius: 14px; padding: 12px; margin-bottom: 12px;">
+            <div style="font-size: 11px; font-weight: 800; color: #34d399; margin-bottom: 8px;">📍 FLY ANYWHERE ON EARTH (CUSTOM GPS TELEPORT)</div>
+            <div style="display: grid; grid-template-columns: 1fr 1fr 0.8fr; gap: 6px; margin-bottom: 8px;">
+              <input id="input-gps-lat" type="number" step="0.0001" placeholder="Lat (e.g. 37.8199)" value="37.8199" style="background: rgba(15,23,42,0.9); border: 1px solid rgba(255,255,255,0.2); border-radius: 8px; padding: 7px 8px; color: #fff; font-size: 12px; width: 100%; box-sizing: border-box;" />
+              <input id="input-gps-lon" type="number" step="0.0001" placeholder="Lon (e.g. -122.4783)" value="-122.4783" style="background: rgba(15,23,42,0.9); border: 1px solid rgba(255,255,255,0.2); border-radius: 8px; padding: 7px 8px; color: #fff; font-size: 12px; width: 100%; box-sizing: border-box;" />
+              <input id="input-gps-hdg" type="number" step="1" placeholder="Hdg °" value="180" style="background: rgba(15,23,42,0.9); border: 1px solid rgba(255,255,255,0.2); border-radius: 8px; padding: 7px 8px; color: #fff; font-size: 12px; width: 100%; box-sizing: border-box;" />
+            </div>
+            <div style="display: flex; gap: 6px;">
+              <input id="input-gps-name" type="text" placeholder="Location Label" value="Golden Gate Bridge, SF" style="flex: 1; background: rgba(15,23,42,0.9); border: 1px solid rgba(255,255,255,0.2); border-radius: 8px; padding: 7px 8px; color: #fff; font-size: 12px;" />
+              <button id="btn-teleport-gps" style="background: linear-gradient(135deg, #059669, #047857); border: none; color: #fff; border-radius: 8px; padding: 7px 14px; font-size: 12px; font-weight: 800; cursor: pointer;">🚀 FLY HERE</button>
+            </div>
+          </div>
+
+          <!-- Google Maps Platform 3D Tiles Key Config -->
+          <div style="background: rgba(2, 6, 23, 0.55); border: 1px solid rgba(255,255,255,0.1); border-radius: 12px; padding: 10px;">
+            <div style="font-size: 10px; font-weight: 800; color: #fbbf24; margin-bottom: 6px;">🔑 GOOGLE MAPS PLATFORM PHOTOREALISTIC 3D TILES KEY</div>
+            <div style="display: flex; gap: 6px;">
+              <input id="input-gmp-api-key" type="password" placeholder="Paste Google Maps API Key (Map Tiles API enabled)" style="flex: 1; background: rgba(15,23,42,0.9); border: 1px solid rgba(255,255,255,0.2); border-radius: 8px; padding: 6px 8px; color: #fff; font-size: 11px;" />
+              <button id="btn-save-gmp-key" style="background: rgba(245, 158, 11, 0.25); border: 1px solid rgba(245, 158, 11, 0.6); color: #fde68a; border-radius: 8px; padding: 6px 12px; font-size: 11px; font-weight: 800; cursor: pointer;">SAVE KEY</button>
+            </div>
+          </div>
+        </div>
       </div>
     `
 
@@ -536,7 +876,9 @@ export class FlightHUD {
     this.risersGuideModal = document.getElementById('hud-risers-guide')
 
     this.wingBtnEl = document.getElementById('btn-wing')
+    this.wingIconEl = document.getElementById('hud-wing-icon')
     this.wingLabelEl = document.getElementById('hud-wing-label')
+    this.objectiveEl = document.getElementById('hud-objective')
     this.ctrlModeBtnEl = document.getElementById('btn-ctrl-mode')
     this.ctrlModeIconEl = document.getElementById('hud-ctrl-icon')
     this.ctrlModeLabelEl = document.getElementById('hud-ctrl-label')
@@ -560,6 +902,12 @@ export class FlightHUD {
     this.dockCruiseBtn = document.getElementById('btn-dock-cruise')
     this.dockCruiseLabelEl = document.getElementById('dock-cruise-label')
     this.hintThrottleEl = document.getElementById('hint-throttle')
+    this.throttleRailEl = document.getElementById('hud-throttle-slider')
+    this.throttleTrackEl = document.getElementById('throttle-track')
+    this.throttleFillEl = document.getElementById('throttle-fill')
+    this.throttleKnobEl = document.getElementById('throttle-knob')
+    this.throttleReadoutEl = document.getElementById('throttle-readout')
+    this.bindThrottleSlider()
 
     this.massBtnEl = document.getElementById('btn-pilot-mass')
     this.massEl = document.getElementById('hud-mass-label')
@@ -606,12 +954,91 @@ export class FlightHUD {
       })
     }
 
+    const lockerModal = document.getElementById('hud-locker-modal')
+    document.getElementById('btn-locker')?.addEventListener('click', (e) => {
+      e.stopPropagation()
+      this.onOpenLockerCallback()
+      if (lockerModal) lockerModal.style.display = 'flex'
+    })
+    document.getElementById('btn-locker-close')?.addEventListener('click', (e) => {
+      e.stopPropagation()
+      if (lockerModal) lockerModal.style.display = 'none'
+    })
+
+    this.worldModalEl = document.getElementById('hud-world-modal')
     if (this.worldBtnEl) {
       this.worldBtnEl.addEventListener('click', (e) => {
         e.stopPropagation()
-        this.onCycleWorldCallback()
+        this.toggleWorldModal()
       })
     }
+    document.getElementById('btn-relaunch-world')?.addEventListener('click', (e) => {
+      e.stopPropagation()
+      this.toggleWorldModal()
+    })
+    document.getElementById('btn-wasted-world')?.addEventListener('click', (e) => {
+      e.stopPropagation()
+      this.toggleWorldModal()
+    })
+
+    const closeWorldModalBtn = document.getElementById('btn-world-modal-close')
+    closeWorldModalBtn?.addEventListener('click', (e) => {
+      e.stopPropagation()
+      if (this.worldModalEl) this.worldModalEl.style.display = 'none'
+    })
+
+    const nextWorldQuickBtn = document.getElementById('btn-world-next-quick')
+    nextWorldQuickBtn?.addEventListener('click', (e) => {
+      e.stopPropagation()
+      if (this.worldModalEl) this.worldModalEl.style.display = 'none'
+      this.onCycleWorldCallback()
+    })
+
+    if (this.worldModalEl) {
+      this.worldModalEl.addEventListener('click', (e) => {
+        if (e.target === this.worldModalEl) {
+          this.worldModalEl!.style.display = 'none'
+        }
+      })
+
+      const cardBtns = this.worldModalEl.querySelectorAll('.world-card-btn')
+      cardBtns.forEach((btn) => {
+        btn.addEventListener('click', (e) => {
+          e.stopPropagation()
+          const wId = (btn as HTMLElement).getAttribute('data-world-id')
+          if (this.worldModalEl) this.worldModalEl.style.display = 'none'
+          if (wId) {
+            this.onSelectWorldCallback(wId)
+          }
+        })
+      })
+    }
+
+    const teleportGpsBtn = document.getElementById('btn-teleport-gps')
+    teleportGpsBtn?.addEventListener('click', (e) => {
+      e.stopPropagation()
+      const latEl = document.getElementById('input-gps-lat') as HTMLInputElement | null
+      const lonEl = document.getElementById('input-gps-lon') as HTMLInputElement | null
+      const hdgEl = document.getElementById('input-gps-hdg') as HTMLInputElement | null
+      const nameEl = document.getElementById('input-gps-name') as HTMLInputElement | null
+      const lat = parseFloat(latEl?.value || '37.8199')
+      const lon = parseFloat(lonEl?.value || '-122.4783')
+      const hdg = parseFloat(hdgEl?.value || '180')
+      const name = nameEl?.value?.trim() || 'Custom Earth GPS'
+      if (Number.isFinite(lat) && Number.isFinite(lon)) {
+        if (this.worldModalEl) this.worldModalEl.style.display = 'none'
+        this.onTeleportCustomGpsCallback(lat, lon, Number.isFinite(hdg) ? hdg : 180, name)
+      }
+    })
+
+    const saveGmpKeyBtn = document.getElementById('btn-save-gmp-key')
+    saveGmpKeyBtn?.addEventListener('click', (e) => {
+      e.stopPropagation()
+      const keyEl = document.getElementById('input-gmp-api-key') as HTMLInputElement | null
+      const val = keyEl?.value?.trim() || ''
+      this.onSaveGoogleApiKeyCallback(val)
+      if (keyEl) keyEl.value = ''
+    })
 
     if (this.ghostBtnEl) {
       this.ghostBtnEl.addEventListener('click', (e) => {
@@ -718,6 +1145,54 @@ export class FlightHUD {
       flipBtn.addEventListener('click', (e) => {
         e.stopPropagation()
         this.onTriggerFlipCallback()
+      })
+    }
+
+    const rollLeftBtn = document.getElementById('btn-roll-left')
+    if (rollLeftBtn) {
+      rollLeftBtn.addEventListener('click', (e) => {
+        e.stopPropagation()
+        this.onTriggerRollCallback(-1)
+      })
+    }
+
+    const rollRightBtn = document.getElementById('btn-roll-right')
+    if (rollRightBtn) {
+      rollRightBtn.addEventListener('click', (e) => {
+        e.stopPropagation()
+        this.onTriggerRollCallback(1)
+      })
+    }
+
+    const bailoutBtn = document.getElementById('btn-bailout')
+    if (bailoutBtn) {
+      let bailToggle = false
+      bailoutBtn.addEventListener('click', (e) => {
+        e.stopPropagation()
+        bailToggle = !bailToggle
+        this.onBailoutCollapseCallback(bailToggle)
+      })
+    }
+
+    this.wastedOverlayEl = document.getElementById('hud-wasted-overlay')
+    this.wastedReasonEl = document.getElementById('wasted-reason')
+    this.wastedSpeedEl = document.getElementById('wasted-speed')
+    this.wastedBonesEl = document.getElementById('wasted-bones')
+    this.wastedBillEl = document.getElementById('wasted-bill')
+
+    const wastedRelaunchBtn = document.getElementById('btn-wasted-relaunch')
+    if (wastedRelaunchBtn) {
+      wastedRelaunchBtn.addEventListener('click', (e) => {
+        e.stopPropagation()
+        this.hideWasted()
+        this.onRelaunchCallback()
+      })
+    }
+    if (this.wastedOverlayEl) {
+      this.wastedOverlayEl.addEventListener('click', (e) => {
+        e.stopPropagation()
+        this.hideWasted()
+        this.onRelaunchCallback()
       })
     }
 
@@ -983,10 +1458,10 @@ export class FlightHUD {
       this.paramotorPillEl.style.display = isParamotor ? 'inline-flex' : 'none'
     }
     if (this.paramotorDockEl) {
-      this.paramotorDockEl.style.display = isParamotor ? 'flex' : 'none'
+      this.paramotorDockEl.style.display = 'none'
     }
     if (this.dockBtnThrottle) {
-      this.dockBtnThrottle.style.display = isParamotor ? 'flex' : 'none'
+      this.dockBtnThrottle.style.display = 'none'
     }
     if (this.hintThrottleEl) {
       this.hintThrottleEl.style.display = isParamotor ? 'inline-block' : 'none'

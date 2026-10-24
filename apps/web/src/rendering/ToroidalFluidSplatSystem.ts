@@ -87,7 +87,7 @@ export class ToroidalFluidSplatSystem {
   private sps: SolidParticleSystem
   private splatMaterial: ShaderMaterial
   private splatMeta: SplatMeta[] = []
-  private splatCount = 1400
+  private splatCount = 320
 
   // Static electricity ionization filaments
   private arcMesh: LinesMesh
@@ -259,6 +259,20 @@ export class ToroidalFluidSplatSystem {
     const lnStyle = LnStyleManager.getInstance()
     const isIr = lnStyle.isIrGoggles
     const isLine = lnStyle.palette.isLineMode
+
+    // In Photoreal mode, skip per-frame 3D fluid splat CPU/GPU updates completely for 60fps performance
+    if (!isIr && !isLine) {
+      if (this.sps.mesh.isVisible) {
+        this.sps.mesh.isVisible = false
+      }
+      if (this.arcMesh.isVisible) {
+        this.arcMesh.isVisible = false
+      }
+      return
+    }
+    if (!this.sps.mesh.isVisible) {
+      this.sps.mesh.isVisible = true
+    }
 
     const camPos = this.scene.activeCamera?.position
 

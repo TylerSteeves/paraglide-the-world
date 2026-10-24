@@ -62,7 +62,7 @@ export const SPEEDWING_13M: WingGeometry = {
   chordMeters: 1.45,
   aspectRatio: 3.8,
   arcAngleDeg: 26.0,
-  tetherLengthMeters: 5.2, // Real-world speedwing lines (~5.2m)
+  tetherLengthMeters: 2.9, // Compact speedwing line pyramid matching 3D rig and close-up GoPro fisheye framing
   riggingAngleDeg: -3.8,
   speedBarAngleDeg: 9.5,
   weightShiftMeters: 0.16,
@@ -85,7 +85,7 @@ export const PARAGLIDER_XC_24M: WingGeometry = {
   chordMeters: 2.10,
   aspectRatio: 6.1,
   arcAngleDeg: 18.0,
-  tetherLengthMeters: 7.2, // Real-world 7.2m lines + risers for standard 24m² EN-B XC glider
+  tetherLengthMeters: 3.3, // Compact 3.3m line pyramid matching 3D rig for close-up GoPro fisheye framing
   riggingAngleDeg: -2.2,
   speedBarAngleDeg: 9.5,
   weightShiftMeters: 0.14,
@@ -94,9 +94,9 @@ export const PARAGLIDER_XC_24M: WingGeometry = {
   pilotMassKg: 88.0,
   pilotDragAreaM2: 0.18, // Streamlined pod / cocoon XC harness
   lineDragAreaM2: 0.035, // Unsheathed microline suspension lines
-  trimSpeedKmh: 38.0,
+  trimSpeedKmh: 48.0,
   minSpeedKmh: 24.0,
-  maxSpeedKmh: 56.0,
+  maxSpeedKmh: 135.0,
   glideRatio: 10.5,
 }
 
@@ -108,7 +108,7 @@ export const PARAMOTOR_FREERIDE_18M: WingGeometry = {
   chordMeters: 1.75,
   aspectRatio: 5.1,
   arcAngleDeg: 20.0,
-  tetherLengthMeters: 6.4, // Real-world 6.4m lines for 18m freeride paramotor wing
+  tetherLengthMeters: 3.1, // 3.1m line pyramid matching 3D paramotor rig
   riggingAngleDeg: -2.8,
   speedBarAngleDeg: 8.5,
   weightShiftMeters: 0.16,

@@ -187,7 +187,7 @@ function generateHimalayasTrack(): Trackpoint[] {
   return pts
 }
 
-export const TRACKED_FLIGHTS: Record<WorldId, TrackedFlight> = {
+export const TRACKED_FLIGHTS: Record<string, TrackedFlight> = {
   roldanillo: {
     id: 'roldanillo-pwc-task',
     worldId: 'roldanillo',

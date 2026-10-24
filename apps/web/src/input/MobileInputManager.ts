@@ -32,9 +32,9 @@ export class MobileInputManager {
   public isPortrait: boolean = true
 
   public smoothedRollDeg: number = 0
-  public smoothedElevationDeg: number = 78.0
-  public phoneElevationDeg: number = 78.0
-  public neutralElevationDeg: number = 78.0
+  public smoothedElevationDeg: number = 86.0
+  public phoneElevationDeg: number = 86.0
+  public neutralElevationDeg: number = 86.0
   public neutralRollDeg: number = 0.0
   public needAutoCalibration: boolean = true
   private autoCalibrateSampleCount: number = 0
@@ -59,7 +59,13 @@ export class MobileInputManager {
   public touchDive: number = 0
   public touchFlare: number = 0
   public isTouchSteering: boolean = false
-  private activePointers: Map<number, { side: 'left' | 'right'; startX: number; startY: number; curX: number; curY: number }> = new Map()
+  /** A planted finger or a two-finger sideways drag. Tilt then slips instead of turning. */
+  public strafeHold: boolean = false
+  public touchStrafe: number = 0
+  private activePointers: Map<
+    number,
+    { side: 'left' | 'right'; startX: number; startY: number; curX: number; curY: number; startTime: number; swipeTriggered: boolean }
+  > = new Map()
 
   // Control mode & settings
   public controlMode: ControlMode = 'direct-tilt'
@@ -76,7 +82,7 @@ export class MobileInputManager {
   public onToggleWing?: () => void
   public onCycleVantage?: () => void
   public onControlModeChange?: (mode: ControlMode) => void
-  public onTriggerLoop?: () => void
+  public onTriggerLoop?: (dir?: number) => void
   public onTriggerRoll?: (dir: number) => void
 
   public keysDown: Set<string> = new Set()
@@ -89,6 +95,7 @@ export class MobileInputManager {
       leftBrakeRate: 0,
       rightBrakeRate: 0,
       weightShift: 0,
+      strafe: 0,
       speedBar: 0,
       pullingA: 0,
       pullingB: 0,
@@ -124,17 +131,16 @@ export class MobileInputManager {
   }
 
   public calibrateNeutral(forceAngle?: number, forceRoll?: number) {
-    if (typeof forceAngle === 'number' && forceAngle >= 25.0 && forceAngle <= 105.0) {
+    if (typeof forceAngle === 'number' && forceAngle >= 60.0 && forceAngle <= 110.0) {
       this.neutralElevationDeg = forceAngle
-    } else if (this.phoneElevationDeg >= 25.0 && this.phoneElevationDeg <= 105.0) {
-      this.neutralElevationDeg = this.phoneElevationDeg
     } else {
-      this.neutralElevationDeg = 78.0
+      // Keep neutral anchored at vertical (~86° looking straight at phone)
+      this.neutralElevationDeg = 86.0
     }
 
     if (typeof forceRoll === 'number') {
       this.neutralRollDeg = forceRoll
-    } else if (Math.abs(this.smoothedRollDeg) < 25.0) {
+    } else if (Math.abs(this.smoothedRollDeg) < 20.0) {
       this.neutralRollDeg = this.smoothedRollDeg
     } else {
       this.neutralRollDeg = 0
@@ -154,6 +160,9 @@ export class MobileInputManager {
     this.controls.rightBrake = 0
     this.controls.speedBar = 0
     this.controls.weightShift = 0
+    this.controls.strafe = 0
+    this.strafeHold = false
+    this.touchStrafe = 0
   }
 
   public requestAutoCalibration() {
@@ -167,6 +176,12 @@ export class MobileInputManager {
 
   public setPullingB(active: boolean) {
     this.controls.pullingB = active ? 1.0 : 0
+    this.isWingCollapsed = active
+  }
+
+  public setBailoutCollapse(active: boolean) {
+    this.isWingCollapsed = active
+    ;(this.controls as any).isCollapsed = active
   }
 
   public setTargetThrottle(throttle: number) {
@@ -202,17 +217,34 @@ export class MobileInputManager {
           (typeof window.orientation === 'number' ? window.orientation : (isPortrait ? 0 : 90))
 
         let rawRoll = 0
-        let rawElev = 78.0
+        let rawElev = 86.0
+
+        // Reconstruct 3D gravity vector from W3C Euler angles (beta, gamma)
+        // Eliminates Euler gimbal lock at 90° vertical and prevents roll sign-flips when looking up (>90°)!
+        const betaRad = (e.beta * Math.PI) / 180
+        const gammaRad = (e.gamma * Math.PI) / 180
+        const cosB = Math.cos(betaRad)
+        const sinB = Math.sin(betaRad)
+        const cosG = Math.cos(gammaRad)
+        const sinG = Math.sin(gammaRad)
+
+        // Device-frame gravity components:
+        // gx: lateral (+right, -left)
+        // gy: longitudinal along screen (+up when vertical)
+        // gz: normal to screen (+out of screen when flat, 0 when vertical, -into screen when looking up)
+        const gx = cosB * sinG
+        const gy = sinB
+        const gz = cosB * cosG
 
         if (screenAngle === 0 || screenAngle === 180 || isPortrait) {
-          rawRoll = e.gamma
-          rawElev = e.beta
+          rawRoll = Math.asin(clamp(gx, -1, 1)) * (180 / Math.PI)
+          rawElev = Math.atan2(gy, gz) * (180 / Math.PI)
         } else if (screenAngle === 90) {
-          rawRoll = -e.beta
-          rawElev = Math.abs(e.gamma)
+          rawRoll = -Math.asin(clamp(gy, -1, 1)) * (180 / Math.PI)
+          rawElev = Math.atan2( Math.abs(gx), gz) * (180 / Math.PI)
         } else {
-          rawRoll = e.beta
-          rawElev = Math.abs(e.gamma)
+          rawRoll = Math.asin(clamp(gy, -1, 1)) * (180 / Math.PI)
+          rawElev = Math.atan2(Math.abs(gx), gz) * (180 / Math.PI)
         }
 
         const now = performance.now()
@@ -241,19 +273,42 @@ export class MobileInputManager {
       this.keysDown.delete(e.code)
     })
 
-    // 3. Dual Independent Brake Toggle Multi-Touch System:
-    // Left side of screen controls Left Brake Toggle.
-    // Right side of screen controls Right Brake Toggle.
-    // Dragging down pulls that toggle down with 100% linear, finite precision!
-    // Dragging both down enters Minimum Sink float or flares!
-    // Dragging up engages Speed Bar!
-    let lastTapTime = 0
+    // 3. Swipe-Activated Aerobatics & Multi-Touch System:
+    // - Swipe UP anywhere on screen -> 360° Backflip!
+    // - Swipe DOWN anywhere on screen -> 360° Frontflip / Infinity Tumble!
+    // - Swipe LEFT anywhere on screen -> Left Barrel Roll!
+    // - Swipe RIGHT anywhere on screen -> Right Barrel Roll!
+    const checkSwipeGesture = (
+      ptr: { startX: number; startY: number; curX: number; curY: number; startTime: number; swipeTriggered: boolean },
+    ): boolean => {
+      if (ptr.swipeTriggered) return true
+      const dx = ptr.curX - ptr.startX
+      const dy = ptr.curY - ptr.startY
+      const elapsedMs = performance.now() - ptr.startTime
+      const verticalFlick = Math.abs(dy) >= Math.abs(dx) && Math.abs(dy) >= 64 && elapsedMs <= 420
+      // A short sideways nudge must NOT barrel-roll. Rolls are a long, fast flick with one finger.
+      const horizontalFlick =
+        this.activePointers.size < 2 &&
+        Math.abs(dx) > Math.abs(dy) &&
+        Math.abs(dx) >= 128 &&
+        elapsedMs <= 320
+      if (verticalFlick || horizontalFlick) {
+        ptr.swipeTriggered = true
+        if (verticalFlick) {
+          this.onTriggerLoop?.(dy < 0 ? 1 : -1)
+        } else {
+          this.onTriggerRoll?.(dx < 0 ? -1 : 1)
+        }
+        return true
+      }
+      return false
+    }
 
     window.addEventListener(
       'pointerdown',
       (e) => {
         const target = e.target as HTMLElement | null
-        if (target && target.closest && target.closest('button, .hud-pill, .guide-card, a')) {
+        if (target && target.closest && target.closest('button, .hud-pill, .guide-card, a, #hud-locker-modal, #hud-world-modal, #hud-wasted-overlay, #hud-throttle-slider')) {
           return
         }
         const w = window.innerWidth || 400
@@ -264,9 +319,10 @@ export class MobileInputManager {
           startY: e.clientY,
           curX: e.clientX,
           curY: e.clientY,
+          startTime: performance.now(),
+          swipeTriggered: false,
         })
-        this.isTouchSteering = true
-        this.recomputeTouchControls()
+        this.recomputeStrafe()
       },
       { passive: true },
     )
@@ -278,7 +334,11 @@ export class MobileInputManager {
         if (!ptr) return
         ptr.curX = e.clientX
         ptr.curY = e.clientY
-        this.recomputeTouchControls()
+        // Fire flip or barrel roll the instant the thumb flick crosses 32px!
+        if (!checkSwipeGesture(ptr)) {
+          this.recomputeTouchControls()
+        }
+        this.recomputeStrafe()
       },
       { passive: true },
     )
@@ -286,27 +346,9 @@ export class MobileInputManager {
     const onPointerEnd = (e: PointerEvent) => {
       const ptr = this.activePointers.get(e.pointerId)
       if (ptr) {
-        const dx = e.clientX - ptr.startX
-        const dy = e.clientY - ptr.startY
-        const dist = Math.hypot(dx, dy)
-        // Double-tap or quick flick gesture for aerobatics:
-        const now = performance.now()
-        if (dist > 45 && Math.abs(dy) > Math.abs(dx) && dy < -40) {
-          this.onTriggerLoop?.()
-        } else if (dist < 20) {
-          if (now - lastTapTime < 350) {
-            if (e.clientX < (window.innerWidth || 400) * 0.35) {
-              this.onTriggerRoll?.(-1)
-            } else if (e.clientX > (window.innerWidth || 400) * 0.65) {
-              this.onTriggerRoll?.(1)
-            } else {
-              this.onTriggerLoop?.()
-            }
-            lastTapTime = 0
-          } else {
-            lastTapTime = now
-          }
-        }
+        ptr.curX = e.clientX
+        ptr.curY = e.clientY
+        checkSwipeGesture(ptr)
         this.activePointers.delete(e.pointerId)
       }
 
@@ -321,6 +363,7 @@ export class MobileInputManager {
       } else {
         this.recomputeTouchControls()
       }
+      this.recomputeStrafe()
     }
 
     window.addEventListener('pointerup', onPointerEnd, { passive: true })
@@ -328,6 +371,8 @@ export class MobileInputManager {
   }
 
   private recomputeTouchControls(): void {
+    // When motion (tilt) is active, screen touches are dedicated to clean acrobatic swipes!
+    if (this.isMotionActive) return
     let leftBrake = 0
     let rightBrake = 0
     let maxSpeedBar = 0
@@ -335,6 +380,7 @@ export class MobileInputManager {
     const dragTravel = Math.max(90.0, Math.min(180.0, h * 0.18))
 
     for (const ptr of this.activePointers.values()) {
+      if (ptr.swipeTriggered) continue
       const dy = ptr.curY - ptr.startY
       if (dy > 3.0) {
         // Dragging down: pulls brake toggle on this side!
@@ -365,39 +411,62 @@ export class MobileInputManager {
     this.touchFlare = Math.min(leftBrake, rightBrake)
   }
 
+  /**
+   * Slip sideways without starting a turn, for the whole time a finger is down.
+   * Tilt sets how far. Moving, braking, or flicking does not cancel it.
+   * Two fingers dragged sideways together set an explicit slip.
+   */
+  private recomputeStrafe(): void {
+    const ptrs = [...this.activePointers.values()]
+    if (ptrs.length === 0) {
+      this.strafeHold = false
+      this.touchStrafe = 0
+      return
+    }
+
+    this.strafeHold = true
+    this.touchStrafe = 0
+
+    if (ptrs.length >= 2) {
+      const dxs = ptrs.map((ptr) => ptr.curX - ptr.startX)
+      const dys = ptrs.map((ptr) => ptr.curY - ptr.startY)
+      const lead = dxs[0]
+      const sameDir = Math.abs(lead) > 14 && dxs.every((dx) => Math.sign(dx) === Math.sign(lead) && Math.abs(dx) > 10)
+      const sideways = dxs.every((dx, i) => Math.abs(dx) > Math.abs(dys[i]) * 0.8)
+      if (sameDir && sideways) {
+        const avg = dxs.reduce((sum, dx) => sum + dx, 0) / dxs.length
+        this.touchStrafe = Math.sign(avg) * clamp(Math.abs(avg) / 88, 0, 1)
+      }
+    }
+  }
+
   private processMotion(rawRoll: number, rawElev: number, dt: number) {
-    // Clean low-pass filter (EMA, ~50ms tau)
-    const rollFactor = 1.0 - Math.exp(-22.0 * dt)
-    const elevFactor = 1.0 - Math.exp(-18.0 * dt)
+    // Smooth low-pass filter to cushion wrist motion and prevent sudden spikes
+    const rollFactor = 1.0 - Math.exp(-14.0 * dt)
+    const elevFactor = 1.0 - Math.exp(-12.0 * dt)
     this.smoothedRollDeg += (rawRoll - this.smoothedRollDeg) * rollFactor
     this.smoothedElevationDeg += (rawElev - this.smoothedElevationDeg) * elevFactor
     this.phoneElevationDeg = this.smoothedElevationDeg
 
-    // Capture resting neutral angle on initial steady frames after launch:
-    // Allows players holding phone comfortably anywhere from 30° to 105° (upright or relaxed)
-    if (this.needAutoCalibration && this.smoothedElevationDeg >= 30.0 && this.smoothedElevationDeg <= 105.0) {
+    // Auto-calibrate ONLY subtle resting roll bias on initial frames;
+    // Keep neutralElevationDeg anchored at vertical (86°) so vertical posture is always neutral!
+    if (this.needAutoCalibration) {
       this.autoCalibrateSampleCount++
-      if (this.autoCalibrateSampleCount === 1) {
-        this.neutralElevationDeg = this.smoothedElevationDeg
-        this.neutralRollDeg = Math.abs(this.smoothedRollDeg) < 22.0 ? this.smoothedRollDeg : 0
-      } else {
-        this.neutralElevationDeg += (this.smoothedElevationDeg - this.neutralElevationDeg) * 0.20
-        if (Math.abs(this.smoothedRollDeg) < 22.0) {
-          this.neutralRollDeg += (this.smoothedRollDeg - this.neutralRollDeg) * 0.20
-        }
+      this.neutralElevationDeg = 86.0
+      if (Math.abs(this.smoothedRollDeg) < 12.0) {
+        this.neutralRollDeg += (this.smoothedRollDeg - this.neutralRollDeg) * 0.15
       }
-      if (this.autoCalibrateSampleCount >= 18) {
+      if (this.autoCalibrateSampleCount >= 12) {
         this.needAutoCalibration = false
       }
     }
 
     // 1. Roll Steering & Rock-Solid Stability in Neutrality:
-    // Natural human phone holding has slight resting asymmetry and tremor.
-    // Roll is measured relative to calibrated neutral resting posture (neutralRollDeg).
+    // Gimbal-lock-free roll angle (degrees) relative to calibrated neutral roll.
     const rollDelta = this.smoothedRollDeg - this.neutralRollDeg
     const absRoll = Math.abs(rollDelta)
 
-    const DEADBAND_ROLL = 1.4
+    const DEADBAND_ROLL = 2.0
     const MAX_ROLL = 26.0
 
     if (absRoll < DEADBAND_ROLL) {
@@ -405,47 +474,47 @@ export class MobileInputManager {
     } else {
       const sign = Math.sign(rollDelta)
       const norm = clamp((absRoll - DEADBAND_ROLL) / (MAX_ROLL - DEADBAND_ROLL), 0, 1)
-      // Smooth progressive exponential power curve (1.55):
-      // Minute wrist micro-corrections give silky, surgical control around center (zero huge swings),
-      // while deep intentional banking smoothly delivers full carving authority!
+      // Progressive 1.55 curve: calm, fine-grained precision for small/medium tilts
+      // so you're never thrown into extreme movement, while still allowing deep carves at full tilt!
       const mag = Math.pow(norm, 1.55)
       const steerSign = this.invertRollSteering ? -sign : sign
       this.tiltWeightShift = steerSign * mag
     }
 
-    this.instantTwistRad = (this.tiltWeightShift * 0.12)
+    this.instantTwistRad = (this.tiltWeightShift * 0.08)
 
-    // 2. Pitch & Wing Envelope:
-    // Natural, rock-solid stability in neutral posture (looking straight at screen).
-    // Neutral elevation is the player's comfortable resting posture (typically 75°-85° upright).
-    const neutral = clamp(this.neutralElevationDeg, 30.0, 105.0)
-    const deadband = 2.0 // +/- 2.0° deadband around neutral for tremor-free resting stability
-
-    // Looking straight at the screen or looking up at the sky must NEVER collapse the wing!
-    this.isWingCollapsed = false
+    // 2. Full-Range Pitch & Posture Envelope (0° Straight Down -> 45° Fast Glide -> 86° Vertical Neutral -> 120° Looking Up):
+    // - Holding phone VERTICAL (~80° to 92°, looking straight at screen): Neutral slope-contouring glide at 64 km/h.
+    // - Looking UP (> 92° up to 118°, tilting phone back toward sky): Flare / Climb upward + camera looks UP at canopy & sky.
+    // - Looking DOWN at 45° (~45° angled downward view): Fast 100+ km/h downhill speed run + camera angles down the slope.
+    // - Looking STRAIGHT DOWN (< 15° down to 0° flat): Full 136+ km/h steep speed dive + camera points straight down the mountain!
+    const neutral = clamp(this.neutralElevationDeg, 78.0, 92.0)
+    const downDeadband = 8.0 // A small nod stays level. Looking down is a deliberate dive.
+    const upDeadband = 5.0   // A small look up starts the climb.
 
     const deltaElev = this.smoothedElevationDeg - neutral
 
-    if (deltaElev < -deadband) {
-      // Leaning forward (tipping top of phone away from user) = DIVE / ACCELERATE
-      const forwardLean = (-deltaElev) - deadband
-      const fullDiveTravel = 10.0 // 10° forward tilt reaches 100% full dive
+    if (deltaElev < -downDeadband) {
+      // Tilting downward from vertical (81° -> 45° fast downhill -> 10° looking straight down full dive!)
+      const forwardLean = (-deltaElev) - downDeadband
+      const fullDiveTravel = 68.0 // 81° down to 13° covers the full 0% -> 100% dive range!
       const norm = clamp(forwardLean / fullDiveTravel, 0, 1)
-      this.diveDemand = Math.pow(norm, 1.0)
+      // Direct response: looking down dives right away. The steep dive then gathers speed in the wing.
+      this.diveDemand = Math.pow(norm, 1.05)
       this.flareDemand = 0
       this.pitchDemand = this.diveDemand
-      this.tiltParallaxPitch = -this.diveDemand * 0.22 // Camera gaze tilts down into the dive
-    } else if (deltaElev > deadband) {
-      // Leaning backward (tipping top of phone towards user / looking up at sky) = FLARE / MINIMUM SINK / CLIMB
-      const backwardLean = deltaElev - deadband
-      const fullFlareTravel = 14.0 // 14° backward tilt reaches 100% flare
+      this.tiltParallaxPitch = -this.diveDemand * 0.68 // Strong downward camera tilt as you angle phone down
+    } else if (deltaElev > upDeadband) {
+      // Looking UP past vertical (90° -> 118°): float, slow down, climb, and look up at the sky!
+      const backwardLean = deltaElev - upDeadband
+      const fullFlareTravel = 12.0 // A comfortable look up is a full climb.
       const norm = clamp(backwardLean / fullFlareTravel, 0, 1)
-      this.flareDemand = Math.pow(norm, 1.05)
+      this.flareDemand = Math.pow(norm, 0.85)
       this.diveDemand = 0
       this.pitchDemand = -this.flareDemand
-      this.tiltParallaxPitch = this.flareDemand * 0.16 // Camera gaze tilts up toward sky
+      this.tiltParallaxPitch = this.flareDemand * 0.62 // Strong upward camera tilt as you look up
     } else {
-      // Pure Trim Glide in Big Sky (neutral posture)
+      // Pure Vertical Neutral Glide (~81° to 90° looking straight at screen)
       this.diveDemand = 0
       this.flareDemand = 0
       this.pitchDemand = 0
@@ -461,20 +530,21 @@ export class MobileInputManager {
 
     // 1. Desktop Keyboard Controls:
     if (this.keysDown.has('ArrowLeft') || this.keysDown.has('KeyA')) {
-      targetLeftBrake = Math.max(targetLeftBrake, 0.55)
-      targetWeightShift = -0.85
+      targetLeftBrake = Math.max(targetLeftBrake, 0.45)
+      targetWeightShift = -0.75
     }
     if (this.keysDown.has('ArrowRight') || this.keysDown.has('KeyD')) {
-      targetRightBrake = Math.max(targetRightBrake, 0.55)
-      targetWeightShift = 0.85
+      targetRightBrake = Math.max(targetRightBrake, 0.45)
+      targetWeightShift = 0.75
     }
     if (this.keysDown.has('ArrowDown') || this.keysDown.has('KeyS')) {
       targetLeftBrake = Math.max(targetLeftBrake, 0.70)
       targetRightBrake = Math.max(targetRightBrake, 0.70)
     }
     if (this.keysDown.has('ArrowUp') || this.keysDown.has('KeyW')) {
-      targetSpeedBar = Math.max(targetSpeedBar, 1.0)
+      targetSpeedBar = Math.max(targetSpeedBar, 0.85)
     }
+    const wantsKeyboardCollapse = this.keysDown.has('KeyB')
 
     // 2. Mobile Motion (Tilt) Integration:
     if (this.isMotionActive) {
@@ -483,29 +553,30 @@ export class MobileInputManager {
         targetLeftBrake = Math.max(targetLeftBrake, this.flareDemand)
         targetRightBrake = Math.max(targetRightBrake, this.flareDemand)
       }
-      // If not overriding with active thumb touch, tilt provides direct weight shift + coordinated brake assist:
-      if (!this.isTouchSteering) {
-        targetWeightShift = this.tiltWeightShift
-        const absTilt = Math.abs(this.tiltWeightShift)
-        if (absTilt > 0.40) {
-          const deepTurnAssist = ((absTilt - 0.40) / 0.60) * 0.35
-          if (this.tiltWeightShift < 0) {
-            targetLeftBrake = Math.max(targetLeftBrake, deepTurnAssist)
-          } else {
-            targetRightBrake = Math.max(targetRightBrake, deepTurnAssist)
-          }
-        }
-      } else {
-        // Subtle tilt complement during touch
-        targetWeightShift = this.tiltWeightShift * 0.65
+      // Tilt banks the wing. It does not slide the body sideways.
+      const tilt = this.tiltWeightShift
+      targetWeightShift = tilt
+      const absTilt = Math.abs(tilt)
+      if (absTilt > 0.72) {
+        const insideBrake = ((absTilt - 0.72) / 0.28) * 0.2
+        if (tilt < 0) targetLeftBrake = Math.max(targetLeftBrake, insideBrake)
+        else targetRightBrake = Math.max(targetRightBrake, insideBrake)
       }
     }
 
-    // 3. Crisp Physical Control Actuation:
-    const brakeFollow = 34.0
-    const steerFollow = 38.0
-    const barFollow = 30.0
-    const throttleFollow = 16.0
+    let targetStrafe = this.touchStrafe
+    if (this.keysDown.has('Comma')) targetStrafe = -1
+    if (this.keysDown.has('Period')) targetStrafe = 1
+    if (this.keysDown.has('Comma') || this.keysDown.has('Period') || Math.abs(targetStrafe) >= 0.08) {
+      targetWeightShift = 0
+    }
+
+    // 3. Smooth, Cushioned Physical Control Actuation:
+    const brakeFollow = 16.0
+    const steerFollow = 18.0
+    const strafeFollow = 12.0
+    const barFollow = 14.0
+    const throttleFollow = 14.0
 
     // Throttle input from keyboard (Space, Shift, or X), or touch/cruise dock:
     const isThrottleKeyDown =
@@ -521,13 +592,15 @@ export class MobileInputManager {
     }
 
     this.controls.weightShift += (targetWeightShift - this.controls.weightShift) * Math.min(1.0, steerFollow * dt)
+    const strafeNow = this.controls.strafe || 0
+    this.controls.strafe = strafeNow + (targetStrafe - strafeNow) * Math.min(1.0, strafeFollow * dt)
     this.controls.leftBrake += (targetLeftBrake - this.controls.leftBrake) * Math.min(1.0, brakeFollow * dt)
     this.controls.rightBrake += (targetRightBrake - this.controls.rightBrake) * Math.min(1.0, brakeFollow * dt)
     this.controls.speedBar += (targetSpeedBar - this.controls.speedBar) * Math.min(1.0, barFollow * dt)
     this.controls.pullingA = this.controls.speedBar
     const curThrottle = this.controls.throttle ?? 0
     this.controls.throttle = curThrottle + (desiredThrottle - curThrottle) * Math.min(1.0, throttleFollow * dt)
-    ;(this.controls as any).isCollapsed = this.isWingCollapsed
+    ;(this.controls as any).isCollapsed = this.isWingCollapsed || wantsKeyboardCollapse
   }
 
   public dispose() {

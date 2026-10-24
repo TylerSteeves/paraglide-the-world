@@ -10,6 +10,7 @@ export type FlightControls = {
   leftBrakeRate: number // d(brake)/dt (for dynamic snap tricks)
   rightBrakeRate: number
   weightShift: number // -1 (lean left) to +1 (lean right)
+  strafe?: number // -1 (slip left) to +1 (slip right), heading unchanged
   speedBar: number // 0 to 1
   pullingA: number // 0 to 1 (A-risers / Speed bar leading edge pull)
   pullingB: number // 0 to 1 (B-risers / B-line stall)
@@ -139,5 +140,10 @@ export type FlightTelemetry = {
   thermalFluidVz?: number
   thermalTempAnomalyC?: number
   isDraftingZone?: boolean
+  crashReason?: string
+  crashImpactSpeedKmh?: number
+  crashImpactG?: number
+  crashBonesBroken?: number
+  crashHospitalBill?: number
 }
 

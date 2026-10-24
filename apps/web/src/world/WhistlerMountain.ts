@@ -7,15 +7,16 @@ import { StandardMaterial } from '@babylonjs/core/Materials/standardMaterial'
 import type { Scene } from '@babylonjs/core/scene'
 import type { Mesh } from '@babylonjs/core/Meshes/mesh'
 import { SpherePackingMeshBuilder } from './SpherePackingMeshBuilder'
-import type { FlightWorld, ThermalZone, Vector3Like, ThermalFluidSample } from './types'
+import type { FlightWorld, ThermalZone, Vector3Like, ThermalFluidSample, WorldObstacle } from './types'
 import { calculateToroidalThermalFluid } from './ThermalFluidDynamics'
 
 export class WhistlerMountain implements FlightWorld {
   public terrainMesh: Mesh
   public waterMesh: Mesh | null = null
   public thermals: ThermalZone[] = []
-  // Launch high into the big open alpine sky (ground is at ~1759m, launching 101m into the big sky!)
-  public readonly launchPosition = new Vector3(0, 1860, 20)
+  public obstacles: WorldObstacle[] = []
+  // Launch 13.5m above the groomed snow headwall for immediate proximity speed-flying!
+  public readonly launchPosition = new Vector3(0, 1748, 20)
   public readonly launchHeadingDeg = 5.0 // Aim straight down the ski piste fall-line (Z+)
   private spawnedMeshes: (Mesh | any)[] = []
   private scene: Scene
@@ -153,15 +154,17 @@ export class WhistlerMountain implements FlightWorld {
     // Olympic Village & finish bowl at z = 2400m ~ 650m
     // Downhill distance: 2400m; Vertical drop: 1115m
     // Continuous ski slope (black diamond headwall 34 deg rolling into alpine bowl 25-28 deg down to village runout)
+    // Continuous, relentless steep downhill gradient from summit (z=0) all the way to the Village (z=2400)
+    // Eliminates the previous pow(t, 0.88) + sin(t*PI) flattening that made the mountain level off after launch!
     const t = Math.max(0, Math.min(1.0, z / 2400.0))
-    const valleySlope = 1765.0 - Math.pow(t, 0.88) * 1115.0
+    const valleySlope = 1765.0 - t * 1140.0
 
     // Curving natural ski bowl centerline
     const pisteCenter = Math.sin(z * 0.0028) * 32.0
     const distFromCenter = Math.abs(x - pisteCenter)
 
-    // Amphitheater bowl depression channeling down the run
-    const bowlDepth = -Math.max(0, 1.0 - distFromCenter / 420.0) * Math.sin(t * Math.PI) * 95.0
+    // Constant-depth ski corridor channel (never climbs uphill in the second half of the run!)
+    const bowlDepth = -Math.max(0, 1.0 - distFromCenter / 380.0) * 32.0
 
     // Mountain ridges framing the ski run on left and right
     const sideRidges = Math.pow(Math.max(0, (distFromCenter - 140.0) / 180.0), 1.35) * 75.0
@@ -320,6 +323,16 @@ export class WhistlerMountain implements FlightWorld {
         tInst.position.set(x, y + 2.1 * scale, z)
         tInst.scaling.set(scale, scale, scale)
         this.spawnedMeshes.push(tInst)
+
+        this.obstacles.push({
+          type: 'tree',
+          name: 'Alpine Spruce Tree',
+          x,
+          yMin: y,
+          yMax: y + 6.5 * scale,
+          z,
+          radius: 2.3 * scale,
+        })
       }
 
       // Add racing slalom flags every ~45m down the piste
@@ -386,7 +399,7 @@ export class WhistlerMountain implements FlightWorld {
     for (let i = 0; i < 35; i++) {
       const z = 150 + random() * 2100
       const pisteCenter = Math.sin(z * 0.0028) * 32.0
-      const x = pisteCenter + (random() > 0.5 ? 1 : -1) * (38 + random() * 70)
+      const x = pisteCenter + (random() > 0.5 ? 1 : -1) * (24 + random() * 55)
       const y = this.sampleHeight(x, z)
 
       if (boulder) {
@@ -396,6 +409,16 @@ export class WhistlerMountain implements FlightWorld {
         bInst.scaling.set(sc, sc, sc)
         bInst.rotation.y = random() * Math.PI * 2
         this.spawnedMeshes.push(bInst)
+
+        this.obstacles.push({
+          type: 'boulder',
+          name: 'Granite Cliff Boulder',
+          x,
+          yMin: y - 1.0,
+          yMax: y + 4.2 * sc,
+          z,
+          radius: 3.8 * sc,
+        })
       }
     }
 
@@ -467,20 +490,40 @@ export class WhistlerMountain implements FlightWorld {
       win.rotation.y = rotY
       win.material = windowGlowMat
       this.spawnedMeshes.push(win)
+
+      this.obstacles.push({
+        type: 'chalet',
+        name: 'Alpine Timber Chalet',
+        x,
+        yMin: y,
+        yMax: y + h + roofH + 1.0,
+        z,
+        radius: Math.max(w, d) * 0.52,
+        halfWidth: w * 0.55,
+        halfDepth: d * 0.55,
+      })
     }
 
-    // A. Mid-Mountain Chalet Hamlet (z = 1060 to 1420)
-    // 8 ski cabins on the left and right flanks of the bowl that the player can deek between!
-    const hamletZ = [1060, 1140, 1220, 1300, 1380]
+    // A. Mid-Mountain Chalet Hamlet (z = 1040 to 1440)
+    // Ski cabins flanking and weaving across the bowl that the player can buzz rooftops or smash into!
+    const hamletZ = [1050, 1130, 1210, 1290, 1370, 1440]
     hamletZ.forEach((z, idx) => {
       const pc = Math.sin(z * 0.0028) * 32.0
-      createChalet(`chalet-l-${idx}`, pc - (45.0 + (idx % 2) * 16.0), z - 10, 1.1 + (idx % 3) * 0.2, 0.25)
-      createChalet(`chalet-r-${idx}`, pc + (48.0 + ((idx + 1) % 2) * 14.0), z + 15, 1.05 + ((idx + 1) % 3) * 0.2, -0.3)
+      createChalet(`chalet-l-${idx}`, pc - (28.0 + (idx % 2) * 12.0), z - 8, 1.15 + (idx % 3) * 0.15, 0.20)
+      createChalet(`chalet-r-${idx}`, pc + (28.0 + ((idx + 1) % 2) * 12.0), z + 12, 1.10 + ((idx + 1) % 3) * 0.15, -0.22)
+    })
+
+    // Additional Village Chalets lining the Olympic Village approach (z = 1980 to 2380)
+    const villageChaletsZ = [2010, 2090, 2310, 2380]
+    villageChaletsZ.forEach((z, idx) => {
+      const pc = Math.sin(z * 0.0028) * 32.0
+      createChalet(`village-chalet-l-${idx}`, pc - 26.0, z, 1.2, 0.1)
+      createChalet(`village-chalet-r-${idx}`, pc + 26.0, z + 10, 1.2, -0.1)
     })
 
     // B. Olympic Village Complex (z = 2100 to 2420)
     // 1. Alpine Clock Tower at z = 2260
-    const towerX = 22.0
+    const towerX = 18.0
     const towerZ = 2260.0
     const towerGroundY = this.sampleHeight(towerX, towerZ)
     const towerBaseH = 18.0
@@ -502,6 +545,18 @@ export class WhistlerMountain implements FlightWorld {
     towerSpire.rotation.y = Math.PI / 4
     towerSpire.material = snowRoofMat
 
+    this.obstacles.push({
+      type: 'tower',
+      name: 'Olympic Village Clock Tower',
+      x: towerX,
+      yMin: towerGroundY,
+      yMax: towerGroundY + towerBaseH + spireH,
+      z: towerZ,
+      radius: 4.2,
+      halfWidth: 3.6,
+      halfDepth: 3.6,
+    })
+
     // 4 Glowing Clock Faces
     for (let f = 0; f < 4; f++) {
       const clockFace = MeshBuilder.CreateDisc(`clock-face-${f}`, { radius: 1.8, tessellation: 20 }, this.scene)
@@ -517,8 +572,8 @@ export class WhistlerMountain implements FlightWorld {
     }
     this.spawnedMeshes.push(towerBase, towerSpire)
 
-    // 2. Grand Mountain Ski Lodge at z = 2210, x = -48
-    const lodgeX = -48.0
+    // 2. Grand Mountain Ski Lodge at z = 2210, x = -34
+    const lodgeX = -34.0
     const lodgeZ = 2210.0
     const lodgeY = this.sampleHeight(lodgeX, lodgeZ)
     const lodgeBody = MeshBuilder.CreateBox(
@@ -539,8 +594,20 @@ export class WhistlerMountain implements FlightWorld {
     lodgeRoof.material = snowRoofMat
     this.spawnedMeshes.push(lodgeBody, lodgeRoof)
 
+    this.obstacles.push({
+      type: 'lodge',
+      name: 'Whistler Grand Ski Lodge',
+      x: lodgeX,
+      yMin: lodgeY,
+      yMax: lodgeY + 17.5,
+      z: lodgeZ,
+      radius: 14.0,
+      halfWidth: 16.5,
+      halfDepth: 9.5,
+    })
+
     // 3. Timber Ski Bridge spanning the course at z = 2140
-    // Spans 42m across the ski piste with a 7.5m clearance arch to fly under or deek around!
+    // Spans 42m across the ski piste with a 9.5m clearance arch to fly under or over!
     const bridgeZ = 2140.0
     const bridgePc = Math.sin(bridgeZ * 0.0028) * 32.0
     const bridgeY = this.sampleHeight(bridgePc, bridgeZ)
@@ -549,7 +616,7 @@ export class WhistlerMountain implements FlightWorld {
       { width: 42.0, height: 2.2, depth: 7.0 },
       this.scene,
     )
-    bridgeDeck.position.set(bridgePc, bridgeY + 8.5, bridgeZ)
+    bridgeDeck.position.set(bridgePc, bridgeY + 10.5, bridgeZ)
     bridgeDeck.material = woodWallMat
 
     const bridgeRoof = MeshBuilder.CreateBox(
@@ -557,17 +624,53 @@ export class WhistlerMountain implements FlightWorld {
       { width: 44.0, height: 1.2, depth: 8.5 },
       this.scene,
     )
-    bridgeRoof.position.set(bridgePc, bridgeY + 12.0, bridgeZ)
+    bridgeRoof.position.set(bridgePc, bridgeY + 14.0, bridgeZ)
     bridgeRoof.material = snowRoofMat
 
     // Left and Right Stone Piers
-    const pierL = MeshBuilder.CreateBox('bridge-pier-l', { width: 3.5, height: 12.0, depth: 7.0 }, this.scene)
-    pierL.position.set(bridgePc - 19.0, bridgeY + 6.0, bridgeZ)
+    const pierL = MeshBuilder.CreateBox('bridge-pier-l', { width: 3.5, height: 14.0, depth: 7.0 }, this.scene)
+    pierL.position.set(bridgePc - 19.0, bridgeY + 7.0, bridgeZ)
     pierL.material = stoneMat
 
-    const pierR = MeshBuilder.CreateBox('bridge-pier-r', { width: 3.5, height: 12.0, depth: 7.0 }, this.scene)
-    pierR.position.set(bridgePc + 19.0, bridgeY + 6.0, bridgeZ)
+    const pierR = MeshBuilder.CreateBox('bridge-pier-r', { width: 3.5, height: 14.0, depth: 7.0 }, this.scene)
+    pierR.position.set(bridgePc + 19.0, bridgeY + 7.0, bridgeZ)
     pierR.material = stoneMat
+
+    this.obstacles.push(
+      {
+        type: 'bridge-pier',
+        name: 'Timber Bridge Stone Pier',
+        x: bridgePc - 19.0,
+        yMin: bridgeY,
+        yMax: bridgeY + 14.5,
+        z: bridgeZ,
+        radius: 3.2,
+        halfWidth: 2.2,
+        halfDepth: 4.0,
+      },
+      {
+        type: 'bridge-pier',
+        name: 'Timber Bridge Stone Pier',
+        x: bridgePc + 19.0,
+        yMin: bridgeY,
+        yMax: bridgeY + 14.5,
+        z: bridgeZ,
+        radius: 3.2,
+        halfWidth: 2.2,
+        halfDepth: 4.0,
+      },
+      {
+        type: 'bridge-deck',
+        name: 'Olympic Timber Ski Bridge',
+        x: bridgePc,
+        yMin: bridgeY + 9.2,
+        yMax: bridgeY + 15.0,
+        z: bridgeZ,
+        radius: 21.0,
+        halfWidth: 21.5,
+        halfDepth: 4.2,
+      },
+    )
 
     this.spawnedMeshes.push(bridgeDeck, bridgeRoof, pierL, pierR)
   }

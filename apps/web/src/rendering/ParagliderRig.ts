@@ -10,6 +10,7 @@ import '@babylonjs/core/Rendering/edgesRenderer'
 import type { ParagliderSimulation } from '../physics/pendulum'
 import { clamp } from '../physics/vecmath'
 import { LnPalette, LnStyleManager } from './LnStyleManager'
+import type { PilotSkin } from '../progression/PilotWardrobe'
 
 export class ParagliderRig {
   private scene: Scene
@@ -47,6 +48,7 @@ export class ParagliderRig {
   private tempMat1: Matrix = new Matrix()
   private tempMat2: Matrix = new Matrix()
   private pilotSuitMat!: StandardMaterial
+  private equippedSkin: PilotSkin | null = null
   private helmetMat!: StandardMaterial
   private visorMat!: StandardMaterial
   private gloveMat!: StandardMaterial
@@ -69,8 +71,9 @@ export class ParagliderRig {
   private leftKneeNode: TransformNode
   private rightKneeNode: TransformNode
 
-  // Line Networks & Risers (clean screen mode default: lines hidden)
+  // Line Networks & Risers (visible by default for authentic tethered paragliding feel)
   public showSuspensionLines: boolean = false
+  public pilotVisible: boolean = true
   private suspensionLinesMesh!: LinesMesh
   private risersMesh!: LinesMesh
   private brakeLinesMesh!: LinesMesh
@@ -521,7 +524,7 @@ export class ParagliderRig {
     const numCells = isXc ? 42 : (isParamotor ? 34 : 30)
     const halfSpan = isXc ? 5.1 : (isParamotor ? 4.2 : 3.8)
     const chord = isXc ? 1.85 : (isParamotor ? 1.75 : 1.55)
-    const lineDrop = isXc ? -4.6 : (isParamotor ? -3.9 : -3.6)
+    const lineDrop = isXc ? -3.3 : (isParamotor ? -3.1 : -2.9)
 
     const upperRibbon: Vector3[] = []
     const lowerRibbon: Vector3[] = []
@@ -691,14 +694,28 @@ export class ParagliderRig {
 
   public setSuspensionLinesVisible(visible: boolean): void {
     this.showSuspensionLines = visible
-    if (this.suspensionLinesMesh) this.suspensionLinesMesh.setEnabled(visible)
-    if (this.risersMesh) this.risersMesh.setEnabled(visible)
-    if (this.brakeLinesMesh) this.brakeLinesMesh.setEnabled(visible)
+    if (this.suspensionLinesMesh) this.suspensionLinesMesh.setEnabled(visible && this.pilotVisible)
+    if (this.risersMesh) this.risersMesh.setEnabled(visible && this.pilotVisible)
+    if (this.brakeLinesMesh) this.brakeLinesMesh.setEnabled(visible && this.pilotVisible)
+  }
+
+  public setPilotVisible(visible: boolean): void {
+    this.pilotVisible = visible
+    this.pilotRoot.setEnabled(visible)
+    this.canopyRoot.setEnabled(visible)
+    if (this.suspensionLinesMesh) this.suspensionLinesMesh.setEnabled(this.showSuspensionLines && visible)
+    if (this.risersMesh) this.risersMesh.setEnabled(this.showSuspensionLines && visible)
+    if (this.brakeLinesMesh) this.brakeLinesMesh.setEnabled(this.showSuspensionLines && visible)
   }
 
   public toggleSuspensionLines(): boolean {
     this.setSuspensionLinesVisible(!this.showSuspensionLines)
     return this.showSuspensionLines
+  }
+
+  public applySkin(skin: PilotSkin): void {
+    this.equippedSkin = skin
+    this.applyPalette(LnStyleManager.getInstance().palette)
   }
 
   public applyPalette(pal: LnPalette): void {
@@ -720,6 +737,17 @@ export class ParagliderRig {
         } catch {}
       } else {
         const isParamotor = this.currentWingType === 'paramotor'
+        const canopyTint = this.equippedSkin?.canopy
+        if (canopyTint) {
+          const tint = new Color3(canopyTint.r, canopyTint.g, canopyTint.b)
+          this.canopyTopSpeedMat.diffuseColor = tint
+          this.canopyTopXcMat.diffuseColor = tint
+          this.canopyTopParamotorMat.diffuseColor = tint
+        } else {
+          this.canopyTopSpeedMat.diffuseColor = new Color3(0.96, 0.18, 0.12)
+          this.canopyTopXcMat.diffuseColor = new Color3(0.98, 0.74, 0.14)
+          this.canopyTopParamotorMat.diffuseColor = new Color3(0.0, 0.88, 1.0)
+        }
         this.canopyMesh.material = isXc
           ? this.canopyTopXcMat
           : (isParamotor ? this.canopyTopParamotorMat : this.canopyTopSpeedMat)
@@ -743,21 +771,34 @@ export class ParagliderRig {
       this.brakeLinesMesh.color = isLine ? pal.majorContourRgb : new Color3(0.98, 0.42, 0.12)
     }
 
+    const skin = this.equippedSkin
     if (this.pilotSuitMat) {
-      this.pilotSuitMat.diffuseColor = isLine ? new Color3(0.12, 0.14, 0.18) : new Color3(0.15, 0.20, 0.28)
+      this.pilotSuitMat.diffuseColor = isLine
+        ? new Color3(0.12, 0.14, 0.18)
+        : skin
+          ? new Color3(skin.suit.r, skin.suit.g, skin.suit.b)
+          : new Color3(0.15, 0.2, 0.28)
     }
     if (this.helmetMat) {
-      this.helmetMat.diffuseColor = isLine ? new Color3(0.95, 0.95, 0.98) : new Color3(0.98, 0.98, 1.0)
+      this.helmetMat.diffuseColor = isLine
+        ? new Color3(0.95, 0.95, 0.98)
+        : skin
+          ? new Color3(skin.helmet.r, skin.helmet.g, skin.helmet.b)
+          : new Color3(0.98, 0.98, 1.0)
     }
     if (this.visorMat) {
-      this.visorMat.diffuseColor = new Color3(0.04, 0.04, 0.06)
+      this.visorMat.diffuseColor = skin && !isLine
+        ? new Color3(skin.visor.r, skin.visor.g, skin.visor.b)
+        : new Color3(0.04, 0.04, 0.06)
       this.visorMat.specularColor = isLine ? pal.majorContourRgb : new Color3(0.95, 0.85, 0.35)
     }
     if (this.gloveMat) {
       this.gloveMat.diffuseColor = new Color3(0.10, 0.11, 0.14)
     }
     if (this.bootMat) {
-      this.bootMat.diffuseColor = new Color3(0.16, 0.19, 0.25)
+      this.bootMat.diffuseColor = skin && !isLine
+        ? new Color3(skin.boots.r, skin.boots.g, skin.boots.b)
+        : new Color3(0.16, 0.19, 0.25)
     }
     if (this.soleMat) {
       this.soleMat.diffuseColor = new Color3(0.95, 0.95, 0.97)

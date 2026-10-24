@@ -152,7 +152,7 @@ export class ThermalVortexSystem {
       this.createVortexStream(th)
 
       // 2. Spawn 2-3 Soaring Eagles / Condors circling in the broad thermal core
-      const birdCount = th.strengthMps > 5.0 ? 3 : 2
+      const birdCount = th.columnLift ? 7 : th.strengthMps > 5.0 ? 3 : 2
       for (let b = 0; b < birdCount; b++) {
         this.spawnSoaringBird(idx, th, b)
       }
@@ -349,21 +349,29 @@ export class ThermalVortexSystem {
   }
 
   private spawnSoaringBird(thermalIndex: number, thermal: ThermalZone, birdSubIndex: number) {
-    const bird = MeshBuilder.CreatePlane(`soaring-bird-${thermal.name}-${birdSubIndex}`, { width: 2.8, height: 0.9 }, this.scene)
+    const column = thermal.columnLift === true
+    const bird = MeshBuilder.CreatePlane(
+      `soaring-bird-${thermal.name}-${birdSubIndex}`,
+      { width: column ? 4.6 : 2.8, height: column ? 1.4 : 0.9 },
+      this.scene,
+    )
     bird.material = this.birdMaterial
     bird.billboardMode = Mesh.BILLBOARDMODE_NONE
 
-    const baseAltitude = thermal.center.y + 150 + birdSubIndex * 140
-    const ceilingAltitude = (thermal.topAltitude ?? (thermal.center.y + 1750)) - 100
+    const top = thermal.topAltitude ?? (thermal.center.y + 1750)
+    const ceilingAltitude = top - (column ? 50 : 100)
+    const baseAltitude = column
+      ? thermal.center.y + 48 + birdSubIndex * 90
+      : thermal.center.y + 150 + birdSubIndex * 140
 
     this.birds.push({
       mesh: bird,
       thermalIndex,
-      altitude: baseAltitude,
+      altitude: Math.min(baseAltitude, ceilingAltitude - 20),
       angle: birdSubIndex * (Math.PI * 0.65) + Math.random(),
       // Circle inside the sweet spot carousel radius (85m - 160m)
-      radius: thermal.radius * (0.32 + Math.random() * 0.22),
-      climbRate: thermal.strengthMps * 0.72 - 0.7,
+      radius: thermal.radius * (column ? 0.18 + Math.random() * 0.16 : 0.32 + Math.random() * 0.22),
+      climbRate: column ? thermal.strengthMps * 0.85 : thermal.strengthMps * 0.72 - 0.7,
       turnRate: 0.36,
       baseAltitude,
       ceilingAltitude,
@@ -380,18 +388,21 @@ export class ThermalVortexSystem {
 
     // 1. Animate Helical Vortex Spirals, Toroid Rings and Volumetric Thermal Shroud
     for (const stream of this.streams) {
-      stream.phase += dt * (stream.thermal.strengthMps * 0.35)
       const th = stream.thermal
+      const column = th.columnLift === true
+      stream.phase += dt * (column ? 1.15 : th.strengthMps * 0.35)
 
-      // Subtle Proximity Weather Connection:
-      // Wisps fade into view organically within 220m of the thermal core, keeping panoramic views clear
+      // Wisps stay faint until you are close, so the city view stays open.
+      // An elevator column reads from further out: it is the way back up.
       let proximityAlpha = 0
       if (pilotPos) {
         const dx = pilotPos.x - th.center.x
         const dz = pilotPos.z - th.center.z
         const distHoriz = Math.hypot(dx, dz)
-        if (distHoriz < 220.0) {
-          proximityAlpha = Math.max(0, 1.0 - (distHoriz - 60.0) / 160.0)
+        const full = column ? 90 : 60
+        const far = column ? 460 : 220
+        if (distHoriz < far) {
+          proximityAlpha = Math.max(0, 1.0 - (distHoriz - full) / Math.max(1, far - full))
         }
       }
 
@@ -404,24 +415,30 @@ export class ThermalVortexSystem {
         stream.mainThirdMesh.isVisible = false
         stream.shearOuterMesh.isVisible = false
         stream.shearCounterMesh.isVisible = false
-        stream.shroudMesh.isVisible = false
+        stream.shroudMesh.isVisible = column && show
 
         if (show) {
           // Warm shimmering golden solar wisps when near the updraft
+          const spine = column ? 0.72 : 0.42
           const subtleCol = new Color3(1.0, 0.94, 0.82)
           stream.coreSpineMesh.color = subtleCol
-          stream.coreSpineMesh.alpha = proximityAlpha * 0.42
+          stream.coreSpineMesh.alpha = proximityAlpha * spine
           stream.coreCompanionMesh.color = subtleCol
-          stream.coreCompanionMesh.alpha = proximityAlpha * 0.35
+          stream.coreCompanionMesh.alpha = proximityAlpha * (column ? 0.6 : 0.35)
           stream.mainSpiralMesh.color = new Color3(1.0, 0.88, 0.65)
-          stream.mainSpiralMesh.alpha = proximityAlpha * 0.30
+          stream.mainSpiralMesh.alpha = proximityAlpha * (column ? 0.5 : 0.30)
           stream.mainCompanionMesh.color = new Color3(1.0, 0.88, 0.65)
-          stream.mainCompanionMesh.alpha = proximityAlpha * 0.25
+          stream.mainCompanionMesh.alpha = proximityAlpha * (column ? 0.42 : 0.25)
+
+          if (column) {
+            stream.shroudMaterial.alpha = proximityAlpha * 0.1
+            stream.shroudMaterial.emissiveColor = new Color3(1.0, 0.8, 0.42)
+          }
 
           for (const ring of stream.toroidMeshes) {
             ring.isVisible = true
             ring.color = new Color3(1.0, 0.92, 0.70)
-            ring.alpha = proximityAlpha * 0.32
+            ring.alpha = proximityAlpha * (column ? 0.48 : 0.32)
           }
         } else {
           for (const ring of stream.toroidMeshes) {
@@ -435,8 +452,8 @@ export class ThermalVortexSystem {
       const heightStep = totalHeight / numPoints
       const expansionRatio = th.expansionRatio ?? 2.0
 
-      const tiltX = wind.x * tiltRate
-      const tiltZ = wind.z * tiltRate
+      const tiltX = column ? 0 : wind.x * tiltRate
+      const tiltZ = column ? 0 : wind.z * tiltRate
 
       for (let i = 0; i < numPoints; i++) {
         const y = baseAlt + i * heightStep
@@ -580,8 +597,9 @@ export class ThermalVortexSystem {
       }
 
       const altDelta = bird.altitude - th.center.y
-      const driftX = wind.x * tiltRate * altDelta
-      const driftZ = wind.z * tiltRate * altDelta
+      const columnBird = th.columnLift === true
+      const driftX = columnBird ? 0 : wind.x * tiltRate * altDelta
+      const driftZ = columnBird ? 0 : wind.z * tiltRate * altDelta
 
       const x = th.center.x + Math.cos(bird.angle) * bird.radius + driftX
       const z = th.center.z + Math.sin(bird.angle) * bird.radius + driftZ

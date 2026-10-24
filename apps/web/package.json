@@ -11,7 +11,11 @@
   "dependencies": {
     "@babylonjs/core": "^9.23.0",
     "@babylonjs/loaders": "^9.23.0",
-    "@wilder-future/world-data-engine": "workspace:*"
+    "@mapbox/vector-tile": "^2.0.5",
+    "@wilder-future/world-data-engine": "workspace:*",
+    "cesium": "^1.146.0",
+    "pbf": "^4.0.2",
+    "vite-plugin-cesium": "^1.2.23"
   },
   "devDependencies": {
     "@vitejs/plugin-basic-ssl": "^2.3.0",

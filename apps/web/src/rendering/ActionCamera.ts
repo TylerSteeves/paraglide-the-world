@@ -47,8 +47,9 @@ void main(void) {
   uvG = clamp(uvG, vec2(0.001), vec2(0.999));
   uvB = clamp(uvB, vec2(0.001), vec2(0.999));
 
+  vec4 baseSample = texture2D(textureSampler, uvG);
   float rCol = texture2D(textureSampler, uvR).r;
-  float gCol = texture2D(textureSampler, uvG).g;
+  float gCol = baseSample.g;
   float bCol = texture2D(textureSampler, uvB).b;
   vec3 color = vec3(rCol, gCol, bCol);
 
@@ -56,7 +57,7 @@ void main(void) {
   float vignette = 1.0 - vignetteStrength * smoothstep(0.48, 1.25, r);
   color *= clamp(vignette, 0.0, 1.0);
 
-  gl_FragColor = vec4(color, 1.0);
+  gl_FragColor = vec4(color, baseSample.a);
 }
 `
 
@@ -73,14 +74,14 @@ export class ActionCamera {
   public postProcess: PostProcess
   public lensMode: LensMode = 'action-cam'
   public vantage: CameraVantage = 'chase-360'
-  public fisheyeStrength: number = 0.02 // Crisp flat perspective, no severe fishbowl warping
-  public chromaticAberration: number = 0.0006 // Minimal optical dispersion
-  public vignetteStrength: number = 0.16 // Subtle action-cam lens shading
+  public fisheyeStrength: number = 0.34 // Authentic GoPro MAX / Insta360 SuperView barrel distortion
+  public chromaticAberration: number = 0.0024 // Wide-angle optical edge dispersion
+  public vignetteStrength: number = 0.24 // Action-cam peripheral lens shading
   public orbitYawRad: number = 0 // 0 to 2*PI horizontal angle rotating around flyer
   public orbitPitchRad: number = 0 // -0.45 to +0.85 vertical elevation angle around flyer
   public isUserOrbiting: boolean = false
   private orbitHoldTimer: number = 0
-  private baseFov: number = 1.34 // ~76.8 degrees wide forward perspective
+  private baseFov: number = 1.85 // ~106° ultra-wide GoPro fisheye perspective (frames close-up pilot + canopy!)
   private smoothedTarget: Vector3
   private smoothedCamPos: Vector3
   private targetCamPos: Vector3
@@ -89,10 +90,12 @@ export class ActionCamera {
   private elasticLag: number = 0
   private shakeTimer: number = 0
   private smoothedHorizonRoll: number = 0
+  private crashCamAngle: number = 0
+  private crashShakeTimer: number = 0
 
   constructor(scene: Scene) {
     this.camera = new FreeCamera('action-camera', new Vector3(70, 2395, 5), scene)
-    this.camera.fov = 1.34
+    this.camera.fov = 1.85
     this.camera.minZ = 0.05
     this.camera.maxZ = 9500
     this.camera.inputs.clear()
@@ -126,11 +129,11 @@ export class ActionCamera {
       const height = this.postProcess.height || engine.getRenderHeight()
       const aspect = width / Math.max(1, height)
 
-      const rCorner = 0.5 * Math.sqrt(aspect * aspect + 1.0)
-      const rCorner2 = rCorner * rCorner
-      const cornerDist =
-        1.0 + this.fisheyeStrength * rCorner2 + (this.fisheyeStrength * 0.35) * (rCorner2 * rCorner2)
-      const safeZoom = 1.0 / Math.max(1.0, cornerDist)
+      // Preserve full top-to-bottom vertical FOV (rEdge = 0.5 -> rEdge2 = 0.25) so the overhead canopy is never cropped!
+      const rEdge2 = 0.25
+      const edgeDist =
+        1.0 + this.fisheyeStrength * rEdge2 + (this.fisheyeStrength * 0.35) * (rEdge2 * rEdge2)
+      const safeZoom = 1.0 / Math.max(1.0, edgeDist)
 
       effect.setFloat('aspectRatio', aspect)
       effect.setFloat('strength', this.fisheyeStrength)
@@ -154,20 +157,20 @@ export class ActionCamera {
   public setLensMode(mode: LensMode) {
     this.lensMode = mode
     if (mode === 'action-cam') {
-      this.fisheyeStrength = 0.02
-      this.chromaticAberration = 0.0006
-      this.vignetteStrength = 0.16
-      this.baseFov = 1.34
+      this.fisheyeStrength = 0.34
+      this.chromaticAberration = 0.0024
+      this.vignetteStrength = 0.24
+      this.baseFov = 1.85
     } else if (mode === 'subtle') {
-      this.fisheyeStrength = 0.0
-      this.chromaticAberration = 0.0
-      this.vignetteStrength = 0.10
-      this.baseFov = 1.28
+      this.fisheyeStrength = 0.16
+      this.chromaticAberration = 0.0012
+      this.vignetteStrength = 0.14
+      this.baseFov = 1.65
     } else {
       this.fisheyeStrength = 0.0
       this.chromaticAberration = 0.0
       this.vignetteStrength = 0.0
-      this.baseFov = 1.22
+      this.baseFov = 1.38
     }
     this.camera.fov = this.baseFov
   }
@@ -214,9 +217,8 @@ export class ActionCamera {
     let startY = 0
 
     element.addEventListener('pointerdown', (e) => {
-      const isUpperScreen = e.clientY < window.innerHeight * 0.45
       const isRightClick = e.button === 2 || e.button === 1 || e.shiftKey
-      if (isRightClick || (isUpperScreen && e.pointerType === 'touch')) {
+      if (isRightClick) {
         isDragging = true
         startX = e.clientX
         startY = e.clientY
@@ -261,7 +263,45 @@ export class ActionCamera {
     parallaxPitch: number = 0,
     _instantTwistRad: number = 0,
     snapIntensity: number = 0,
+    ragdollPos?: Vector3,
   ) {
+    // GTA Crash Camera Mode: Dramatic impact shake + cinematic slow-orbit tracking of the tumbling ragdoll!
+    if (sim.isCrashed && ragdollPos) {
+      this.crashCamAngle += dt * 0.58
+      this.crashShakeTimer += dt
+      const impactShake = Math.max(0, 1.0 - this.crashShakeTimer * 1.6) * 0.65
+      const shakeVec = new Vector3(
+        Math.sin(this.crashShakeTimer * 55) * impactShake,
+        Math.cos(this.crashShakeTimer * 62) * impactShake,
+        Math.sin(this.crashShakeTimer * 48) * impactShake,
+      )
+
+      const yawRad = (sim.canopy.yawDeg * Math.PI) / 180 + this.crashCamAngle
+      const camDist = 6.2
+      const camHeight = 3.2
+      this.targetCamPos = new Vector3(
+        ragdollPos.x - Math.sin(yawRad) * camDist,
+        ragdollPos.y + camHeight,
+        ragdollPos.z - Math.cos(yawRad) * camDist,
+      ).add(shakeVec)
+
+      this.lookTarget = new Vector3(ragdollPos.x, ragdollPos.y + 0.35, ragdollPos.z)
+
+      const lerp = Math.min(1.0, 9.5 * dt)
+      this.smoothedCamPos.x += (this.targetCamPos.x - this.smoothedCamPos.x) * lerp
+      this.smoothedCamPos.y += (this.targetCamPos.y - this.smoothedCamPos.y) * lerp
+      this.smoothedCamPos.z += (this.targetCamPos.z - this.smoothedCamPos.z) * lerp
+      this.smoothedTarget.x += (this.lookTarget.x - this.smoothedTarget.x) * lerp
+      this.smoothedTarget.y += (this.lookTarget.y - this.smoothedTarget.y) * lerp
+      this.smoothedTarget.z += (this.lookTarget.z - this.smoothedTarget.z) * lerp
+
+      this.camera.position.copyFrom(this.smoothedCamPos)
+      this.camera.upVector.copyFrom(Vector3.Up())
+      this.camera.setTarget(this.smoothedTarget)
+      return
+    }
+    this.crashShakeTimer = 0
+
     const pilotPos = new Vector3(sim.pilot.position.x, sim.pilot.position.y, sim.pilot.position.z)
     const canopyPos = new Vector3(sim.canopy.position.x, sim.canopy.position.y, sim.canopy.position.z)
 
@@ -271,9 +311,9 @@ export class ActionCamera {
     const renderHeight = engine.getRenderHeight()
     const isPortrait = renderHeight >= renderWidth
 
-    // Portrait framing scale factors: elevate and pull back slightly to keep canopy and slope framed
-    const portraitDistMult = isPortrait ? 1.25 : 1.0
-    const portraitHeightMult = isPortrait ? 1.35 : 1.0
+    // Portrait framing scale factors: keep camera ultra-close to the flyer in both portrait and landscape!
+    const portraitDistMult = isPortrait ? 1.08 : 1.0
+    const portraitHeightMult = isPortrait ? 1.06 : 1.0
 
     // Tether vector (points up along suspension lines toward canopy)
     const tetherDiff = canopyPos.subtract(pilotPos)
@@ -383,11 +423,14 @@ export class ActionCamera {
     const effectivePitch = this.orbitPitchRad
 
     if (this.vantage === 'chase-360' || this.vantage === 'orbit-360') {
-      // 1. Forward Driver & 360° Rotating Orbit Perspective:
-      // Perfectly frames the flyer from any angle, rotating 360° around the pilot and canopy!
-      const diveTighten = Math.min(0.75, (Math.max(0, -verticalMps) / 25.0) * (isSpeedwing ? 0.70 : 0.55))
-      const dist = (3.4 * portraitDistMult) + this.elasticLag * 0.35 + Math.min(0.35, speedSurge * 0.012) - diveTighten
-      const height = (1.35 * portraitHeightMult) + Math.min(0.16, speedSurge * 0.008) + downhillDescend * 0.20 - gHeavinessComp + stomachDropFloat
+      // 1. Ultra-Close Insta360 / GoPro Fisheye Chase Rig:
+      // Mounted right behind the pilot (~1.95m) with a 106°+ fisheye lens so the flyer is up-close and visceral
+      // while the wide barrel lens bends upward to capture the arched canopy and suspension lines overhead!
+      const diveTighten = Math.min(0.45, (Math.max(0, -verticalMps) / 25.0) * (isSpeedwing ? 0.45 : 0.35))
+      // Rises higher above pilot when tilting down into a dive; drops below pilot when looking up at canopy/sky!
+      const pitchHeightShift = -parallaxPitch * 1.65
+      const dist = (1.95 * portraitDistMult) + this.elasticLag * 0.25 + Math.min(0.25, speedSurge * 0.008) - diveTighten
+      const height = (1.12 * portraitHeightMult) + pitchHeightShift + Math.min(0.12, speedSurge * 0.006) + downhillDescend * 0.12 - gHeavinessComp * 0.65 + stomachDropFloat * 0.65
 
       const cosY = Math.cos(effectiveYaw)
       const sinY = Math.sin(effectiveYaw)
@@ -403,20 +446,17 @@ export class ActionCamera {
       const upRef = Vector3.Up()
       const uOrbitDir = uH.scale(cosP).add(upRef.scale(sinP)).normalize()
 
-      // Centrifugal lateral camera swing during high-G turns:
-      // Subtle, authentic physical sensation without wild jerky swings
-      const centLag = Math.max(-0.35, Math.min(0.35, (sim.bankDeg / 45.0) * (gForce - 0.9) * 0.16))
-
+      // Stay with the body. An outside-of-turn camera lag swung the view
+      // into whatever you were trying to turn away from.
       this.targetCamPos = pilotPos
         .add(uOrbitDir.scale(dist))
-        .subtract(uRight.scale(centLag))
         .add(upRef.scale(height * Math.max(0.2, 1.0 - Math.abs(sinP))))
         .add(shake)
 
       // Forward flight path line-of-sight: look target projects along the true flight vector
       const lookDist = 50.0 + (speedKmh / trimSpeed) * 20.0
-      const slopeDip = downhillDescend * 3.2 - thermalClimb * 2.0 + 1.2
-      const tiltDip = -parallaxPitch * (lookDist * 0.40)
+      const slopeDip = downhillDescend * 2.4 - thermalClimb * 2.0 + 0.6
+      const tiltDip = -parallaxPitch * (lookDist * 0.90)
       const forwardLook = this.targetCamPos
         .add(vDir.scale(lookDist))
         .subtract(Vector3.Up().scale(slopeDip + tiltDip))
@@ -518,17 +558,17 @@ export class ActionCamera {
     this.camera.upVector.copyFrom(camUp)
     this.camera.setTarget(this.smoothedTarget)
 
-    // Dynamic speed-tunnel FOV dilation: expands peripheral vision and creates forward speed rush
-    const effectiveBaseFov = isPortrait ? 1.25 : this.baseFov
-    // Plunge boost: in steep dives, FOV immediately flares open to give the stomach-dropping speed sensation!
-    const plungeBoost = Math.min(0.40, (Math.max(0, -sim.telemetry.verticalSpeedMps - 2.5) / 25.0) * 0.40)
+    // Dynamic speed-tunnel FOV dilation: expands peripheral vision and creates visceral fisheye speed rush!
+    const effectiveBaseFov = isPortrait ? 1.82 : this.baseFov
+    // Plunge boost: in steep dives, FOV flares open even wider for stomach-dropping speed sensation!
+    const plungeBoost = Math.min(0.22, (Math.max(0, -sim.telemetry.verticalSpeedMps - 2.5) / 25.0) * 0.22)
     const fovBoost = isSpeedwing
-      ? Math.min(0.68, Math.pow(Math.max(0, speedKmh - 65.0) / 50.0, 1.1) * 0.50 + plungeBoost)
-      : Math.min(0.50, Math.pow(Math.max(0, speedKmh - 38.0) / 35.0, 1.15) * 0.35 + plungeBoost)
-    const snapFovBoost = snapIntensity * 0.08
-    const loopFovBoost = (sim.isLooping || sim.isRolling) ? 0.12 : 0
-    const gTunnelFov = Math.max(0, gForce - 1.2) * 0.025
-    const targetFov = Math.min(1.75, effectiveBaseFov * (1.0 + fovBoost + snapFovBoost + loopFovBoost - gTunnelFov))
+      ? Math.min(0.26, Math.pow(Math.max(0, speedKmh - 65.0) / 50.0, 1.1) * 0.18 + plungeBoost)
+      : Math.min(0.22, Math.pow(Math.max(0, speedKmh - 45.0) / 45.0, 1.15) * 0.15 + plungeBoost)
+    const snapFovBoost = snapIntensity * 0.05
+    const loopFovBoost = (sim.isLooping || sim.isRolling) ? 0.08 : 0
+    const gTunnelFov = Math.max(0, gForce - 1.2) * 0.015
+    const targetFov = Math.min(2.08, effectiveBaseFov * (1.0 + fovBoost + snapFovBoost + loopFovBoost - gTunnelFov))
     this.camera.fov += (targetFov - this.camera.fov) * Math.min(1.0, 14.0 * dt)
   }
 }

@@ -33,6 +33,22 @@ export class FlightSoundscape {
   private wasCollapsedLastFrame: boolean = false
   private initialized: boolean = false
 
+  // Just A major. A second root a fraction sharp makes a slow beat, like air moving.
+  // Pitches never move. Speed only opens the next note.
+  private readonly chordHz = [110, 110.4, 165, 220, 275, 330]
+  private chordVoices: { osc: OscillatorNode; gain: GainNode }[] = []
+  private chordPhase = 0
+
+  /** Create the context inside a user gesture and pull it out of suspension. */
+  public unlock(): void {
+    this.init()
+    const ctx = this.ctx
+    if (!ctx) return
+    if (ctx.state === 'suspended' || ctx.state === 'interrupted') {
+      void ctx.resume()
+    }
+  }
+
   public init() {
     if (this.initialized) return
 
@@ -63,6 +79,18 @@ export class FlightSoundscape {
       this.windFilter.connect(this.windGain)
       this.windGain.connect(this.ctx.destination)
       whiteNoise.start()
+
+      for (const hz of this.chordHz) {
+        const osc = this.ctx.createOscillator()
+        osc.type = 'sine'
+        osc.frequency.value = hz
+        const gain = this.ctx.createGain()
+        gain.gain.value = 0
+        osc.connect(gain)
+        gain.connect(this.ctx.destination)
+        osc.start()
+        this.chordVoices.push({ osc, gain })
+      }
 
       // 2. Procedural Variometer Beep (Sine Oscillator)
       this.varioOsc = this.ctx.createOscillator()
@@ -187,13 +215,13 @@ export class FlightSoundscape {
     airspeedKmh: number,
     verticalSpeedMps: number,
     gForce: number,
-    lineTensionN: number = 860,
+    _lineTensionN: number = 860,
     leftForceN: number = 0,
     rightForceN: number = 0,
     stallWarning: number = 0,
     isStalled: boolean = false,
     dt: number = 0.016,
-    staticChargeField: number = 0,
+    _staticChargeField: number = 0,
     engineRpm: number = 0,
     throttlePercent: number = 0,
     wingType: string = 'paraglider',
@@ -215,8 +243,8 @@ export class FlightSoundscape {
       return
     }
 
-    if (this.ctx.state === 'suspended') {
-      this.ctx.resume()
+    if (this.ctx.state === 'suspended' || this.ctx.state === 'interrupted') {
+      void this.ctx.resume()
     }
 
     // 0. Canopy Re-inflation Audio: Snap open on recovery from collapse
@@ -225,105 +253,111 @@ export class FlightSoundscape {
     }
     this.wasCollapsedLastFrame = isCollapsed
 
-    // 1. Modulate Wind Noise: Clean laminar rush; exhilarating roar on surges & G-turns; quiet float on zero-G; screaming roar on freefall
+    // 1. A dark rush under a fixed chord. The noise stays quiet; the notes carry the intensity.
     const isSpeedwing = wingType === 'speedwing'
     const speedRatio = Math.max(0.1, Math.min(4.8, airspeedKmh / (isSpeedwing ? 70.0 : 42.0)))
     const gHeaviness = Math.max(0, gForce - 1.0)
     const zeroGFloat = Math.max(0, 1.0 - gForce)
-    // Plunge rush: in steep dives, wind screams with roaring airframe pressure!
-    const plungeNoise = Math.max(0, -verticalSpeedMps - 3.0) / 20.0
-    let targetGain = (0.08 + Math.pow(speedRatio, 1.45) * (isSpeedwing ? 0.32 : 0.18) + gHeaviness * 0.22 + plungeNoise * 0.35) * (1.0 - zeroGFloat * 0.35)
-    let targetFreq = (340 + Math.pow(speedRatio, 1.55) * (isSpeedwing ? 1650 : 1050) + gHeaviness * 650 + plungeNoise * 1800) * (1.0 - zeroGFloat * 0.25)
+    const plungeNoise = Math.max(0, -verticalSpeedMps - 6.0) / 24.0
+    let targetGain = (0.018 + Math.pow(speedRatio, 1.35) * (isSpeedwing ? 0.05 : 0.032) + gHeaviness * 0.015 + plungeNoise * 0.03) * (1.0 - zeroGFloat * 0.4)
+    let targetFreq = (140 + Math.pow(speedRatio, 1.05) * 90 + plungeNoise * 40) * (1.0 - zeroGFloat * 0.2)
 
     if (isCollapsed || collapseFrac > 0.05) {
-      // Freefall plunge: screaming wind roar as pilot plummets downward!
-      targetGain = 0.52 + collapseFrac * 0.22
-      targetFreq = 850 + collapseFrac * 850
+      targetGain = 0.08 + collapseFrac * 0.04
+      targetFreq = 180
     } else if (isStalled) {
-      // Stall breakaway: laminar airflow detaches! Highs vanish, dull turbulence remains
       targetGain *= 0.35
-      targetFreq = 220
+      targetFreq = 120
     }
 
-    this.windGain.gain.setTargetAtTime(Math.min(0.96, targetGain), this.ctx.currentTime, 0.04)
-    this.windFilter.frequency.setTargetAtTime(Math.min(5500, targetFreq), this.ctx.currentTime, 0.04)
+    this.windGain.gain.setTargetAtTime(Math.min(0.1, targetGain), this.ctx.currentTime, 0.12)
+    this.windFilter.frequency.setTargetAtTime(Math.min(380, targetFreq), this.ctx.currentTime, 0.12)
 
-    // 2. Aeolian Line Whistle (Singing Lines)
-    // Resonates when lines are taut and fast; cuts out when lines go slack or wing collapses
-    const isSlack = lineTensionN < 250 || isStalled || isCollapsed || collapseFrac > 0.05
-    if (isSlack || airspeedKmh < 28) {
-      this.lineWhistleGain.gain.setTargetAtTime(0, this.ctx.currentTime, 0.05)
-    } else {
-      const tensionFrac = Math.min(3.5, lineTensionN / 860.0)
-      const baseWhistle = isSpeedwing ? 2200 : 1600
-      const whistleFreq = baseWhistle + (airspeedKmh / 45.0) * (isSpeedwing ? 1650 : 950) + (tensionFrac - 1.0) * 1100 + plungeNoise * 850
-      const whistleGain = Math.min(isSpeedwing ? 0.26 : 0.14, (0.024 * speedRatio + plungeNoise * 0.08) * Math.min(2.5, tensionFrac))
-      this.lineWhistleOsc.frequency.setTargetAtTime(whistleFreq, this.ctx.currentTime, 0.035)
-      this.lineWhistleGain.gain.setTargetAtTime(whistleGain, this.ctx.currentTime, 0.04)
+    // A2, a slow-beating twin, E3, A3, C#4, E4. Same chord at every speed.
+    const energy = Math.max(0, Math.min(1.7, (speedRatio - 0.2) * 0.72 + plungeNoise * 0.4 + gHeaviness * 0.1))
+    this.chordPhase += dt * Math.PI * 2 * 0.2
+    const breath = 0.86 + 0.14 * Math.sin(this.chordPhase)
+    const open = (edge: number, width: number) => {
+      const t = Math.max(0, Math.min(1, (energy - edge) / width))
+      return t * t * (3 - 2 * t)
+    }
+    // A glide already holds A–E–A. Speed opens C# and the top E. Pitches stay put.
+    let chord = [
+      (0.045 + energy * 0.045) * breath,
+      (0.03 + energy * 0.028) * breath,
+      (0.025 + open(0.0, 0.45) * 0.05) * breath,
+      open(0.15, 0.45) * 0.055 * breath,
+      open(0.5, 0.45) * 0.032 * breath,
+      open(0.9, 0.4) * 0.02 * breath,
+    ]
+    if (isStalled) {
+      chord = chord.map((gain, i) => (i < 2 ? gain * 0.4 : 0))
+    } else if (isCollapsed || collapseFrac > 0.05) {
+      chord[0] = Math.min(0.05, chord[0] + 0.016)
+      chord[1] = Math.min(0.032, chord[1] + 0.01)
+      chord[2] = Math.min(0.028, chord[2] + 0.008)
+      chord[3] *= 0.25
+      chord[4] = 0
+      chord[5] = 0
+    } else if (zeroGFloat > 0.35) {
+      const thin = 1 - zeroGFloat * 0.7
+      chord = chord.map((gain) => gain * thin)
+    }
+    if (wingType === 'paramotor' && engineRpm > 500) {
+      chord = chord.map((gain) => gain * 0.5)
+    }
+    const chordNow = this.ctx.currentTime
+    for (let i = 0; i < this.chordVoices.length; i++) {
+      this.chordVoices[i].gain.gain.setTargetAtTime(chord[i] ?? 0, chordNow, 0.22)
     }
 
-    // 3. Trailing Edge Flutter & High-G Line Tension Groan & Deflated Canopy Buffeting
-    const totalBrakeForce = leftForceN + rightForceN
-    const gTensionLoad = Math.max(0, gForce - 1.2) * 0.20
-    if (isCollapsed || collapseFrac > 0.05) {
-      // Deflated canopy cloth flutters and snaps violently in freefall airstream!
-      const clothFlutter = 0.30 * collapseFrac
-      this.brakeFlutterGain.gain.setTargetAtTime(clothFlutter, this.ctx.currentTime, 0.04)
-      if (this.brakeFlutterFilter) {
-        this.brakeFlutterFilter.frequency.setTargetAtTime(82, this.ctx.currentTime, 0.04)
-      }
-    } else if ((totalBrakeForce > 8 || gTensionLoad > 0.01) && !isStalled) {
-      const flutterGain = Math.min(0.28, (totalBrakeForce / 120.0) * 0.18 + gTensionLoad)
-      this.brakeFlutterGain.gain.setTargetAtTime(flutterGain, this.ctx.currentTime, 0.04)
-      if (this.brakeFlutterFilter) {
-        this.brakeFlutterFilter.frequency.setTargetAtTime(55 + gTensionLoad * 45, this.ctx.currentTime, 0.04)
-      }
-    } else {
-      this.brakeFlutterGain.gain.setTargetAtTime(0, this.ctx.currentTime, 0.08)
-    }
-
-    // 4. Pre-Stall Buffet (Pulsing 34 Hz Aerodynamic Shudder)
-    if (stallWarning > 0.45 && !isStalled) {
-      const buffetVol = Math.min(0.24, (stallWarning - 0.45) * 0.45)
-      this.stallBuffetGain.gain.setTargetAtTime(buffetVol, this.ctx.currentTime, 0.03)
-    } else {
-      this.stallBuffetGain.gain.setTargetAtTime(0, this.ctx.currentTime, 0.06)
-    }
-
-    // 5. Variometer Logic: Hyper-sensitive paraglider thermalling
-    if (wingType !== 'speedwing' && verticalSpeedMps > 0.08) {
-      // Climbing in thermal updraft! (Threshold lowered to +0.08 m/s for instant feedback)
-      const climbRate = Math.min(8.0, verticalSpeedMps)
-      const pitchHz = 520 + climbRate * 195
-      const beepInterval = Math.max(0.08, 0.45 - climbRate * 0.065)
-
-      this.varioOsc.frequency.setTargetAtTime(pitchHz, this.ctx.currentTime, 0.025)
-
-      this.varioTimer += dt
-      if (this.varioTimer > beepInterval * 2) {
-        this.varioTimer = 0
-      }
-
-      // Musical Beep on/off pulse
-      const isBeeping = this.varioTimer < beepInterval && !this.varioMuted
-      this.varioGain.gain.setTargetAtTime(isBeeping ? 0.11 : 0, this.ctx.currentTime, 0.012)
-    } else if (verticalSpeedMps < -1.25 && !this.varioMuted && wingType !== 'speedwing') {
-      // Sinking air warning for paraglider XC mode
-      const sinkPitch = Math.max(160, 360 + (verticalSpeedMps + 1.25) * 42)
-      this.varioOsc.frequency.setTargetAtTime(sinkPitch, this.ctx.currentTime, 0.04)
-      this.varioGain.gain.setTargetAtTime(0.05, this.ctx.currentTime, 0.04)
-    } else {
-      // Quiet laminar float in neutral glide
-      this.varioGain.gain.setTargetAtTime(0, this.ctx.currentTime, 0.04)
-    }
-
-    // 6. Triboelectric RF Static Crackle at Thermal Shear Margin
-    if (this.staticCrackleGain && staticChargeField > 0.12) {
-      // Sporadic burst ionization crackles
-      const crackleBurst = Math.random() < staticChargeField * 0.45 ? 0.045 * staticChargeField : 0.002 * staticChargeField
-      this.staticCrackleGain.gain.setTargetAtTime(crackleBurst, this.ctx.currentTime, 0.015)
-    } else if (this.staticCrackleGain) {
+    // The high line whistle and the radio-static crackle read as noise, so they stay closed.
+    this.lineWhistleGain.gain.setTargetAtTime(0, this.ctx.currentTime, 0.05)
+    if (this.staticCrackleGain) {
       this.staticCrackleGain.gain.setTargetAtTime(0, this.ctx.currentTime, 0.05)
+    }
+
+    // 3. Cloth flutter only on a real brake pull or a collapse, not on ordinary G.
+    const totalBrakeForce = leftForceN + rightForceN
+    if (isCollapsed || collapseFrac > 0.05) {
+      this.brakeFlutterGain.gain.setTargetAtTime(0.06 * collapseFrac, this.ctx.currentTime, 0.06)
+      if (this.brakeFlutterFilter) {
+        this.brakeFlutterFilter.frequency.setTargetAtTime(70, this.ctx.currentTime, 0.06)
+      }
+    } else if (totalBrakeForce > 40 && !isStalled) {
+      const flutterGain = Math.min(0.07, ((totalBrakeForce - 40) / 180.0) * 0.07)
+      this.brakeFlutterGain.gain.setTargetAtTime(flutterGain, this.ctx.currentTime, 0.06)
+      if (this.brakeFlutterFilter) {
+        this.brakeFlutterFilter.frequency.setTargetAtTime(52, this.ctx.currentTime, 0.06)
+      }
+    } else {
+      this.brakeFlutterGain.gain.setTargetAtTime(0, this.ctx.currentTime, 0.1)
+    }
+
+    // 4. Stall warning stays, quieter, and only once the wing is actually near a stall.
+    if (stallWarning > 0.6 && !isStalled) {
+      const buffetVol = Math.min(0.07, (stallWarning - 0.6) * 0.16)
+      this.stallBuffetGain.gain.setTargetAtTime(buffetVol, this.ctx.currentTime, 0.05)
+    } else {
+      this.stallBuffetGain.gain.setTargetAtTime(0, this.ctx.currentTime, 0.08)
+    }
+
+    // 5. Variometer: a soft chirp on a real climb, a rare low tone on a hard sink.
+    const climbing = wingType !== 'speedwing' && verticalSpeedMps > 0.75 && !this.varioMuted
+    const hardSink = wingType !== 'speedwing' && verticalSpeedMps < -4.5 && !this.varioMuted
+    if (climbing || hardSink) {
+      const climbRate = climbing ? Math.min(5.0, verticalSpeedMps) : 0
+      const climbNotes = [440, 554.37, 659.25]
+      const pitchHz = climbing ? climbNotes[climbRate < 1.6 ? 0 : climbRate < 3.2 ? 1 : 2] : 164.81
+      const beepInterval = climbing ? Math.max(0.36, 0.95 - climbRate * 0.06) : 0.9
+      const beepGain = climbing ? 0.04 : 0.022
+      this.varioOsc.frequency.setTargetAtTime(pitchHz, this.ctx.currentTime, 0.06)
+      this.varioTimer += dt
+      if (this.varioTimer > beepInterval) this.varioTimer = 0
+      const isBeeping = this.varioTimer < 0.14
+      this.varioGain.gain.setTargetAtTime(isBeeping ? beepGain : 0, this.ctx.currentTime, 0.04)
+    } else {
+      this.varioGain.gain.setTargetAtTime(0, this.ctx.currentTime, 0.08)
     }
 
     // 7. Paramotor Engine Sound Dynamics (Vittorazi Moster 185 2-Stroke)
@@ -346,12 +380,10 @@ export class FlightSoundscape {
         const pipeFreq = 180 + throttleFrac * 360 + (engineRpm / 8400) * 220
         this.engineFilter.frequency.setTargetAtTime(pipeFreq, this.ctx.currentTime, 0.04)
 
-        // Engine volume: idle burble (0.07) to wide-open scream (0.26)
-        const targetVol = 0.07 + throttleFrac * 0.20
-        this.engineGain.gain.setTargetAtTime(targetVol, this.ctx.currentTime, 0.04)
+        const targetVol = 0.04 + throttleFrac * 0.1
+        this.engineGain.gain.setTargetAtTime(targetVol, this.ctx.currentTime, 0.06)
 
-        // Propeller chop and wash noise
-        const propVol = 0.02 + Math.pow(throttleFrac, 1.4) * 0.15
+        const propVol = 0.012 + Math.pow(throttleFrac, 1.4) * 0.06
         this.propWashGain.gain.setTargetAtTime(propVol, this.ctx.currentTime, 0.04)
         this.propWashFilter.frequency.setTargetAtTime(320 + throttleFrac * 680, this.ctx.currentTime, 0.04)
       } else {
@@ -376,17 +408,17 @@ export class FlightSoundscape {
     try {
       const osc = this.ctx.createOscillator()
       const gain = this.ctx.createGain()
-      osc.type = 'triangle'
-      osc.frequency.setValueAtTime(987.77, this.ctx.currentTime) // B5
-      osc.frequency.exponentialRampToValueAtTime(1318.51, this.ctx.currentTime + 0.12) // E6
+      osc.type = 'sine'
+      osc.frequency.setValueAtTime(659.25, this.ctx.currentTime) // E5
+      osc.frequency.exponentialRampToValueAtTime(880, this.ctx.currentTime + 0.14) // A5
 
-      gain.gain.setValueAtTime(0.18, this.ctx.currentTime)
-      gain.gain.exponentialRampToValueAtTime(0.001, this.ctx.currentTime + 0.25)
+      gain.gain.setValueAtTime(0.06, this.ctx.currentTime)
+      gain.gain.exponentialRampToValueAtTime(0.001, this.ctx.currentTime + 0.28)
 
       osc.connect(gain)
       gain.connect(this.ctx.destination)
       osc.start()
-      osc.stop(this.ctx.currentTime + 0.25)
+      osc.stop(this.ctx.currentTime + 0.28)
     } catch {
       // Ignore audio glitches
     }
@@ -403,7 +435,7 @@ export class FlightSoundscape {
       subOsc.frequency.setValueAtTime(140, t0)
       subOsc.frequency.exponentialRampToValueAtTime(45, t0 + 0.18)
 
-      subGain.gain.setValueAtTime(0.38, t0)
+      subGain.gain.setValueAtTime(0.14, t0)
       subGain.gain.exponentialRampToValueAtTime(0.001, t0 + 0.22)
 
       subOsc.connect(subGain)
@@ -414,17 +446,93 @@ export class FlightSoundscape {
       // 2. High-frequency line-snap / cloth snap
       const snapOsc = this.ctx.createOscillator()
       const snapGain = this.ctx.createGain()
-      snapOsc.type = 'triangle'
-      snapOsc.frequency.setValueAtTime(1200, t0)
-      snapOsc.frequency.exponentialRampToValueAtTime(350, t0 + 0.08)
+      snapOsc.type = 'sine'
+      snapOsc.frequency.setValueAtTime(480, t0)
+      snapOsc.frequency.exponentialRampToValueAtTime(240, t0 + 0.08)
 
-      snapGain.gain.setValueAtTime(0.24, t0)
+      snapGain.gain.setValueAtTime(0.04, t0)
       snapGain.gain.exponentialRampToValueAtTime(0.001, t0 + 0.09)
 
       snapOsc.connect(snapGain)
       snapGain.connect(this.ctx.destination)
       snapOsc.start(t0)
       snapOsc.stop(t0 + 0.09)
+    } catch {
+      // Ignore audio glitches
+    }
+  }
+
+  public playGoreCrashSound(impactSpeedKmh: number = 60) {
+    if (!this.initialized || !this.ctx) return
+    try {
+      const t0 = this.ctx.currentTime
+      // Silence continuous flight loops
+      this.windGain?.gain.setTargetAtTime(0.01, t0, 0.05)
+      for (const voice of this.chordVoices) {
+        voice.gain.gain.setTargetAtTime(0, t0, 0.05)
+      }
+      this.varioGain?.gain.setTargetAtTime(0, t0, 0.02)
+      this.lineWhistleGain?.gain.setTargetAtTime(0, t0, 0.02)
+      this.brakeFlutterGain?.gain.setTargetAtTime(0, t0, 0.02)
+      this.engineGain?.gain.setTargetAtTime(0, t0, 0.03)
+      this.propWashGain?.gain.setTargetAtTime(0, t0, 0.03)
+
+      const intensity = Math.min(1.2, Math.max(0.75, impactSpeedKmh / 70.0))
+
+      // One low thud, then a short muted chord. No crunch, no splat.
+      const boomOsc = this.ctx.createOscillator()
+      const boomGain = this.ctx.createGain()
+      boomOsc.type = 'sine'
+      boomOsc.frequency.setValueAtTime(78 * intensity, t0)
+      boomOsc.frequency.exponentialRampToValueAtTime(36, t0 + 0.5)
+      boomGain.gain.setValueAtTime(0.22, t0)
+      boomGain.gain.exponentialRampToValueAtTime(0.001, t0 + 0.55)
+      boomOsc.connect(boomGain)
+      boomGain.connect(this.ctx.destination)
+      boomOsc.start(t0)
+      boomOsc.stop(t0 + 0.56)
+
+      const stingNotes = [98.0, 146.83]
+      for (const freq of stingNotes) {
+        const osc = this.ctx.createOscillator()
+        const gain = this.ctx.createGain()
+        osc.type = 'sine'
+        osc.frequency.setValueAtTime(freq, t0 + 0.16)
+        const lp = this.ctx.createBiquadFilter()
+        lp.type = 'lowpass'
+        lp.frequency.setValueAtTime(280, t0 + 0.16)
+        lp.frequency.exponentialRampToValueAtTime(120, t0 + 1.15)
+        gain.gain.setValueAtTime(0.001, t0 + 0.16)
+        gain.gain.linearRampToValueAtTime(0.045, t0 + 0.28)
+        gain.gain.exponentialRampToValueAtTime(0.001, t0 + 1.2)
+        osc.connect(lp)
+        lp.connect(gain)
+        gain.connect(this.ctx.destination)
+        osc.start(t0 + 0.16)
+        osc.stop(t0 + 1.25)
+      }
+    } catch {
+      // Ignore audio glitches
+    }
+  }
+
+  public playRagdollBounceSound(impactSpeed: number = 8) {
+    if (!this.initialized || !this.ctx) return
+    try {
+      const t0 = this.ctx.currentTime
+      const vol = Math.min(0.09, Math.max(0.03, impactSpeed / 48.0))
+
+      const thudOsc = this.ctx.createOscillator()
+      const thudGain = this.ctx.createGain()
+      thudOsc.type = 'sine'
+      thudOsc.frequency.setValueAtTime(70, t0)
+      thudOsc.frequency.exponentialRampToValueAtTime(32, t0 + 0.18)
+      thudGain.gain.setValueAtTime(vol, t0)
+      thudGain.gain.exponentialRampToValueAtTime(0.001, t0 + 0.2)
+      thudOsc.connect(thudGain)
+      thudGain.connect(this.ctx.destination)
+      thudOsc.start(t0)
+      thudOsc.stop(t0 + 0.21)
     } catch {
       // Ignore audio glitches
     }

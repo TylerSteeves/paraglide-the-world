@@ -1,4 +1,20 @@
-export type WorldId = 'roldanillo' | 'whistler' | 'himalayas'
+export type WorldId =
+  | 'whistler'
+  | 'sf'
+  | 'rio'
+  | 'manhattan'
+  | 'paris'
+  | 'egypt'
+  | 'rome'
+  | 'london'
+  | 'toronto'
+  | 'matterhorn'
+  | 'chamonix'
+  | 'yosemite'
+  | 'dubai'
+  | 'roldanillo'
+  | 'himalayas'
+  | 'custom-gps'
 
 export interface Vector3Like {
   x: number
@@ -16,6 +32,8 @@ export type ThermalZone = {
   surfaceType?: string
   topAltitude?: number
   expansionRatio?: number
+  /** Steady vertical elevator. No wind lean, no sink collar. */
+  columnLift?: boolean
 }
 
 export interface ThermalFluidSample {
@@ -25,11 +43,36 @@ export interface ThermalFluidSample {
   isDraftingZone: boolean        // True in convective core & buoyant wake
 }
 
+export type WorldObstacleType =
+  | 'tree'
+  | 'chalet'
+  | 'boulder'
+  | 'tower'
+  | 'lodge'
+  | 'bridge-pier'
+  | 'bridge-deck'
+  | 'pole'
+
+export interface WorldObstacle {
+  type: WorldObstacleType
+  name: string
+  x: number
+  yMin: number
+  yMax: number
+  z: number
+  radius: number
+  halfWidth?: number
+  halfDepth?: number
+  /** Footprint in world x/z. When set, only the interior of this shape is solid. */
+  ring?: ReadonlyArray<{ x: number; z: number }>
+}
+
 export interface FlightWorld {
   readonly launchPosition: Vector3Like
   readonly launchHeadingDeg: number
   readonly terrainMesh?: any
   readonly thermals?: ThermalZone[]
+  readonly obstacles?: WorldObstacle[]
   sampleHeight(x: number, z: number): number
   sampleUpdraft(x: number, y: number, z: number, timeSeconds?: number, windVector?: Vector3Like): number
   sampleRidgeLift?(x: number, y: number, z: number, windDir: Vector3Like, windSpeedMps: number): number
@@ -41,6 +84,7 @@ export interface FlightWorld {
     timeSeconds?: number,
     windVector?: Vector3Like,
   ): ThermalFluidSample
+  checkPhotorealCollision?(x: number, y: number, z: number): string | null
   dispose(): void
 }
 

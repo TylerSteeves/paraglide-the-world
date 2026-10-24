@@ -101,12 +101,14 @@ export class TrackedFlightPlayer {
     this.ghostPod.parent = this.ghostRoot
   }
 
-  public setFlight(flight: TrackedFlight) {
+  public setFlight(flight?: TrackedFlight) {
     this.clearRibbon()
+    if (!flight || !flight.trackpoints || flight.trackpoints.length < 2) {
+      this.flight = null
+      return
+    }
     this.flight = flight
     this.playbackTime = 0
-
-    if (!flight.trackpoints || flight.trackpoints.length < 2) return
 
     // Build 3D Vario-Colored Ribbon Path
     // Chunk trackpoints into segments of similar climb/sink for vibrant colored tracks
