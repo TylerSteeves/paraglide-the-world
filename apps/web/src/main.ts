@@ -1055,6 +1055,7 @@ function initApp() {
             heading: sim.canopy.yawDeg,
           }
           rig.setPilotVisible(false)
+          ragdollCrash.dress(wardrobe.equippedSkin())
           ragdollCrash.triggerCrash(
             sim.pilot.position,
             sim.pilot.velocity,

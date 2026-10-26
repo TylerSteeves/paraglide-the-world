@@ -54,6 +54,15 @@ export class RagdollCrashSystem {
   private bloodBrightMat: StandardMaterial
   private bloodDarkMat: StandardMaterial
   private boneMat: StandardMaterial
+  private suitMat: StandardMaterial
+  private pantsMat: StandardMaterial
+  private helmetMat: StandardMaterial
+  private visorMat: StandardMaterial
+  private bootMat: StandardMaterial
+  private soleMat: StandardMaterial
+  private leatherMat: StandardMaterial
+  private brassMat: StandardMaterial
+  private tealMat: StandardMaterial
 
   constructor(scene: Scene) {
     this.root = new TransformNode('ragdoll-crash-root', scene)
@@ -75,36 +84,48 @@ export class RagdollCrashSystem {
     this.boneMat.diffuseColor = new Color3(0.95, 0.92, 0.85)
     this.boneMat.emissiveColor = new Color3(0.2, 0.18, 0.15)
 
-    const suitMat = new StandardMaterial('ragdoll-suit-mat', scene)
-    suitMat.diffuseColor = new Color3(0.15, 0.20, 0.28)
-
-    const helmetMat = new StandardMaterial('ragdoll-helmet-mat', scene)
-    helmetMat.diffuseColor = new Color3(0.96, 0.96, 0.99)
-    helmetMat.specularColor = new Color3(0.9, 0.9, 0.95)
-
-    const visorMat = new StandardMaterial('ragdoll-visor-mat', scene)
-    visorMat.diffuseColor = new Color3(0.05, 0.05, 0.08)
-    visorMat.specularColor = new Color3(0.95, 0.8, 0.3)
-
-    const bootMat = new StandardMaterial('ragdoll-boot-mat', scene)
-    bootMat.diffuseColor = new Color3(0.92, 0.22, 0.14)
+    // Same airman the flight uses: orange suit, white pants, pale helmet, brown boots.
+    this.suitMat = this.paint(scene, 'ragdoll-suit-mat', new Color3(0.86, 0.4, 0.14))
+    this.pantsMat = this.paint(scene, 'ragdoll-pants-mat', new Color3(0.9, 0.88, 0.82))
+    this.helmetMat = this.paint(scene, 'ragdoll-helmet-mat', new Color3(0.93, 0.9, 0.82))
+    this.visorMat = this.paint(scene, 'ragdoll-visor-mat', new Color3(0.06, 0.07, 0.08))
+    this.bootMat = this.paint(scene, 'ragdoll-boot-mat', new Color3(0.48, 0.27, 0.13))
+    this.soleMat = this.paint(scene, 'ragdoll-sole-mat', new Color3(0.18, 0.12, 0.08))
+    this.leatherMat = this.paint(scene, 'ragdoll-leather-mat', new Color3(0.42, 0.24, 0.13))
+    this.brassMat = this.paint(scene, 'ragdoll-brass-mat', new Color3(0.72, 0.52, 0.22))
+    this.tealMat = this.paint(scene, 'ragdoll-teal-mat', new Color3(0.55, 0.78, 0.74))
+    const suitMat = this.suitMat
+    const helmetMat = this.helmetMat
+    const visorMat = this.visorMat
+    const bootMat = this.bootMat
 
     const canopyMat = new StandardMaterial('ragdoll-canopy-mat', scene)
-    canopyMat.diffuseColor = new Color3(0.98, 0.55, 0.12)
+    canopyMat.diffuseColor = new Color3(0.86, 0.4, 0.14)
+    canopyMat.emissiveColor = canopyMat.diffuseColor.scale(0.2)
     canopyMat.backFaceCulling = false
 
-    // 1. Torso + Harness Core (with bloody neck/limb stumps)
+    // 1. Orange suit torso, thin seat, neck stump. Not the old dark harness box.
     const torsoNode = new TransformNode('ragdoll-torso', scene)
     torsoNode.parent = this.root
-    const chest = MeshBuilder.CreateBox('rd-chest', { width: 0.46, height: 0.58, depth: 0.32 }, scene)
+    const chest = MeshBuilder.CreateSphere('rd-chest', { diameter: 0.42, segments: 12 }, scene)
+    chest.scaling.set(0.94, 1.2, 0.72)
+    chest.position.set(0, 0.06, 0.02)
     chest.material = suitMat
     chest.parent = torsoNode
-    const harness = MeshBuilder.CreateSphere('rd-harness', { diameter: 0.52, segments: 8 }, scene)
-    harness.position.set(0, -0.15, -0.06)
-    harness.material = suitMat
-    harness.parent = torsoNode
-    const gorePatch = MeshBuilder.CreateSphere('rd-torso-gore', { diameter: 0.36, segments: 8 }, scene)
-    gorePatch.position.set(0, 0.18, 0.1)
+    const waist = MeshBuilder.CreateCylinder('rd-waist', { height: 0.18, diameterTop: 0.28, diameterBottom: 0.32, tessellation: 10 }, scene)
+    waist.position.set(0, -0.16, 0)
+    waist.material = suitMat
+    waist.parent = torsoNode
+    const seat = MeshBuilder.CreateBox('rd-seat', { width: 0.26, height: 0.04, depth: 0.16 }, scene)
+    seat.position.set(0, -0.28, -0.02)
+    seat.material = this.leatherMat
+    seat.parent = torsoNode
+    const buckle = MeshBuilder.CreateBox('rd-buckle', { width: 0.055, height: 0.04, depth: 0.02 }, scene)
+    buckle.position.set(0, 0.02, 0.16)
+    buckle.material = this.brassMat
+    buckle.parent = torsoNode
+    const gorePatch = MeshBuilder.CreateSphere('rd-torso-gore', { diameter: 0.12, segments: 8 }, scene)
+    gorePatch.position.set(0, 0.3, 0.02)
     gorePatch.material = this.bloodBrightMat
     gorePatch.parent = torsoNode
 
@@ -122,20 +143,31 @@ export class RagdollCrashSystem {
     }
     this.parts.push(this.torsoPart)
 
-    // 2. Head + Full-Face Helmet + Stump Bone
+    // 2. Pale helmet, teal crown, dark goggles. Same head as the flying airman.
     const headNode = new TransformNode('ragdoll-head', scene)
     headNode.parent = this.root
-    const helmet = MeshBuilder.CreateSphere('rd-helmet', { diameter: 0.32, segments: 10 }, scene)
-    helmet.scaling.set(0.94, 1.06, 1.14)
+    const helmet = MeshBuilder.CreateSphere('rd-helmet', { diameter: 0.26, segments: 12 }, scene)
+    helmet.scaling.set(1.02, 1.08, 1.0)
     helmet.material = helmetMat
     helmet.parent = headNode
-    const visor = MeshBuilder.CreateSphere('rd-visor', { diameter: 0.28, segments: 8 }, scene)
-    visor.position.set(0, 0.02, 0.09)
-    visor.scaling.set(0.95, 0.5, 0.85)
-    visor.material = visorMat
-    visor.parent = headNode
-    const neckGore = MeshBuilder.CreateCylinder('rd-neck-gore', { height: 0.14, diameter: 0.16 }, scene)
-    neckGore.position.set(0, -0.15, 0)
+    const crown = MeshBuilder.CreateSphere('rd-crown', { diameter: 0.16, segments: 10 }, scene)
+    crown.scaling.set(1.05, 0.5, 0.9)
+    crown.position.set(0, 0.1, 0.02)
+    crown.material = this.tealMat
+    crown.parent = headNode
+    for (const side of [-1, 1]) {
+      const lens = MeshBuilder.CreateSphere(`rd-lens-${side}`, { diameter: 0.074, segments: 8 }, scene)
+      lens.scaling.set(1, 1, 0.45)
+      lens.position.set(side * 0.04, 0.01, 0.11)
+      lens.material = visorMat
+      lens.parent = headNode
+      const rim = MeshBuilder.CreateTorus(`rd-rim-${side}`, { diameter: 0.088, thickness: 0.012, tessellation: 12 }, scene)
+      rim.position.set(side * 0.04, 0.01, 0.1)
+      rim.material = this.brassMat
+      rim.parent = headNode
+    }
+    const neckGore = MeshBuilder.CreateCylinder('rd-neck-gore', { height: 0.1, diameter: 0.1 }, scene)
+    neckGore.position.set(0, -0.16, 0)
     neckGore.material = this.bloodBrightMat
     neckGore.parent = headNode
 
@@ -152,19 +184,29 @@ export class RagdollCrashSystem {
       bleeds: true,
     })
 
-    // 3. Left & Right Arms (with exposed bone & blood cuff)
+    // 3. Orange suited arms, leather gloves, shoulder stump.
     for (const side of [-1, 1]) {
       const armNode = new TransformNode(`ragdoll-arm-${side}`, scene)
       armNode.parent = this.root
-      const armMesh = MeshBuilder.CreateCylinder(`rd-arm-${side}`, { height: 0.62, diameter: 0.13 }, scene)
-      armMesh.material = suitMat
-      armMesh.parent = armNode
-      const stump = MeshBuilder.CreateSphere(`rd-arm-gore-${side}`, { diameter: 0.16, segments: 6 }, scene)
-      stump.position.set(0, 0.30, 0)
+      const upper = MeshBuilder.CreateCylinder(`rd-upper-${side}`, { height: 0.28, diameter: 0.11, tessellation: 10 }, scene)
+      upper.position.y = 0.12
+      upper.material = suitMat
+      upper.parent = armNode
+      const fore = MeshBuilder.CreateCylinder(`rd-fore-${side}`, { height: 0.24, diameter: 0.09, tessellation: 10 }, scene)
+      fore.position.set(side * 0.04, -0.16, 0)
+      fore.rotation.z = side * 0.4
+      fore.material = suitMat
+      fore.parent = armNode
+      const glove = MeshBuilder.CreateBox(`rd-glove-${side}`, { width: 0.07, height: 0.08, depth: 0.05 }, scene)
+      glove.position.set(side * 0.08, -0.3, 0)
+      glove.material = this.leatherMat
+      glove.parent = armNode
+      const stump = MeshBuilder.CreateSphere(`rd-arm-gore-${side}`, { diameter: 0.12, segments: 6 }, scene)
+      stump.position.set(0, 0.26, 0)
       stump.material = this.bloodBrightMat
       stump.parent = armNode
-      const bone = MeshBuilder.CreateCylinder(`rd-arm-bone-${side}`, { height: 0.14, diameter: 0.05 }, scene)
-      bone.position.set(0, 0.35, 0)
+      const bone = MeshBuilder.CreateCylinder(`rd-arm-bone-${side}`, { height: 0.1, diameter: 0.04 }, scene)
+      bone.position.set(0, 0.32, 0)
       bone.material = this.boneMat
       bone.parent = armNode
 
@@ -182,23 +224,32 @@ export class RagdollCrashSystem {
       })
     }
 
-    // 4. Left & Right Legs + Trail Boots + Exposed Femur Bone
+    // 4. White pants and brown boots. The old crash legs were a dark suit with red shoes.
     for (const side of [-1, 1]) {
       const legNode = new TransformNode(`ragdoll-leg-${side}`, scene)
       legNode.parent = this.root
-      const legMesh = MeshBuilder.CreateCylinder(`rd-leg-${side}`, { height: 0.78, diameter: 0.17 }, scene)
-      legMesh.material = suitMat
-      legMesh.parent = legNode
-      const boot = MeshBuilder.CreateBox(`rd-boot-${side}`, { width: 0.17, height: 0.15, depth: 0.34 }, scene)
-      boot.position.set(0, -0.38, 0.08)
+      const thigh = MeshBuilder.CreateCylinder(`rd-thigh-${side}`, { height: 0.4, diameter: 0.14, tessellation: 10 }, scene)
+      thigh.position.y = 0.16
+      thigh.material = this.pantsMat
+      thigh.parent = legNode
+      const shin = MeshBuilder.CreateCylinder(`rd-shin-${side}`, { height: 0.36, diameter: 0.1, tessellation: 10 }, scene)
+      shin.position.y = -0.18
+      shin.material = this.pantsMat
+      shin.parent = legNode
+      const boot = MeshBuilder.CreateBox(`rd-boot-${side}`, { width: 0.12, height: 0.08, depth: 0.24 }, scene)
+      boot.position.set(0, -0.4, 0.05)
       boot.material = bootMat
       boot.parent = legNode
-      const hipGore = MeshBuilder.CreateSphere(`rd-leg-gore-${side}`, { diameter: 0.20, segments: 6 }, scene)
-      hipGore.position.set(0, 0.38, 0)
+      const sole = MeshBuilder.CreateBox(`rd-sole-${side}`, { width: 0.13, height: 0.03, depth: 0.26 }, scene)
+      sole.position.set(0, -0.45, 0.05)
+      sole.material = this.soleMat
+      sole.parent = legNode
+      const hipGore = MeshBuilder.CreateSphere(`rd-leg-gore-${side}`, { diameter: 0.12, segments: 6 }, scene)
+      hipGore.position.set(0, 0.36, 0)
       hipGore.material = this.bloodBrightMat
       hipGore.parent = legNode
-      const femur = MeshBuilder.CreateCylinder(`rd-femur-${side}`, { height: 0.16, diameter: 0.06 }, scene)
-      femur.position.set(0, 0.44, 0)
+      const femur = MeshBuilder.CreateCylinder(`rd-femur-${side}`, { height: 0.1, diameter: 0.045 }, scene)
+      femur.position.set(0, 0.42, 0)
       femur.material = this.boneMat
       femur.parent = legNode
 
@@ -257,6 +308,31 @@ export class RagdollCrashSystem {
 
   public setVisible(visible: boolean): void {
     this.root.setEnabled(visible)
+  }
+
+  /** Match the suit, helmet, goggles, and boots that are in the air. Pants stay white. */
+  public dress(skin: {
+    suit: { r: number; g: number; b: number }
+    helmet: { r: number; g: number; b: number }
+    visor: { r: number; g: number; b: number }
+    boots: { r: number; g: number; b: number }
+  }): void {
+    this.paintOnto(this.suitMat, new Color3(skin.suit.r, skin.suit.g, skin.suit.b))
+    this.paintOnto(this.helmetMat, new Color3(skin.helmet.r, skin.helmet.g, skin.helmet.b))
+    this.paintOnto(this.visorMat, new Color3(skin.visor.r, skin.visor.g, skin.visor.b))
+    this.paintOnto(this.bootMat, new Color3(skin.boots.r, skin.boots.g, skin.boots.b))
+  }
+
+  private paint(scene: Scene, name: string, color: Color3): StandardMaterial {
+    const mat = new StandardMaterial(name, scene)
+    this.paintOnto(mat, color)
+    mat.specularColor = new Color3(0.08, 0.07, 0.06)
+    return mat
+  }
+
+  private paintOnto(mat: StandardMaterial, color: Color3): void {
+    mat.diffuseColor = color
+    mat.emissiveColor = color.scale(0.2)
   }
 
   public triggerCrash(

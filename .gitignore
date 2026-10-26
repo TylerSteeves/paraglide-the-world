@@ -4,6 +4,7 @@ dist
 .DS_Store
 .pnpm-store
 test-results
+Old, not used/
 references/
 apps/web/references/
 gods-eye-view
