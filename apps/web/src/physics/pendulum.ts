@@ -14,6 +14,8 @@
  *    - The wing banks and moves into the turn first. The pilot stays on the
  *      line already being flown, then is pulled across. A right bank never
  *      swings the body out to the left.
+ *    - A loop or barrel roll is the other way around: the wing stays on the
+ *      line, and the pilot swings around the wing.
  */
 
 import type {
@@ -22,12 +24,14 @@ import type {
   FlightControls,
   FlightTelemetry,
   PilotState,
+  WingKind,
 } from './types'
 import type { FlightWorld } from '../world/types'
 import {
   PARAMOTOR_FREERIDE_18M,
   PARAGLIDER_XC_24M,
   SPEEDWING_13M,
+  WINGSUIT_TRACK,
   type WingGeometry,
 } from './aerodynamics'
 import {
@@ -121,12 +125,14 @@ export class ParagliderSimulation {
   private pPos: V3
   private pVel: V3
 
-  public currentWingType: 'speedwing' | 'paraglider' | 'paramotor' = 'paraglider'
+  public currentWingType: WingKind = 'wingsuit'
   public launchPos: V3
   public engineRpm: number = 0
   public pilotMassKg: number = 95.0 // Pilot + harness + reserve (~95 kg; 122 kg with paramotor)
   public isMotorActive: boolean = false
   public thrustNewtons: number = 0
+  /** 0 closed, 1 fully open. Throttle below center on the powered wing. */
+  public drogueOpen: number = 0
 
   public setPilotMass(massKg: number): void {
     this.pilotMassKg = clamp(massKg, 50, 220)
@@ -256,7 +262,7 @@ export class ParagliderSimulation {
   constructor(
     initialAltitude: number = 2050,
     initialHeadingDeg: number = 5,
-    defaultWing: 'speedwing' | 'paraglider' | 'paramotor' = 'paraglider',
+    defaultWing: WingKind = 'wingsuit',
     startPos?: { x: number; y: number; z: number },
   ) {
     this.currentWingType = defaultWing
@@ -267,8 +273,13 @@ export class ParagliderSimulation {
       this.isMotorActive = true
     } else if (defaultWing === 'paraglider') {
       this.wing = { ...PARAGLIDER_XC_24M }
-      this.engineRpm = 0
+      this.engineRpm = 2200
       this.pilotMassKg = 95.0
+      this.isMotorActive = false
+    } else if (defaultWing === 'wingsuit') {
+      this.wing = { ...WINGSUIT_TRACK }
+      this.engineRpm = 0
+      this.pilotMassKg = 90.0
       this.isMotorActive = false
     } else {
       this.wing = { ...SPEEDWING_13M }
@@ -284,7 +295,7 @@ export class ParagliderSimulation {
     this.pitchDeg = 1.0
     this.bankDeg = 0
     this.airspeedKmh = this.wing.trimSpeedKmh || 45.0
-    this.currentSinkMps = defaultWing === 'paraglider' ? 0 : -0.3
+    this.currentSinkMps = defaultWing === 'paraglider' ? 0 : defaultWing === 'wingsuit' ? -16 : -0.3
     this.diveKineticSpeedMps = 0
     this.diveBuild = 0
     this.diveHoldSec = 0
@@ -382,7 +393,7 @@ export class ParagliderSimulation {
       bankDeg: 0,
       pitchDeg: this.pitchDeg,
       headingDeg: initialHeadingDeg,
-      wingType: 'speedwing',
+      wingType: defaultWing,
       xcDistanceMeters: 0,
       maxAltitudeMeters: initialAltitude,
       thermalClimbMps: 0,
@@ -401,7 +412,7 @@ export class ParagliderSimulation {
 
   public setSeed(_seed: number) {}
 
-  public setWing(wingType: 'speedwing' | 'paraglider' | 'paramotor') {
+  public setWing(wingType: WingKind) {
     this.currentWingType = wingType
     if (wingType === 'paramotor') {
       this.wing = { ...PARAMOTOR_FREERIDE_18M }
@@ -410,8 +421,13 @@ export class ParagliderSimulation {
       this.isMotorActive = true
     } else if (wingType === 'paraglider') {
       this.wing = { ...PARAGLIDER_XC_24M }
-      this.engineRpm = 0
+      this.engineRpm = 2200
       this.pilotMassKg = 95.0
+      this.isMotorActive = false
+    } else if (wingType === 'wingsuit') {
+      this.wing = { ...WINGSUIT_TRACK }
+      this.engineRpm = 0
+      this.pilotMassKg = 90.0
       this.isMotorActive = false
     } else {
       this.wing = { ...SPEEDWING_13M }
@@ -448,7 +464,7 @@ export class ParagliderSimulation {
     this.turnHoldTime = 0
     this.whipFrac = 0
     this.airspeedKmh = this.wing.trimSpeedKmh || 52.0
-    this.currentSinkMps = this.currentWingType === 'paraglider' ? 0 : -0.3
+    this.currentSinkMps = this.currentWingType === 'paraglider' ? 0 : this.currentWingType === 'wingsuit' ? -16 : -0.3
     this.diveKineticSpeedMps = 0
     this.diveBuild = 0
     this.diveHoldSec = 0
@@ -510,12 +526,17 @@ export class ParagliderSimulation {
     const speedBar = clamp((this.controls.speedBar ?? 0) + (this.controls.pullingA ?? 0), 0, 1)
 
     const isSpeedwing = this.currentWingType === 'speedwing'
-    const isParamotor = this.currentWingType === 'paramotor' || this.isMotorActive
+    const isWingsuit = this.currentWingType === 'wingsuit'
+    const isParaglider = this.currentWingType === 'paraglider'
+    // The suit is not a paramotor. Sharing that flag would make it hold altitude and soar.
+    const isParamotor = !isWingsuit && (this.currentWingType === 'paramotor' || this.isMotorActive)
+    // Hydrogen jet lives on the chute. The wingsuit is an unpowered drop.
+    const isJet = isParamotor || isParaglider
 
     // Total System Mass (Pilot + Harness + Wing):
     const canopyMassKg = this.wing.canopyMassKg || (isSpeedwing ? 3.2 : (isParamotor ? 4.8 : 4.6))
     const totalMassKg = this.pilotMassKg + canopyMassKg
-    const refMassKg = isSpeedwing ? 95.2 : (isParamotor ? 126.8 : 99.6)
+    const refMassKg = isSpeedwing ? 95.2 : (isWingsuit ? 91.2 : (isParamotor ? 126.8 : 99.6))
     const massRatio = Math.sqrt(totalMassKg / refMassKg)
 
     const massRollScale = Math.min(1.4, Math.max(0.7, this.pilotMassKg / 95.0))
@@ -528,11 +549,11 @@ export class ParagliderSimulation {
     // Fast, Exhilarating Flight Performance Profiles:
     // Downhill momentum builds as you charge down the mountain so it NEVER feels like it slows down!
     const downhillMomentumBoost = Math.min(20.0, Math.max(0, this.cPos.z) * 0.009)
-    const baseTrimSpeed = ((isSpeedwing ? 88.0 : (isParamotor ? 74.0 : 72.0)) + downhillMomentumBoost) * massRatio
-    const baseTrimSink = (isSpeedwing ? -3.40 : (isParamotor ? -1.45 : -1.55)) * massRatio
-    const maxDivePitch = isSpeedwing ? 72.0 : (isParamotor ? 46.0 : 68.0)
-    const maxDiveSpeed = ((isSpeedwing ? 175.0 : (isParamotor ? 132.0 : 148.0)) + downhillMomentumBoost) * massRatio
-    const minFlareSpeed = (isSpeedwing ? 38.0 : (isParamotor ? 28.0 : 26.0)) * massRatio
+    const baseTrimSpeed = ((isSpeedwing ? 88.0 : (isWingsuit ? 155.0 : (isParamotor ? 74.0 : 72.0))) + downhillMomentumBoost) * massRatio
+    const baseTrimSink = (isSpeedwing ? -3.40 : (isWingsuit ? -16.0 : (isParamotor ? -1.45 : -1.55))) * massRatio
+    const maxDivePitch = isSpeedwing ? 72.0 : (isWingsuit ? 78.0 : (isParamotor ? 46.0 : 68.0))
+    const maxDiveSpeed = ((isSpeedwing ? 175.0 : (isWingsuit ? 230.0 : (isParamotor ? 132.0 : 148.0))) + downhillMomentumBoost) * massRatio
+    const minFlareSpeed = (isSpeedwing ? 38.0 : (isWingsuit ? 110.0 : (isParamotor ? 28.0 : 26.0))) * massRatio
 
     // Looking down unlocks a real spiral. Wings-level carve stays the same.
     const diveAmt = speedBar
@@ -612,9 +633,9 @@ export class ParagliderSimulation {
     const bankInducedSink = (1.0 / Math.max(0.25, Math.cos(bankRad)) - 1.0) * 0.35
     let targetAirspeedKmh = baseTrimSpeed + (absBank / 45.0) * 6.0
 
-    // A level phone holds altitude, turns included. Looking down is what descends.
-    // The powered wing holds altitude too. Looking up is what climbs.
-    const floatSink = (isSpeedwing ? -0.8 : 0) * massRatio
+    // A level phone holds altitude on a canopy, turns included. Looking down is what descends.
+    // The wingsuit always descends. Looking up stretches the glide a little. It never soars.
+    const floatSink = (isSpeedwing ? -0.8 : isWingsuit ? -16.0 : 0) * massRatio
     const turnSink = isSpeedwing ? bankInducedSink : 0
     let targetSinkMps = floatSink - turnSink
     let targetPitchDeg = 3.0
@@ -636,6 +657,8 @@ export class ParagliderSimulation {
     const grow = clamp(this.diveHoldSec / 7, 0, 1)
     const surgeBend = grow * (0.72 + 0.28 * grow)
     let divePathRad = 0
+    // Wingsuit dive horizontal, from the same along-path speed as the sink.
+    let suitDiveHMps = 0
 
     if (this.collapseFrac > 0.05) {
       // True Freefall Plunge (Wing Collapse / Bailout):
@@ -645,51 +668,85 @@ export class ParagliderSimulation {
     } else if (speedBar > 0.01) {
       // Looking down pitches the wing onto a steeper glide. The steep half
       // builds while that angle is held, wings level. A bank only adds a little.
-      const pathDeg =
-        diveCurve * (isSpeedwing ? 28.0 : 20.0) +
-        this.diveBuild * (isSpeedwing ? 12.0 : 10.0) +
-        surgeBend * (isSpeedwing ? 32.0 : 28.0) +
-        spiralFrac * (isSpeedwing ? 4.0 : 3.0)
+      // The wingsuit starts from its trim glide (~20°) and steepens. Canopy
+      // path angles stay on the shared curve.
+      let pathDeg: number
+      let pathMps: number
+      if (isWingsuit) {
+        pathDeg =
+          20.4 +
+          diveCurve * 9.0 +
+          this.diveBuild * 11.0 +
+          surgeBend * 7.0 +
+          spiralFrac * 2.5
+        const surgeKmh = surgeBend * 22.0 * massRatio
+        const alongTrimKmh = Math.hypot(baseTrimSpeed, 57.6 * massRatio)
+        const alongKmh = alongTrimKmh + diveCurve * (230.0 * massRatio - alongTrimKmh) + surgeKmh
+        pathMps = alongKmh / 3.6
+      } else {
+        pathDeg =
+          diveCurve * (isSpeedwing ? 28.0 : 20.0) +
+          this.diveBuild * (isSpeedwing ? 12.0 : 10.0) +
+          surgeBend * (isSpeedwing ? 32.0 : 28.0) +
+          spiralFrac * (isSpeedwing ? 4.0 : 3.0)
+        const surgeKmh = surgeBend * (isSpeedwing ? 110.0 : 100.0)
+        pathMps = (baseTrimSpeed + diveCurve * (maxDiveSpeed - baseTrimSpeed) + surgeKmh) / 3.6
+      }
       divePathRad = pathDeg * DEG
-      const surgeKmh = surgeBend * (isSpeedwing ? 110.0 : 100.0)
-      const pathMps = (baseTrimSpeed + diveCurve * (maxDiveSpeed - baseTrimSpeed) + surgeKmh) / 3.6
       targetAirspeedKmh = pathMps * 3.6
       const slopeSink = Math.min(0, slopeGrade * pathMps * Math.cos(divePathRad))
       targetSinkMps = -pathMps * Math.sin(divePathRad) + slopeSink
+      if (isWingsuit) suitDiveHMps = pathMps * Math.cos(divePathRad)
       targetPitchDeg = Math.min(maxDivePitch, 8.0 + pathDeg * 1.35)
     } else if (dualBrake > 0.02) {
       // Looking Up (> 90° -> 118°):
       // Disengages the 18m contour lock so tilting the phone upward floats & climbs you high above the slope!
-      const flareFrac = clamp(dualBrake / 0.62, 0, 1)
-      targetAirspeedKmh = baseTrimSpeed - flareFrac * (baseTrimSpeed - minFlareSpeed) * 0.18
-      const climbAboveSlope = flareFrac * (isSpeedwing ? 26.0 : 38.0)
-      targetSinkMps = floatSink * (1.0 - flareFrac) + climbAboveSlope
-      targetPitchDeg = 1.0 - flareFrac * 40.0
+      const flareFrac = clamp(dualBrake / 0.5, 0, 1)
+      if (isWingsuit) {
+        // A slightly slower, slightly flatter descent. Sink stays negative.
+        targetAirspeedKmh = baseTrimSpeed - flareFrac * (baseTrimSpeed - minFlareSpeed)
+        const lookSink = -12.0 * massRatio
+        targetSinkMps = floatSink + flareFrac * (lookSink - floatSink)
+        targetPitchDeg = 4.0 - flareFrac * 20.0
+      } else {
+        targetAirspeedKmh = baseTrimSpeed - flareFrac * (baseTrimSpeed - minFlareSpeed) * 0.18
+        const climbAboveSlope = flareFrac * (isSpeedwing ? 26.0 : 38.0)
+        targetSinkMps = floatSink * (1.0 - flareFrac) + climbAboveSlope
+        targetPitchDeg = 1.0 - flareFrac * 40.0
+      }
     }
 
-    // 1b. Powered wing. Throttle 0 is a normal glide. Opening it adds speed,
-    // and looking up climbs in proportion to that throttle.
-    const targetThrottle = clamp(this.controls.throttle ?? 0, 0, 1)
+    // 1b. Hydrogen jet on the chute. The stick centers on a coast.
+    // Above center is the jet. Below center opens the drogue sock.
+    // The wingsuit has neither. Its stick-bottom deploys the chute outside this step.
+    const stick = clamp(this.controls.throttle ?? 0, 0, 1)
+    const propDemand = isJet ? clamp((stick - 0.5) / 0.5, 0, 1) : 0
+    const drogueDemand = isJet ? clamp((0.5 - stick) / 0.5, 0, 1) : 0
+    const drogue = this.collapseFrac <= 0.05 ? drogueDemand : 0
+    this.drogueOpen = drogue
     let throttleFrac = 0
-    if (isParamotor) {
-      const targetRpm = 2200 + targetThrottle * 6200
-      const spoolRate = targetThrottle > (this.engineRpm - 2200) / 6200 ? 14.0 : 8.5
+    if (isJet) {
+      const targetRpm = drogue > 0.04 ? 2200 * (1 - drogue) : 2200 + propDemand * 6200
+      const spoolRate = targetRpm > this.engineRpm ? 14.0 : 8.5
       this.engineRpm += (targetRpm - this.engineRpm) * Math.min(1.0, spoolRate * frameDt)
 
       throttleFrac = clamp((this.engineRpm - 2200) / 6200, 0, 1)
       const maxThrust = this.wing.maxThrustNewtons || 740.0
       this.thrustNewtons = 35.0 + (maxThrust - 35.0) * Math.pow(throttleFrac, 1.8)
 
-      targetAirspeedKmh += throttleFrac * 60.0
-      if (dualBrake > 0.04 && throttleFrac > 0.05 && this.collapseFrac <= 0.05) {
-        const flareFrac = clamp(dualBrake / 0.62, 0, 1)
-        targetSinkMps = Math.max(targetSinkMps, throttleFrac * (16.0 + flareFrac * 30.0))
+      if (isParamotor) {
+        targetAirspeedKmh += throttleFrac * 60.0
+        if (dualBrake > 0.04 && throttleFrac > 0.05 && this.collapseFrac <= 0.05) {
+          const flareFrac = clamp(dualBrake / 0.5, 0, 1)
+          targetSinkMps = Math.max(targetSinkMps, throttleFrac * (16.0 + flareFrac * 30.0))
+        }
       }
       const thrustPitchNudge = -Math.atan2(this.thrustNewtons, totalMassKg * 9.81) * (180 / Math.PI) * 0.22
       targetPitchDeg += thrustPitchNudge
     } else {
       this.engineRpm = 0
       this.thrustNewtons = 0
+      this.drogueOpen = 0
     }
 
     // Sample atmospheric wind/thermals for HUD & FLIR telemetry (without floating you off the low proximity line!)
@@ -715,6 +772,11 @@ export class ParagliderSimulation {
       // Ordinary thermals still want you to look up into them.
       targetSinkMps += rawUpdraft * 0.45
     }
+    // The drogue holds a creep. A strong column still lifts through it.
+    if (drogue > 0.02 && rawUpdraft < 12) {
+      const creepSink = -0.35 * drogue
+      targetSinkMps += (creepSink - targetSinkMps) * drogue
+    }
 
     // Forward Dive & Gravity Acceleration Dynamics:
     const isCollapsing = this.collapseFrac > 0.05
@@ -734,13 +796,14 @@ export class ParagliderSimulation {
 
     // 3. Vertical Acceleration & Responsive Contour Tracking:
     const massPunchFactor = Math.min(1.35, Math.max(0.75, totalMassKg / 95.0))
-    if (!isCollapsing && speedBar < 0.72 && this.zoomClimbMps > 0.5) {
+    if (!isWingsuit && !isCollapsing && speedBar < 0.72 && this.zoomClimbMps > 0.5) {
       const zoomCap = isSpeedwing ? 28.0 : 24.0
       targetSinkMps = Math.max(targetSinkMps, Math.min(zoomCap, this.zoomClimbMps) * (1.0 - speedBar * 0.85))
     }
     // A long dive falls faster than a level-off can erase. Fold that surplus
     // into the climb before the cruise follow cancels it.
-    if (!isCollapsing && speedBar < 0.18 && this.diveHoldSec > 0.4 && this.currentSinkMps < -12) {
+    // The suit keeps that energy as speed. It does not climb.
+    if (!isWingsuit && !isCollapsing && speedBar < 0.18 && this.diveHoldSec > 0.4 && this.currentSinkMps < -12) {
       const surplus = -12 - this.currentSinkMps
       const zoomCap = isSpeedwing ? 30.0 : 26.0
       const take = surplus * Math.min(1, 6.0 * frameDt)
@@ -757,27 +820,32 @@ export class ParagliderSimulation {
     const lineBoostMps = Math.min(10, this.coinCount) * (2.4 / 3.6) + (this.ringBoostTimer > 0 ? 4.2 : 0)
     const curHSpeedMps = Math.hypot(this.cVel.x, this.cVel.z)
     let newHSpeedMps = curHSpeedMps
+    // Full drogue replaces the target, including a live coin dash.
+    const drogueHold = (mps: number) => mps + (2.6 - mps) * drogue
 
     if (speedBar > 0.01 && !isCollapsing) {
       const current3DAirspeed = Math.hypot(curHSpeedMps, this.currentSinkMps)
       this.diveKineticSpeedMps = Math.max(this.diveKineticSpeedMps, current3DAirspeed)
 
       const pathMps = (baseTrimSpeed + diveCurve * (maxDiveSpeed - baseTrimSpeed)) / 3.6
-      const diveHSpeedTarget = pathMps * Math.cos(divePathRad) + throttleFrac * 8.0 + lineBoostMps
+      const diveHSpeedTarget = isWingsuit
+        ? suitDiveHMps + lineBoostMps
+        : drogueHold(pathMps * Math.cos(divePathRad) + throttleFrac * 8.0 + lineBoostMps)
 
       const fwdAccRate = (isSpeedwing ? 16.0 : 12.5) * massPunchFactor
       newHSpeedMps += (diveHSpeedTarget - curHSpeedMps) * Math.min(1.0, fwdAccRate * frameDt)
     } else if (this.diveKineticSpeedMps > baseTrimSpeedMps + 1.0 || this.zoomClimbMps > 0.4) {
       const swoopEfficiency = isSpeedwing ? 0.92 : 0.88
       const pulloutFrac = Math.max(0, 1.0 - Math.min(1.0, pitchRad / 0.45))
-      const swoopTargetMps = this.diveKineticSpeedMps * swoopEfficiency * (0.55 + 0.25 * pulloutFrac)
+      const swoopTargetMps = drogueHold(this.diveKineticSpeedMps * swoopEfficiency * (0.55 + 0.25 * pulloutFrac))
 
       if (newHSpeedMps < swoopTargetMps) {
         newHSpeedMps += (swoopTargetMps - newHSpeedMps) * Math.min(1.0, 8.0 * frameDt)
       }
 
       // Speed gathered in the fall is spent as climb once you level off.
-      if (this.currentSinkMps < -6.0) {
+      // A wingsuit flare only shallows the descent.
+      if (!isWingsuit && this.currentSinkMps < -6.0) {
         const take = (-6.0 - this.currentSinkMps) * Math.min(1.0, 1.8 * frameDt)
         this.currentSinkMps += take
         const zoomCap = isSpeedwing ? 30.0 : 26.0
@@ -788,22 +856,22 @@ export class ParagliderSimulation {
       const flareBrakeDamp = dualBrake > 0.60 ? (dualBrake - 0.60) * 0.9 : 0
       const swoopBleedRate = (isSpeedwing ? 0.18 : 0.25) + flareBrakeDamp
       this.diveKineticSpeedMps += (baseTrimSpeedMps - this.diveKineticSpeedMps) * Math.min(1.0, swoopBleedRate * frameDt)
-      newHSpeedMps += (baseTrimSpeedMps + lineBoostMps - newHSpeedMps) * Math.min(1.0, swoopBleedRate * 0.35 * frameDt)
+      newHSpeedMps += (drogueHold(baseTrimSpeedMps + lineBoostMps) - newHSpeedMps) * Math.min(1.0, swoopBleedRate * 0.35 * frameDt)
     } else if (dualBrake > 0.02) {
       this.diveKineticSpeedMps = 0
-      const brakeTargetMps = targetAirspeedKmh / 3.6 + lineBoostMps
+      const brakeTargetMps = drogueHold(targetAirspeedKmh / 3.6 + lineBoostMps)
       const brakeDecelRate = isSpeedwing ? 14.0 : 9.0
       newHSpeedMps += (brakeTargetMps - curHSpeedMps) * Math.min(1.0, brakeDecelRate * frameDt)
     } else {
       this.diveKineticSpeedMps = 0
-      const cruiseMps = baseTrimSpeedMps + throttleFrac * (60.0 / 3.6) + lineBoostMps
+      const cruiseMps = drogueHold(baseTrimSpeedMps + throttleFrac * (60.0 / 3.6) + lineBoostMps)
       const cruiseRate = throttleFrac > 0.2 ? 9.0 : 6.5
       newHSpeedMps += (cruiseMps - curHSpeedMps) * Math.min(1.0, cruiseRate * frameDt)
     }
 
     // Rolling out of a steep bank hands the speed in that turn back as climb.
     // Still looking straight down keeps the fall; the zoom arrives as the gaze comes up.
-    if (!isCollapsing && bankDrop > 0.02 && bankFrom > 18.0 && speedBar < 0.72) {
+    if (!isWingsuit && !isCollapsing && bankDrop > 0.02 && bankFrom > 18.0 && speedBar < 0.72 && newHSpeedMps < 95) {
       const speed3d = Math.hypot(newHSpeedMps, Math.max(0, -this.currentSinkMps))
       const excess = Math.max(0, Math.max(speed3d, this.diveKineticSpeedMps) - baseTrimSpeedMps)
       const exitFrac = clamp(bankDrop / Math.max(12.0, bankFrom), 0, 1)
@@ -815,7 +883,7 @@ export class ParagliderSimulation {
       this.diveKineticSpeedMps = Math.max(baseTrimSpeedMps, this.diveKineticSpeedMps - converted)
     }
 
-    if (!isCollapsing && speedBar < 0.72 && this.zoomClimbMps > 0.35) {
+    if (!isWingsuit && !isCollapsing && speedBar < 0.72 && this.zoomClimbMps > 0.35 && drogue < 0.35) {
       const zoomCap = isSpeedwing ? 28.0 : 24.0
       const climbTarget = Math.min(zoomCap, this.zoomClimbMps)
       if (climbTarget > this.currentSinkMps) {
@@ -824,22 +892,22 @@ export class ParagliderSimulation {
       const spent = Math.max(0, this.currentSinkMps) * frameDt * 0.45 + this.zoomClimbMps * frameDt * 0.28
       this.zoomClimbMps = Math.max(0, this.zoomClimbMps - spent)
       newHSpeedMps = Math.max(baseTrimSpeedMps * 0.7, newHSpeedMps - spent * 0.2)
-    } else if (this.zoomClimbMps > 0.35 && speedBar >= 0.45) {
+    } else if (this.zoomClimbMps > 0.35 && (speedBar >= 0.45 || drogue > 0.35)) {
       this.zoomClimbMps = Math.max(0, this.zoomClimbMps - this.zoomClimbMps * Math.min(1.0, 0.15 * frameDt))
     }
 
-    // Total Airspeed derived from true 3D relative airflow:
-    this.airspeedKmh = Math.sqrt(newHSpeedMps * newHSpeedMps + this.currentSinkMps * this.currentSinkMps) * 3.6
-
-    // Aerobatics execution:
+    // Aerobatics execution. aroundWing stays true on the frame a trick finishes,
+    // so the last pose still hangs the pilot from the wing.
     let renderPitchDeg = this.pitchDeg
     let renderBankDeg = this.bankDeg
+    let aroundWing = false
 
     if (this.isLooping) {
       this.loopProgress += frameDt / 0.95 // ~0.95s snappy dynamic backflip / frontflip
       const p = Math.min(1.0, this.loopProgress)
       renderPitchDeg = this.pitchDeg - p * 360.0 * this.loopDirection
       this.currentSinkMps = slopeFollowSinkMps - Math.sin(p * Math.PI * 2) * 8.0 * this.loopDirection
+      aroundWing = true
       if (this.loopProgress >= 1.0) {
         this.isLooping = false
         this.loopProgress = 0
@@ -849,6 +917,7 @@ export class ParagliderSimulation {
       this.rollProgress += frameDt / 0.88 // ~0.88s snappy barrel roll
       const p = Math.min(1.0, this.rollProgress)
       renderBankDeg = this.bankDeg + p * 360.0 * this.rollDirection
+      aroundWing = true
       if (this.rollProgress >= 1.0) {
         this.isRolling = false
         this.rollProgress = 0
@@ -863,6 +932,43 @@ export class ParagliderSimulation {
       const holdMps = 2.4
       newHSpeedMps = curHSpeedMps + (holdMps - curHSpeedMps) * Math.min(1.0, 5.0 * frameDt)
     }
+
+    // Full jet runs to the speed of sound. The top of the stick is Mach 1.
+    // Lower settings stay usable, and letting go bleeds back to a glide.
+    // A speed already above a dive is still the jet, so it keeps bleeding.
+    // Looking up is a climb. It must not light the jet or hold super speed.
+    const lookingUp = dualBrake > 0.12
+    // Above this, a released jet is still bleeding. A canopy dive stays under it.
+    const jetHoldMps = 90
+    if (isJet && drogue <= 0.02 && (throttleFrac > 0.04 || curHSpeedMps > jetHoldMps)) {
+      const sonicMps = 343
+      const jetFrac = throttleFrac * throttleFrac
+      let jetMps = Math.min(sonicMps, baseTrimSpeedMps + jetFrac * (sonicMps - baseTrimSpeedMps) + lineBoostMps)
+      if (lookingUp) jetMps = Math.min(jetMps, baseTrimSpeedMps + lineBoostMps)
+      const gap = jetMps - curHSpeedMps
+      // The heading follow only takes part of this target, so the lead is
+      // sized to come out near 110 m/s². Full stick reaches Mach 1 in a few seconds.
+      const jetLead = 110 / 18
+      const lead = lookingUp ? Math.min(0, gap) : gap
+      newHSpeedMps = curHSpeedMps + clamp(lead, -jetLead, jetLead)
+    }
+
+    // Drogue last, so trim floors, the coin dash, and the column's horizontal
+    // hold cannot put the speed back. The column's lift is left alone.
+    if (isJet && drogue > 0.02 && !isCollapsing) {
+      const creep = 2.6
+      const goal = newHSpeedMps + (creep - newHSpeedMps) * drogue
+      const follow = 3.5 + drogue * 5.0
+      const alpha = Math.min(1.0, follow * frameDt)
+      const chuteLead = 140 / 18
+      newHSpeedMps += clamp((goal - newHSpeedMps) * alpha, -chuteLead, chuteLead)
+      if (rawUpdraft < 12) {
+        const sinkGoal = -0.35 * drogue
+        this.currentSinkMps += (sinkGoal - this.currentSinkMps) * alpha
+      }
+    }
+
+    this.airspeedKmh = Math.hypot(newHSpeedMps, this.currentSinkMps) * 3.6
 
     // 3. Trajectory & World Position Integration (Zero Crosswind Drift & Zero Turn Speed Penalty!)
     const headingRad = this.headingDeg * DEG
@@ -899,16 +1005,24 @@ export class ParagliderSimulation {
       this.cPos.z += -Math.sin(headingRad) * slipMps * frameDt
     }
 
-    // The pilot is the weight on the lines. Attitude swings the wing around him,
-    // and the line from him to the wing center is the wing's own up-axis.
+    // Turns swing the wing around the pilot, who stays on the line.
+    // A loop or roll swings the pilot around the wing, which stays on the line.
     this.cQ = qFromYawPitchRoll(this.headingDeg, renderPitchDeg, renderBankDeg)
     const wingUp = qRotate(this.cQ, v3(0, 1, 0))
-    const anchorX = this.cPos.x - this.prevWingUp.x * tetherL
-    const anchorY = this.cPos.y - this.prevWingUp.y * tetherL
-    const anchorZ = this.cPos.z - this.prevWingUp.z * tetherL
-    this.pPos = v3(anchorX, anchorY, anchorZ)
+    if (aroundWing) {
+      this.pPos = v3(
+        this.cPos.x - wingUp.x * tetherL,
+        this.cPos.y - wingUp.y * tetherL,
+        this.cPos.z - wingUp.z * tetherL,
+      )
+    } else {
+      const anchorX = this.cPos.x - this.prevWingUp.x * tetherL
+      const anchorY = this.cPos.y - this.prevWingUp.y * tetherL
+      const anchorZ = this.cPos.z - this.prevWingUp.z * tetherL
+      this.pPos = v3(anchorX, anchorY, anchorZ)
+      this.cPos = v3(anchorX + wingUp.x * tetherL, anchorY + wingUp.y * tetherL, anchorZ + wingUp.z * tetherL)
+    }
     this.pVel = vCopy(this.cVel)
-    this.cPos = v3(anchorX + wingUp.x * tetherL, anchorY + wingUp.y * tetherL, anchorZ + wingUp.z * tetherL)
     this.prevWingUp = wingUp
 
     // 5. 3D Obstacle Collision Detection (Buildings, Skyscrapers, Monuments, Trees, Chalets, Bridges)
@@ -1038,8 +1152,9 @@ export class ParagliderSimulation {
     const turnCentrifugalG = (1.0 / cosBank - 1.0) + this.whipFrac * 1.4 + spiralFrac * 1.8
 
     const isSpeedwing = this.currentWingType === 'speedwing'
-    const isParamotor = this.currentWingType === 'paramotor' || this.isMotorActive
-    const baseTrimSpeed = isSpeedwing ? 74.0 : (isParamotor ? 52.0 : 38.5)
+    const isWingsuit = this.currentWingType === 'wingsuit'
+    const isParamotor = !isWingsuit && (this.currentWingType === 'paramotor' || this.isMotorActive)
+    const baseTrimSpeed = isSpeedwing ? 74.0 : (isWingsuit ? 155.0 : (isParamotor ? 52.0 : 38.5))
     const speedRatio = Math.max(1.0, this.airspeedKmh / baseTrimSpeed)
     const speedBarVal = this.controls.speedBar || 0
     const swoopPulloutG = (speedBarVal < 0.25 && this.currentSinkMps < -4.0)

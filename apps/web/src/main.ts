@@ -11,6 +11,7 @@ import '@babylonjs/core/Culling/ray'
 import '@babylonjs/core/Rendering/edgesRenderer'
 
 import { ParagliderSimulation } from './physics/pendulum'
+import type { WingKind } from './physics/types'
 import { TrickDetector } from './physics/tricks'
 import { ActionCamera } from './rendering/ActionCamera'
 import { ParagliderRig } from './rendering/ParagliderRig'
@@ -31,7 +32,7 @@ import {
 import { GodsEyeGlobeEngine } from './world/GodsEyeGlobeEngine'
 import { ChairliftSystem } from './world/ChairliftSystem'
 import { CoinRings } from './world/CoinRings'
-import { flightObjective, TORONTO_POWER_WING } from './world/TorontoCourse'
+import { flightObjective, TORONTO_POWER_WING, TORONTO_WINGSUIT_COLUMN, torontoWingsuitPickup } from './world/TorontoCourse'
 import type { FlightWorld, WorldId } from './world/types'
 import { MobileInputManager } from './input/MobileInputManager'
 import { FlightSoundscape } from './audio/FlightSoundscape'
@@ -43,9 +44,12 @@ import { XCMissionSystem } from './simulation/XCMissionSystem'
 import { ToroidalFluidSplatSystem } from './rendering/ToroidalFluidSplatSystem'
 import { GliderFlock } from './world/GliderFlock'
 import { RagdollCrashSystem } from './rendering/RagdollCrashSystem'
+import { WingtipTrailSystem } from './rendering/WingtipTrailSystem'
+import { FlightReplayBuffer } from './rendering/FlightReplayBuffer'
 import { PilotWardrobe, PILOT_SKINS, WORLD_REWARDS } from './progression/PilotWardrobe'
 import { SupplyDrop } from './world/SupplyDrop'
 import { PowerWingPickup } from './world/PowerWingPickup'
+import { WingsuitPickup } from './world/WingsuitPickup'
 
 function initApp() {
   const canvas = document.getElementById('renderCanvas') as HTMLCanvasElement
@@ -125,7 +129,7 @@ function initApp() {
   const lPos = activeWorld.launchPosition
   const lHeading = activeWorld.launchHeadingDeg
   const sim = new ParagliderSimulation(lPos.y, lHeading, 'paraglider', { x: lPos.x, y: lPos.y, z: lPos.z })
-  sim.setWing('paraglider') // Default to authentic 24m² XC Paraglider with 10.5:1 glide and thermal soaring!
+  sim.setWing('paraglider')
   sim.world = activeWorld
   ;(window as any).sim = sim
   ;(window as any).scene = scene
@@ -134,6 +138,8 @@ function initApp() {
   rig.applySkin(wardrobe.equippedSkin())
   const supplyDrop = new SupplyDrop(scene)
   const powerWing = new PowerWingPickup(scene)
+  const wingsuitPickup = new WingsuitPickup(scene)
+  let wingsuitInHand = false
   const POWER_WING_KEY = 'ptw-powered-wing'
   let ownsPowerWing = false
   try {
@@ -144,6 +150,11 @@ function initApp() {
   ;(window as any).rig = rig
   const ragdollCrash = new RagdollCrashSystem(scene)
   ;(window as any).ragdollCrash = ragdollCrash
+  const wingtipTrails = new WingtipTrailSystem(scene)
+  ;(window as any).wingtipTrails = wingtipTrails
+  const replayBuffer = new FlightReplayBuffer()
+  const replayLook = new Vector3()
+  ;(window as any).replayBuffer = replayBuffer
   const actionCam = new ActionCamera(scene)
   ;(window as any).actionCam = actionCam
   actionCam.update(sim, 0.016)
@@ -174,56 +185,79 @@ function initApp() {
       sim.reset(p.y, initEarth.launchHeadingDeg, { x: p.x, y: p.y, z: p.z })
       actionCam.snap()
     }
+    placeWingsuitItem()
   })
-  const getWingLabel = (w: 'paraglider' | 'speedwing' | 'paramotor') => {
+  const getWingLabel = (w: WingKind) => {
+    if (w === 'wingsuit') return 'SUIT'
     if (w === 'paraglider') return 'XC 10:1'
     if (w === 'speedwing') return 'SPEED 5:1'
     return 'POWER'
   }
-  const getWingIcon = (w: 'paraglider' | 'speedwing' | 'paramotor') => {
+  const getWingIcon = (w: WingKind) => {
+    if (w === 'wingsuit') return '🪽'
     if (w === 'paramotor') return '⚡'
     if (w === 'speedwing') return '💨'
     return '🪂'
   }
+  const wingBlurb = (w: WingKind) => {
+    if (w === 'wingsuit') return '🪽 Wingsuit. Always descending. Look down to dive. Drag the rail down to pull the chute.'
+    if (w === 'paraglider') {
+      if (currentWorldId === 'toronto' && !wingsuitInHand) {
+        return '🪂 Chute open. Middle holds altitude. Up is the hydrogen jet. Down slows you. The wingsuit is at the top of the harbour elevator.'
+      }
+      return '🪂 Chute open. Middle holds altitude. Up is the hydrogen jet. Down slows you. Climb, then the wing button drops the suit.'
+    }
+    if (w === 'speedwing') return '💨 Speedwing on. Faster trim, steeper dives.'
+    return '⚡ Powered wing. Drag up to rip. All the way up is the speed of sound. Drag down and a sock opens behind you.'
+  }
   hud.setWingLabel(getWingLabel(sim.currentWingType), getWingIcon(sim.currentWingType))
   hud.setControlMode(inputManager.controlMode)
-  if (ownsPowerWing) hud.setThrottleVisible(true)
+  hud.setThrottleVisible(true)
+  inputManager.isCruiseLocked = false
+  inputManager.setTargetThrottle(0.5)
+  inputManager.controls.throttle = 0.5
+  hud.setThrottlePosition(0.5)
 
-  const engagePower = () => {
-    if (!ownsPowerWing || sim.currentWingType === 'paramotor') return
-    sim.setWing('paramotor')
-    hud.setWingLabel(getWingLabel('paramotor'), getWingIcon('paramotor'))
+  // The suit is the drop. The chute is the map. Cruise only exists on the chute,
+  // so a locked rail can never sit above the chute-pull.
+  const SUIT_DROP_AGL_M = 200
+  const equipWing = (next: WingKind, announce: boolean) => {
+    const jetWing = next === 'paraglider' || next === 'paramotor'
+    inputManager.cruiseAllowed = jetWing
+    inputManager.isCruiseLocked = false
+    if (next === 'paraglider' || next === 'wingsuit' || next === 'speedwing') {
+      // Opening the chute at the bottom of the rail would arrive with the sock out.
+      // Dropping into the suit with the rail buried would pull the chute again.
+      inputManager.setTargetThrottle(0.5)
+      inputManager.controls.throttle = 0.5
+    }
+    sim.setWing(next)
+    hud.setWingLabel(getWingLabel(next), getWingIcon(next))
+    hud.setThrottlePosition(inputManager.targetThrottle)
+    if (announce) hud.setWeatherInfo(wingBlurb(next))
   }
 
   const toggleWing = () => {
-    let nextWing: 'paraglider' | 'speedwing' | 'paramotor' = 'paraglider'
-    if (!ownsPowerWing) {
-      nextWing = sim.currentWingType === 'speedwing' ? 'paraglider' : 'speedwing'
-    } else if (sim.currentWingType === 'paraglider') {
-      nextWing = 'paramotor'
-    } else if (sim.currentWingType === 'paramotor') {
-      nextWing = 'speedwing'
-    } else {
-      nextWing = 'paraglider'
+    const cur = sim.currentWingType
+    if (cur === 'wingsuit') {
+      equipWing('speedwing', true)
+      return
     }
-
-    if (nextWing === 'paramotor') {
-      if (inputManager.targetThrottle < 0.15) {
-        inputManager.setTargetThrottle(0.7)
-        inputManager.controls.throttle = Math.max(inputManager.controls.throttle ?? 0, 0.7)
-      }
-    } else {
-      inputManager.isCruiseLocked = false
-      inputManager.setTargetThrottle(0)
-      inputManager.controls.throttle = 0
+    if (cur === 'speedwing') {
+      equipWing('paraglider', true)
+      return
     }
-
-    sim.setWing(nextWing)
-    hud.setWingLabel(getWingLabel(nextWing), getWingIcon(nextWing))
-    const desc = nextWing === 'paramotor'
-      ? '⚡ Powered wing. Drag the throttle on the right. Look up to climb.'
-      : (nextWing === 'speedwing' ? '💨 Speedwing on. Faster trim, steeper dives.' : '🪂 Glider on. Level holds altitude. Look down to dive.')
-    hud.setWeatherInfo(desc)
+    // The suit is the pickup at the top of the harbour column. Until then the button cannot invent one.
+    if (!wingsuitInHand) {
+      hud.setWeatherInfo('🪽 The wingsuit is at the top of the harbour elevator.')
+      return
+    }
+    // One press from the chute drops the suit, once the drop is worth it.
+    if (sim.groundClearanceMeters < SUIT_DROP_AGL_M) {
+      hud.setWeatherInfo(`🪽 Too low for the suit. Climb past ${SUIT_DROP_AGL_M} m. You are at ${Math.round(sim.groundClearanceMeters)} m.`)
+      return
+    }
+    equipWing('wingsuit', true)
   }
   hud.setOnCycleWing(toggleWing)
   inputManager.onToggleWing = toggleWing
@@ -235,26 +269,28 @@ function initApp() {
   hud.setOnCyclePilotMass(cyclePilotMass)
 
   hud.setOnThrottle((value) => {
-    if (!ownsPowerWing) return
     inputManager.isCruiseLocked = false
     inputManager.setTargetThrottle(value)
-    if (value > 0.02) engagePower()
   })
 
   hud.setOnThrottleHold((holding) => {
-    if (!ownsPowerWing || !holding) return
+    if (!holding) return
     inputManager.setTargetThrottle(1.0)
-    engagePower()
   })
 
   hud.setOnToggleCruise(() => {
+    if (!inputManager.cruiseAllowed) {
+      hud.setWeatherInfo('Cruise is on the chute. Drag the rail down to pull it.')
+      return
+    }
     const locked = inputManager.toggleCruiseLock()
     if (locked) {
-      inputManager.setTargetThrottle(0.35)
-      if (ownsPowerWing) engagePower()
-      hud.setWeatherInfo('🔒 Level Cruise Locked (35% Throttle, 0 m/s Sink)')
+      inputManager.setTargetThrottle(0.675)
+      inputManager.controls.throttle = Math.max(inputManager.controls.throttle ?? 0, 0.675)
+      hud.setWeatherInfo('🔒 Cruise burn locked')
     } else {
-      inputManager.setTargetThrottle(0)
+      inputManager.setTargetThrottle(0.5)
+      if ((inputManager.controls.throttle ?? 0) < 0.5) inputManager.controls.throttle = 0.5
       hud.setWeatherInfo('🔓 Cruise Disengaged')
     }
   })
@@ -397,6 +433,12 @@ function initApp() {
     const pos = activeWorld.launchPosition
     const heading = activeWorld.launchHeadingDeg
     sim.reset(pos.y, heading, { x: pos.x, y: pos.y, z: pos.z })
+    inputManager.isCruiseLocked = false
+    inputManager.setTargetThrottle(0.5)
+    inputManager.controls.throttle = 0.5
+    wingsuitInHand = currentWorldId !== 'toronto'
+    equipWing('paraglider', false)
+    placeWingsuitItem()
     actionCam.snap()
     engine.resize()
 
@@ -424,9 +466,20 @@ function initApp() {
     if (!aboveCrash) crashRespawn = null
     inputManager.setBailoutCollapse(false)
     ragdollCrash.reset()
+    wingtipTrails.reset()
+    replayBuffer.stopReplay()
+    actionCam.replayFocus = null
+    actionCam.setCrashVantage('orbit')
+    hud.setCrashCamLabel('orbit')
     rig.setPilotVisible(true)
     wasCrashedLastFrame = false
     sim.reset(pos.y, heading, { x: pos.x, y: pos.y, z: pos.z })
+    inputManager.isCruiseLocked = false
+    inputManager.setTargetThrottle(0.5)
+    inputManager.controls.throttle = 0.5
+    wingsuitInHand = currentWorldId !== 'toronto'
+    equipWing('paraglider', false)
+    placeWingsuitItem()
     if (coinRings) coinRings.reset()
     trickDetector.reset()
     xcMission.resetTask()
@@ -520,6 +573,7 @@ function initApp() {
         cr.reanchorToTerrain(earthWorld)
         placeSupplyDrop()
         placePowerWing()
+        placeWingsuitItem()
         if (activeWorld === earthWorld && sim.telemetry.flightDurationSeconds < 1.5) {
           const p = earthWorld.launchPosition
           sim.reset(p.y, earthWorld.launchHeadingDeg, { x: p.x, y: p.y, z: p.z })
@@ -594,6 +648,17 @@ function initApp() {
     supplyDrop.place(x, origin.y, z)
   }
 
+  function placeWingsuitItem() {
+    if (wingsuitInHand || currentWorldId !== 'toronto') {
+      wingsuitPickup.hide()
+      return
+    }
+    const col = TORONTO_WINGSUIT_COLUMN
+    const spot = torontoWingsuitPickup(activeWorld.sampleHeight(col.x, col.z))
+    wingsuitPickup.place(spot.x, spot.y, spot.z)
+  }
+  placeWingsuitItem()
+
   const placePowerWing = () => {
     if (ownsPowerWing || currentWorldId !== 'toronto') {
       powerWing.hide()
@@ -610,16 +675,15 @@ function initApp() {
       /* private mode still keeps it for this flight */
     }
     powerWing.hide()
-    inputManager.isCruiseLocked = false
-    inputManager.setTargetThrottle(0.7)
-    inputManager.controls.throttle = 0.7
-    sim.setWing('paramotor')
-    sim.engineRpm = 2200 + 0.7 * 6200
-    hud.setWingLabel(getWingLabel('paramotor'), getWingIcon('paramotor'))
-    hud.setThrottleVisible(true)
-    hud.setThrottlePosition(0.7)
     soundscape.playCoinSound()
-    hud.setWeatherInfo('⚡ Powered wing. Drag the throttle on the right.')
+    hud.setWeatherInfo('⚡ The hydrogen jet is on the chute. Rail up to rip, rail down to slow.')
+  }
+
+  const grantWingsuit = () => {
+    wingsuitInHand = true
+    wingsuitPickup.hide()
+    soundscape.playCoinSound()
+    equipWing('wingsuit', true)
   }
 
   const cycleCamera = () => {
@@ -637,7 +701,35 @@ function initApp() {
         ? '🎥 ACTION SELFIE'
         : '🎥 CINEMATIC TRAIL'
     hud.setWeatherInfo(label)
+    const shortLabel =
+      v === 'chase-360'
+        ? 'Action 360'
+        : v === 'orbit-360'
+        ? 'Orbit 360'
+        : v === 'shoulder-chase'
+        ? 'Shoulder'
+        : v === 'pilot-fpv'
+        ? 'Cockpit FPV'
+        : v === 'front-selfie'
+        ? 'Selfie'
+        : 'Wide Trail'
+    hud.setCamVantageLabel(shortLabel)
   }
+
+  hud.setOnCycleCamVantage(cycleCamera)
+  hud.setOnCycleCrashCam(() => {
+    const nextAngle = actionCam.cycleCrashVantage()
+    hud.setCrashCamLabel(nextAngle)
+  })
+  hud.setOnReplayWipeout(() => {
+    const started = replayBuffer.startReplay(0.35)
+    if (started) {
+      wingtipTrails.reset()
+      rig.setPilotVisible(true)
+      ragdollCrash.setVisible(false)
+      hud.setWeatherInfo('⏪ Slow motion from the side. The pass, then the hit.')
+    }
+  })
 
   hud.setOnOpenLocker(syncLocker)
   hud.setOnSelectSkin((skinId) => {
@@ -653,6 +745,7 @@ function initApp() {
     const equipped = wardrobe.equip(skinId)
     if (!equipped) return
     rig.applySkin(equipped)
+    wingtipTrails.setTrailColor(equipped.trailColor || null, equipped.emissiveTrail)
     syncLocker()
     hud.setWeatherInfo(`👕 Wearing ${equipped.name}`)
   })
@@ -687,6 +780,76 @@ function initApp() {
     }
     switchWorld('custom-gps', customSpec)
   })
+
+  let earthDropName = 'Drop site'
+  const rememberEarthName = (lat: number, lon: number) => {
+    earthDropName = `${lat.toFixed(2)}°, ${lon.toFixed(2)}°`
+    hud.setEarthDropLabel(`${earthDropName}. Drop in, or wait for the place name.`)
+    void globeEngine.reversePlace(lat, lon).then((place) => {
+      if (!globeEngine.isPickingEarth()) return
+      const current = globeEngine.getPickLatLon()
+      if (!current || Math.abs(current.lat - lat) > 0.02 || Math.abs(current.lon - lon) > 0.02) return
+      if (!place) return
+      earthDropName = place
+      hud.setEarthDropLabel(place)
+    })
+  }
+  hud.setOnOpenEarthPick(() => {
+    earthDropName = 'Drop site'
+    hud.setEarthDropLabel('Drag to spin. Search or tap where you want to drop.')
+    hud.setEarthDropVisible(true)
+    globeEngine.beginWholeEarthPick(rememberEarthName)
+  })
+  hud.setOnEarthSearch((query) => {
+    hud.setEarthDropLabel('Searching…')
+    void globeEngine.searchPlace(query).then((hit) => {
+      if (!globeEngine.isPickingEarth()) return
+      if (!hit) {
+        hud.setEarthDropLabel('No place found. Try a city or a street.')
+        return
+      }
+      earthDropName = hit.name
+      hud.setEarthDropLabel(hit.name)
+      globeEngine.flyToPlace(hit.lat, hit.lon, 14000, false)
+    })
+  })
+  hud.setOnEarthDrop(() => {
+    const pick = globeEngine.getPickLatLon()
+    if (!pick) {
+      hud.setEarthDropLabel('Tap the planet first.')
+      return
+    }
+    const headingDeg = globeEngine.getPickHeadingDeg()
+    const sampled = globeEngine.sampleGlobeTerrainHeight(pick.lat, pick.lon)
+    const launchElevationM =
+      sampled !== null && Number.isFinite(sampled) ? Math.max(0, Math.round(sampled)) : 320
+    const name = earthDropName
+    const customSpec: EarthSiteSpec = {
+      id: 'custom-gps',
+      name,
+      shortLabel: `📍 ${name.slice(0, 12)}`,
+      countryFlag: '📍',
+      lat: pick.lat,
+      lon: pick.lon,
+      headingDeg,
+      launchElevationM,
+      launchAglM: 480,
+      verticalDropM: 40,
+      archetype: 'urban-canyon',
+      description: `Dropped in at ${pick.lat.toFixed(4)}°, ${pick.lon.toFixed(4)}°`,
+    }
+    globeEngine.endWholeEarthPick()
+    hud.setEarthDropVisible(false)
+    switchWorld('custom-gps', customSpec)
+    void startFlight()
+    hud.setWeatherInfo(`🪂 ${name}. Wingsuit from about 480 m. Pull the chute to roam.`)
+  })
+  hud.setOnEarthBack(() => {
+    globeEngine.endWholeEarthPick()
+    hud.setEarthDropVisible(false)
+    hud.toggleWorldModal()
+  })
+
   hud.setOnSaveGoogleApiKey((key) => {
     setConfiguredGoogleMapsApiKey(key)
     hud.setWeatherInfo(key ? '🔑 Google Maps 3D Key Saved — Reloading Map...' : '🔑 Google Maps Key Cleared')
@@ -743,6 +906,13 @@ function initApp() {
 
   window.addEventListener('keydown', (e) => {
     unlockAudio()
+    const keyTarget = e.target as HTMLElement | null
+    if (
+      globeEngine.isPickingEarth() ||
+      keyTarget?.closest?.('input, textarea, #earth-drop-bar, #hud-world-modal')
+    ) {
+      return
+    }
     if (!hasStarted) {
       startFlight()
     }
@@ -766,13 +936,18 @@ function initApp() {
     } else if (e.code === 'KeyU') {
       cyclePilotMass()
     } else if (e.code === 'KeyC') {
+      if (!inputManager.cruiseAllowed) {
+        hud.setWeatherInfo('Cruise is on the chute. Drag the rail down to pull it.')
+        return
+      }
       const locked = inputManager.toggleCruiseLock()
       if (locked) {
-        inputManager.setTargetThrottle(0.35)
-        if (ownsPowerWing) engagePower()
-        hud.setWeatherInfo('🔒 Level Cruise Locked (35% Throttle, 0 m/s Sink)')
+        inputManager.setTargetThrottle(0.675)
+        inputManager.controls.throttle = Math.max(inputManager.controls.throttle ?? 0, 0.675)
+        hud.setWeatherInfo('🔒 Cruise burn locked')
       } else {
-        inputManager.setTargetThrottle(0)
+        inputManager.setTargetThrottle(0.5)
+        if ((inputManager.controls.throttle ?? 0) < 0.5) inputManager.controls.throttle = 0.5
         hud.setWeatherInfo('🔓 Cruise Disengaged')
       }
     } else if (e.code === 'KeyO') {
@@ -791,8 +966,9 @@ function initApp() {
   // Global click to start flight & ensure motion permission
   const handleGlobalStart = async (e: Event) => {
     soundscape.unlock()
+    if (globeEngine.isPickingEarth()) return
     const target = e.target as HTMLElement
-    if (target?.closest('#btn-world, #btn-camera, #btn-ghost, #btn-gyro, #btn-ln-style, #btn-ir-goggles, #btn-risers-guide, #btn-wing, #btn-ctrl-mode, #btn-roll-left, #btn-roll-right, #btn-bailout, #btn-acro-flip, #btn-wasted-relaunch, #btn-locker, #hud-locker-modal, #hud-throttle-slider, .skin-card-btn')) return
+    if (target?.closest('#btn-world, #btn-camera, #btn-ghost, #btn-gyro, #btn-ln-style, #btn-ir-goggles, #btn-risers-guide, #btn-wing, #btn-ctrl-mode, #btn-roll-left, #btn-roll-right, #btn-bailout, #btn-acro-flip, #btn-wasted-relaunch, #btn-locker, #hud-locker-modal, #hud-world-modal, #hud-throttle-slider, #cesiumContainer, #earth-drop-bar, .skin-card-btn, input, textarea')) return
     if (!inputManager.hasGyroPermission && typeof (window as any).DeviceOrientationEvent?.requestPermission === 'function') {
       await inputManager.requestGyroPermission()
     }
@@ -811,7 +987,10 @@ function initApp() {
   })
 
   // Wheel / trackpad gesture start
-  window.addEventListener('wheel', () => {
+  window.addEventListener('wheel', (e: WheelEvent) => {
+    if (globeEngine.isPickingEarth()) return
+    const wheelTarget = e.target as HTMLElement | null
+    if (wheelTarget?.closest?.('#cesiumContainer, #earth-drop-bar, #hud-world-modal')) return
     if (!hasStarted) {
       startFlight()
     }
@@ -826,7 +1005,9 @@ function initApp() {
   engine.runRenderLoop(() => {
     const dt = engine.getDeltaTime() * 0.001 // seconds
 
-    if (hasStarted) {
+    if (globeEngine.isPickingEarth()) {
+      // The planet covers the flight. Hold position until they drop in or go back.
+    } else if (hasStarted) {
       // Step A: Update Inputs (Touch, Trackpad, Keys with Aerodynamic Resistance & Haptics)
       inputManager.update(
         dt,
@@ -839,6 +1020,14 @@ function initApp() {
         sim.atmosphere.thermalUpdraftMps,
       )
       sim.controls = { ...inputManager.controls }
+      if (!sim.isCrashed && sim.currentWingType === 'wingsuit') {
+        const stickNow = inputManager.controls.throttle ?? inputManager.targetThrottle
+        if (stickNow < 0.08) {
+          equipWing('paraglider', true)
+          // The copy above still has the buried stick. The chute must open at a coast.
+          sim.controls = { ...inputManager.controls }
+        }
+      }
 
       // Step B: Sample Atmosphere (Thermals & Ridge Lift with pulse cycles & wind-drift lockstep)
       const updraft = activeWorld.sampleUpdraft(
@@ -857,6 +1046,9 @@ function initApp() {
       if (sim.isCrashed) {
         if (!wasCrashedLastFrame) {
           wasCrashedLastFrame = true
+          replayBuffer.snapshotCrash()
+          actionCam.setCrashVantage('orbit')
+          hud.setCrashCamLabel('orbit')
           crashRespawn = {
             x: sim.pilot.position.x,
             z: sim.pilot.position.z,
@@ -879,11 +1071,67 @@ function initApp() {
             sim.crashHospitalBill,
           )
         }
+
+        // Slow-motion playback if player activated Wipeout Replay
+        if (replayBuffer.isReplaying) {
+          const frame = replayBuffer.step(dt)
+          if (frame) {
+            rig.setPilotVisible(true)
+            sim.pilot.position.x = frame.pilotPos.x
+            sim.pilot.position.y = frame.pilotPos.y
+            sim.pilot.position.z = frame.pilotPos.z
+            sim.pilot.velocity.x = frame.pilotVel.x
+            sim.pilot.velocity.y = frame.pilotVel.y
+            sim.pilot.velocity.z = frame.pilotVel.z
+            sim.canopy.position.x = frame.canopyPos.x
+            sim.canopy.position.y = frame.canopyPos.y
+            sim.canopy.position.z = frame.canopyPos.z
+            sim.canopy.yawDeg = frame.canopyYaw
+            sim.canopy.pitchDeg = frame.canopyPitch
+            sim.canopy.rollDeg = frame.canopyRoll
+            sim.canopy.quaternion.x = frame.qx
+            sim.canopy.quaternion.y = frame.qy
+            sim.canopy.quaternion.z = frame.qz
+            sim.canopy.quaternion.w = frame.qw
+            sim.telemetry.airspeedKmh = frame.speedKmh
+            sim.telemetry.gForce = frame.gForce
+            sim.telemetry.verticalSpeedMps = frame.pilotVel.y
+            sim.telemetry.collapseFrac = frame.collapse
+            sim.thrustNewtons = frame.thrust
+            sim.drogueOpen = frame.drogue
+            sim.controls.weightShift = frame.weightShift
+            sim.controls.leftBrake = frame.leftBrake
+            sim.controls.rightBrake = frame.rightBrake
+            sim.controls.speedBar = frame.speedBar
+            sim.controls.pullingA = frame.pullingA
+            sim.controls.pullingB = frame.pullingB
+            sim.controls.strafe = 0
+            replayLook.copyFrom(frame.pilotPos)
+            actionCam.replayFocus = replayLook
+            rig.update(sim, actionCam.vantage)
+            const tips = rig.getWingtipPositions()
+            const thrusters = rig.getThrusterPositions()
+            wingtipTrails.update(sim, dt, tips.left, tips.right, thrusters?.left, thrusters?.right)
+          } else {
+            replayBuffer.stopReplay()
+            actionCam.replayFocus = null
+            rig.setPilotVisible(false)
+            ragdollCrash.setVisible(true)
+          }
+        } else {
+          wingtipTrails.sleep()
+        }
+
+        // Ragdoll keeps falling while the replay hides it, so the cut back is the body on the ground.
         ragdollCrash.update(
-          dt,
+          dt * 0.45,
           (x, z) => activeWorld.sampleHeight(x, z),
-          (impactSpd) => soundscape.playRagdollBounceSound(impactSpd),
+          (impactSpd) => {
+            if (!replayBuffer.isReplaying) soundscape.playRagdollBounceSound(impactSpd)
+          },
         )
+      } else {
+        replayBuffer.record(sim)
       }
 
       // Step D: Detect Emergent Acrobatics & Tricks
@@ -897,6 +1145,7 @@ function initApp() {
         soundscape.playCoinSound()
         if (found.skin) {
           rig.applySkin(found.skin)
+          wingtipTrails.setTrailColor(found.skin.trailColor || null, found.skin.emissiveTrail)
           hud.setWeatherInfo(`👕 ${found.skin.name} unlocked`)
         } else if (found.souvenir) {
           hud.setWeatherInfo(`🎁 ${found.souvenir.name}`)
@@ -906,6 +1155,10 @@ function initApp() {
 
       if (!sim.isCrashed && powerWing.update(dt, sim.pilot.position)) {
         grantPowerWing()
+      }
+
+      if (!sim.isCrashed && wingsuitPickup.update(dt, sim.pilot.position)) {
+        grantWingsuit()
       }
 
       // Step E: Coin Ring Collection (Active in Whistler)
@@ -953,6 +1206,9 @@ function initApp() {
       // Step G: Update Visual Rig & Action Camera with AR Viewport Twist & Snap Dynamics
       if (!sim.isCrashed) {
         rig.update(sim, actionCam.vantage)
+        const tips = rig.getWingtipPositions()
+        const thrusters = rig.getThrusterPositions()
+        wingtipTrails.update(sim, dt, tips.left, tips.right, thrusters?.left, thrusters?.right)
       }
       actionCam.update(
         sim,
@@ -992,7 +1248,7 @@ function initApp() {
         inputManager.pitchDemand,
       )
       if (coinRings) {
-        const objective = flightObjective(currentWorldId, coinRings.collectedCount, coinRings.totalCoins, ownsPowerWing)
+        const objective = flightObjective(currentWorldId, coinRings.collectedCount, coinRings.totalCoins)
         hud.setObjective(sim.ringBoostTimer > 0.08 ? `${objective}  Boost ${sim.coinCount}.` : objective)
       }
       hud.setThrottlePosition(inputManager.targetThrottle)
@@ -1052,7 +1308,7 @@ function initApp() {
 
         hud.updateIrSpotTemp(spotTemp, status)
       }
-    } else {
+    } else if (!globeEngine.isPickingEarth()) {
       // Pre-launch preview state
       rig.update(sim, actionCam.vantage)
       actionCam.update(sim, dt)
@@ -1067,6 +1323,15 @@ function initApp() {
       if (lnStyle.isIrGoggles) {
         hud.updateIrSpotTemp(currentAirTempC, 'LAUNCH SITE AMBIENT')
       }
+    }
+
+    const northDeg = activeWorld instanceof GoogleEarthWorld ? activeWorld.site.headingDeg : 0
+    hud.setCompass(northDeg + sim.telemetry.headingDeg)
+
+    if (activeWorld instanceof GoogleEarthWorld && !globeEngine.isPickingEarth()) {
+      const pilot = sim.pilot.position
+      const here = globeEngine.localToLatLonAlt(pilot.x, pilot.y, pilot.z)
+      activeWorld.refreshStreetNames(here.lat, here.lon)
     }
 
     // Synchronize GodsEyeGlobeEngine (CesiumJS 3D Planet) 1:1 with Babylon ActionCamera

@@ -1,4 +1,5 @@
 node_modules
+apps/web/.cert/
 dist
 .DS_Store
 .pnpm-store

@@ -12,6 +12,10 @@ export type PilotSkin = {
   boots: Rgb
   /** null keeps the wing's own color. */
   canopy: Rgb | null
+  /** Custom wingtip trail color */
+  trailColor?: Rgb
+  emissiveTrail?: boolean
+  style?: 'default' | 'neon' | 'steampunk' | 'carbon' | 'gold'
 }
 
 export type Souvenir = {
@@ -28,13 +32,13 @@ export type WorldReward = {
 export const PILOT_SKINS: PilotSkin[] = [
   {
     id: 'slate',
-    name: 'Slate',
-    blurb: 'The suit you launch with.',
+    name: 'Brass Airman',
+    blurb: 'Orange flight suit, white helmet, brass goggles.',
     priceLabel: null,
-    suit: { r: 0.15, g: 0.2, b: 0.28 },
-    helmet: { r: 0.98, g: 0.98, b: 1 },
-    visor: { r: 0.04, g: 0.04, b: 0.06 },
-    boots: { r: 0.18, g: 0.22, b: 0.32 },
+    suit: { r: 0.86, g: 0.4, b: 0.14 },
+    helmet: { r: 0.93, g: 0.9, b: 0.82 },
+    visor: { r: 0.06, g: 0.07, b: 0.08 },
+    boots: { r: 0.48, g: 0.27, b: 0.13 },
     canopy: null,
   },
   {
@@ -127,14 +131,73 @@ export const PILOT_SKINS: PilotSkin[] = [
   },
   {
     id: 'gold-leaf',
-    name: 'Gold Leaf',
-    blurb: 'A paid suit. The shop is not open yet.',
-    priceLabel: '$8',
-    suit: { r: 0.72, g: 0.55, b: 0.16 },
-    helmet: { r: 0.85, g: 0.68, b: 0.22 },
-    visor: { r: 0.35, g: 0.22, b: 0.05 },
-    boots: { r: 0.4, g: 0.28, b: 0.08 },
-    canopy: { r: 0.92, g: 0.72, b: 0.18 },
+    name: 'Liquid Gold',
+    blurb: 'Reflective gold foil canopy and champagne stardust trails.',
+    priceLabel: null,
+    suit: { r: 0.12, g: 0.12, b: 0.14 },
+    helmet: { r: 0.95, g: 0.82, b: 0.28 },
+    visor: { r: 0.85, g: 0.72, b: 0.15 },
+    boots: { r: 0.18, g: 0.16, b: 0.12 },
+    canopy: { r: 0.98, g: 0.82, b: 0.22 },
+    trailColor: { r: 1.0, g: 0.84, b: 0.2 },
+    emissiveTrail: true,
+    style: 'gold',
+  },
+  {
+    id: 'cyber-neon',
+    name: 'Cyber Neon',
+    blurb: 'Matte obsidian suit with pulsing electroluminescent cyan trails.',
+    priceLabel: null,
+    suit: { r: 0.05, g: 0.05, b: 0.08 },
+    helmet: { r: 0.08, g: 0.08, b: 0.12 },
+    visor: { r: 0.0, g: 0.95, b: 1.0 },
+    boots: { r: 0.04, g: 0.04, b: 0.06 },
+    canopy: { r: 0.02, g: 0.88, b: 0.95 },
+    trailColor: { r: 0.0, g: 0.95, b: 1.0 },
+    emissiveTrail: true,
+    style: 'neon',
+  },
+  {
+    id: 'steampunk-aero',
+    name: 'Aero Steampower',
+    blurb: 'Vintage aeronaut flight leathers, brass hardware & blue hydrogen thrust.',
+    priceLabel: null,
+    suit: { r: 0.38, g: 0.24, b: 0.14 },
+    helmet: { r: 0.78, g: 0.58, b: 0.22 },
+    visor: { r: 0.45, g: 0.26, b: 0.08 },
+    boots: { r: 0.24, g: 0.14, b: 0.08 },
+    canopy: { r: 0.82, g: 0.45, b: 0.18 },
+    trailColor: { r: 0.2, g: 0.8, b: 1.0 },
+    emissiveTrail: true,
+    style: 'steampunk',
+  },
+  {
+    id: 'acro-velocity',
+    name: 'Acro Velocity',
+    blurb: 'Red Bull style high-contrast aerobatic racing team livery.',
+    priceLabel: null,
+    suit: { r: 0.08, g: 0.12, b: 0.22 },
+    helmet: { r: 0.96, g: 0.96, b: 0.98 },
+    visor: { r: 0.98, g: 0.18, b: 0.12 },
+    boots: { r: 0.92, g: 0.18, b: 0.12 },
+    canopy: { r: 0.96, g: 0.14, b: 0.16 },
+    trailColor: { r: 0.98, g: 0.22, b: 0.18 },
+    emissiveTrail: true,
+    style: 'default',
+  },
+  {
+    id: 'carbon-phantom',
+    name: 'Carbon Phantom',
+    blurb: 'Matte stealth carbon fiber with sharp crimson wingtip ribbons.',
+    priceLabel: null,
+    suit: { r: 0.1, g: 0.1, b: 0.12 },
+    helmet: { r: 0.14, g: 0.14, b: 0.16 },
+    visor: { r: 0.85, g: 0.08, b: 0.12 },
+    boots: { r: 0.08, g: 0.08, b: 0.1 },
+    canopy: { r: 0.15, g: 0.15, b: 0.18 },
+    trailColor: { r: 0.95, g: 0.08, b: 0.15 },
+    emissiveTrail: true,
+    style: 'carbon',
   },
   {
     id: 'iridium',
@@ -150,7 +213,7 @@ export const PILOT_SKINS: PilotSkin[] = [
 ]
 
 /** Skins you start with. City drops and future purchases add the rest. */
-const STARTER_SKIN_IDS = ['slate', 'alpine']
+const STARTER_SKIN_IDS = ['slate', 'alpine', 'cyber-neon', 'steampunk-aero', 'gold-leaf', 'acro-velocity', 'carbon-phantom']
 
 export const WORLD_REWARDS: Record<string, WorldReward> = {
   manhattan: { skinId: 'nyc-night', souvenirName: 'Downtown NYC crest' },

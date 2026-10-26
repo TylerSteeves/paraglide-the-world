@@ -255,6 +255,10 @@ export class RagdollCrashSystem {
     this.root.setEnabled(false)
   }
 
+  public setVisible(visible: boolean): void {
+    this.root.setEnabled(visible)
+  }
+
   public triggerCrash(
     pilotPos: { x: number; y: number; z: number },
     pilotVel: { x: number; y: number; z: number },

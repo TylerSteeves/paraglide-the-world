@@ -1,6 +1,8 @@
 import { Color3, Color4 } from '@babylonjs/core/Maths/math.color'
 import { Vector3, Quaternion, Matrix } from '@babylonjs/core/Maths/math.vector'
+import { Material } from '@babylonjs/core/Materials/material'
 import { StandardMaterial } from '@babylonjs/core/Materials/standardMaterial'
+import { Texture } from '@babylonjs/core/Materials/Textures/texture'
 import { Mesh } from '@babylonjs/core/Meshes/mesh'
 import type { LinesMesh } from '@babylonjs/core/Meshes/linesMesh'
 import { MeshBuilder } from '@babylonjs/core/Meshes/meshBuilder'
@@ -8,7 +10,9 @@ import { TransformNode } from '@babylonjs/core/Meshes/transformNode'
 import type { Scene } from '@babylonjs/core/scene'
 import '@babylonjs/core/Rendering/edgesRenderer'
 import type { ParagliderSimulation } from '../physics/pendulum'
+import type { WingKind } from '../physics/types'
 import { clamp } from '../physics/vecmath'
+import { ArticulatedPilot } from './ArticulatedPilot'
 import { LnPalette, LnStyleManager } from './LnStyleManager'
 import type { PilotSkin } from '../progression/PilotWardrobe'
 
@@ -19,27 +23,48 @@ export class ParagliderRig {
   private pilotBodyPivot: TransformNode
 
   // Glider 3D Mesh
-  private canopyMesh!: Mesh
-  private underMesh!: Mesh
-  public currentWingType: 'speedwing' | 'paraglider' | 'paramotor' = 'speedwing'
+  private canopyMesh: Mesh | null = null
+  private underMesh: Mesh | null = null
+  public currentWingType: WingKind = 'paraglider'
   private canopyTopSpeedMat!: StandardMaterial
   private canopyTopXcMat!: StandardMaterial
   private canopyTopParamotorMat!: StandardMaterial
   private canopyUnderMat!: StandardMaterial
   private canopyUnderParamotorMat!: StandardMaterial
-  private propBlurMat!: StandardMaterial
   private lineCanopyMat!: StandardMaterial
+  private sailMat!: StandardMaterial
+  private sailFrameMat!: StandardMaterial
   private ribLinesMesh: LinesMesh | null = null
+  private leadingEdgeMesh: Mesh | null = null
+  private trailingEdgeMesh: Mesh | null = null
+  private sailBattens: Mesh[] = []
+  private sailBattenTs: number[] = []
+  private sailChordSpars: Mesh[] = []
+  private sailChordCells: number[] = []
 
-  // Paramotor Frame & Propeller
+  // Hydrogen jet pack
   private paramotorNode!: TransformNode
-  private propellerMesh!: Mesh
-  private propBlurMesh!: Mesh
+  private drogueRoot!: TransformNode
+
+  // Steampunk Blue Hydrogen Thrusters & Plasma Flames
+  private flameMeshL!: Mesh
+  private flameMeshR!: Mesh
+  private thrusterBellL!: Mesh
+  private thrusterBellR!: Mesh
+  private flameMat!: StandardMaterial
+  private h2CoreMat!: StandardMaterial
+  private brassMat!: StandardMaterial
+  private copperMat!: StandardMaterial
 
   // Stylized Articulated Pilot
   private pilotHeadNode: TransformNode
   private helmetMesh: Mesh
   private visorMesh: Mesh
+  private travelerKit!: TransformNode
+  private airmanBack: Mesh | null = null
+  private airmanFront: Mesh | null = null
+  private airmanSuit: Mesh | null = null
+  private sculptedPilot: Mesh[] = []
   private neckMesh: Mesh
   private torsoMesh: Mesh
   private harnessMesh: Mesh
@@ -64,19 +89,27 @@ export class ParagliderRig {
   private rightElbowMesh: Mesh
   private leftHandNode: TransformNode
   private rightHandNode: TransformNode
-  private currentLeftHandPos: Vector3 = new Vector3(-0.28, 0.88, 0.06)
-  private currentRightHandPos: Vector3 = new Vector3(0.28, 0.88, 0.06)
+  private currentLeftHandPos: Vector3 = new Vector3(-0.26, 0.96, 0.06)
+  private currentRightHandPos: Vector3 = new Vector3(0.26, 0.96, 0.06)
   private leftLegNode: TransformNode
   private rightLegNode: TransformNode
   private leftKneeNode: TransformNode
   private rightKneeNode: TransformNode
+  private leftAnkleNode: TransformNode
+  private rightAnkleNode: TransformNode
+  private leftToggle: Mesh
+  private rightToggle: Mesh
+  private figure!: ArticulatedPilot
+  // Same anchors the arm IK reaches for. Shoulder y sits on the jacket, not the old squat chest.
+  private readonly shoulderL = new Vector3(-0.22, 0.46, 0.03)
+  private readonly shoulderR = new Vector3(0.22, 0.46, 0.03)
 
   // Line Networks & Risers (visible by default for authentic tethered paragliding feel)
   public showSuspensionLines: boolean = false
   public pilotVisible: boolean = true
-  private suspensionLinesMesh!: LinesMesh
-  private risersMesh!: LinesMesh
-  private brakeLinesMesh!: LinesMesh
+  private suspensionLinesMesh: LinesMesh | null = null
+  private risersMesh: LinesMesh | null = null
+  private brakeLinesMesh: LinesMesh | null = null
 
   // Aerofoil Rib Paths
   private aLinePoints: Vector3[] = []
@@ -131,56 +164,113 @@ export class ParagliderRig {
     this.canopyUnderParamotorMat.diffuseColor = new Color3(0.95, 0.96, 0.98) // Clean racing silver/white
     this.canopyUnderParamotorMat.specularColor = new Color3(0.2, 0.2, 0.2)
 
-    this.propBlurMat = new StandardMaterial('prop-blur-mat', scene)
-    this.propBlurMat.diffuseColor = new Color3(0.15, 0.15, 0.18)
-    this.propBlurMat.alpha = 0
-    this.propBlurMat.backFaceCulling = false
-
     this.lineCanopyMat = new StandardMaterial('canopy-line-mat', scene)
     this.lineCanopyMat.diffuseColor = new Color3(0.96, 0.95, 0.92)
     this.lineCanopyMat.backFaceCulling = false
 
+    // Clear sail: sun through silk, the city showing through the cloth.
+    this.sailMat = new StandardMaterial('clear-sail-mat', scene)
+    this.sailMat.diffuseColor = new Color3(0.93, 0.9, 0.82)
+    this.sailMat.emissiveColor = new Color3(0.38, 0.28, 0.14)
+    this.sailMat.specularColor = new Color3(0.9, 0.74, 0.42)
+    this.sailMat.specularPower = 28
+    this.sailMat.alpha = 0.34
+    this.sailMat.backFaceCulling = false
+    this.sailMat.twoSidedLighting = true
+    this.sailMat.disableDepthWrite = true
+    this.sailMat.transparencyMode = Material.MATERIAL_ALPHABLEND
+
+    this.sailFrameMat = new StandardMaterial('sail-frame-mat', scene)
+    this.sailFrameMat.diffuseColor = new Color3(0.8, 0.46, 0.2)
+    this.sailFrameMat.emissiveColor = new Color3(0.32, 0.14, 0.04)
+    this.sailFrameMat.specularColor = new Color3(0.95, 0.68, 0.34)
+    this.sailFrameMat.specularPower = 24
+    this.sailFrameMat.backFaceCulling = false
+
     // Pilot Suit & Gear Materials
     this.pilotSuitMat = new StandardMaterial('pilot-suit-mat', scene)
-    this.pilotSuitMat.diffuseColor = new Color3(0.15, 0.20, 0.28) // Deep charcoal navy flight suit
+    this.pilotSuitMat.diffuseColor = new Color3(0.86, 0.4, 0.14)
+    this.pilotSuitMat.emissiveColor = new Color3(0.17, 0.08, 0.03)
     this.pilotSuitMat.specularColor = new Color3(0.06, 0.06, 0.06)
 
     this.helmetMat = new StandardMaterial('helmet-mat', scene)
-    this.helmetMat.diffuseColor = new Color3(0.98, 0.98, 1.0) // Gloss white action helmet
-    this.helmetMat.specularColor = new Color3(0.9, 0.9, 0.95)
+    this.helmetMat.diffuseColor = new Color3(0.93, 0.9, 0.82)
+    this.helmetMat.emissiveColor = new Color3(0.19, 0.18, 0.16)
+    this.helmetMat.specularColor = new Color3(0.16, 0.12, 0.08)
 
     this.visorMat = new StandardMaterial('visor-mat', scene)
-    this.visorMat.diffuseColor = new Color3(0.04, 0.04, 0.06) // Mirrored iridium visor
-    this.visorMat.specularColor = new Color3(0.95, 0.85, 0.35) // Gold sun glint
+    this.visorMat.diffuseColor = new Color3(0.06, 0.07, 0.08)
+    this.visorMat.emissiveColor = new Color3(0.16, 0.08, 0.02)
+    this.visorMat.specularColor = new Color3(0.9, 0.72, 0.28)
+    this.visorMat.alpha = 1
 
     const skinMat = new StandardMaterial('skin-mat', scene)
-    skinMat.diffuseColor = new Color3(0.88, 0.68, 0.54) // Natural skin/neck
+    skinMat.diffuseColor = new Color3(0.8, 0.62, 0.48)
+    skinMat.specularColor = new Color3(0.08, 0.06, 0.05)
+    skinMat.emissiveColor = new Color3(0.05, 0.03, 0.02)
+
+    const hairMat = new StandardMaterial('pilot-hair-mat', scene)
+    hairMat.diffuseColor = new Color3(0.62, 0.6, 0.56)
+    hairMat.specularColor = new Color3(0.06, 0.06, 0.06)
+    hairMat.emissiveColor = new Color3(0.05, 0.05, 0.045)
+
+    const scarfMat = new StandardMaterial('pilot-scarf-mat', scene)
+    scarfMat.diffuseColor = new Color3(0.86, 0.82, 0.7)
+    scarfMat.specularColor = new Color3(0.06, 0.05, 0.04)
+
+    const leatherMat = new StandardMaterial('pilot-leather-mat', scene)
+    leatherMat.diffuseColor = new Color3(0.38, 0.22, 0.12)
+    leatherMat.specularColor = new Color3(0.14, 0.09, 0.05)
 
     const metalMat = new StandardMaterial('metal-mat', scene)
     metalMat.diffuseColor = new Color3(0.85, 0.88, 0.94) // Anodized aluminum carabiners
     metalMat.specularColor = new Color3(0.95, 0.95, 0.95)
 
     this.bootMat = new StandardMaterial('boot-mat', scene)
-    this.bootMat.diffuseColor = new Color3(0.18, 0.22, 0.32) // Sport trail shoes
+    this.bootMat.diffuseColor = new Color3(0.48, 0.27, 0.13)
+    this.bootMat.emissiveColor = new Color3(0.1, 0.05, 0.03)
     this.bootMat.specularColor = new Color3(0.1, 0.1, 0.1)
 
     const sockMat = new StandardMaterial('sock-mat', scene)
-    sockMat.diffuseColor = new Color3(0.08, 0.72, 0.45) // Sporty electric green/teal socks
+    sockMat.diffuseColor = new Color3(0.42, 0.36, 0.3) // Wool sock above the boot
 
     this.soleMat = new StandardMaterial('sole-mat', scene)
-    this.soleMat.diffuseColor = new Color3(0.96, 0.96, 0.98) // White trail shoe EVA outsole
-    this.soleMat.specularColor = new Color3(0.3, 0.3, 0.3)
+    this.soleMat.diffuseColor = new Color3(0.18, 0.12, 0.08) // Leather boot sole
+    this.soleMat.specularColor = new Color3(0.08, 0.06, 0.04)
 
     this.gloveMat = new StandardMaterial('glove-mat', scene)
-    this.gloveMat.diffuseColor = new Color3(0.10, 0.12, 0.16) // Technical flight gloves
-    this.gloveMat.specularColor = new Color3(0.15, 0.15, 0.15)
+    this.gloveMat.diffuseColor = new Color3(0.36, 0.22, 0.13) // Leather flight gloves
+    this.gloveMat.specularColor = new Color3(0.1, 0.08, 0.05)
 
     this.toggleMat = new StandardMaterial('toggle-mat', scene)
     this.toggleMat.diffuseColor = new Color3(0.96, 0.24, 0.14) // Paraglider red brake toggle loops
     this.toggleMat.specularColor = new Color3(0.4, 0.4, 0.4)
 
-    // Build initial Speedwing canopy & lines
-    this.buildCanopyAndLines('speedwing')
+    // Steampunk Brass & Copper Materials
+    this.brassMat = new StandardMaterial('steampunk-brass-mat', scene)
+    this.brassMat.diffuseColor = new Color3(0.85, 0.65, 0.22)
+    this.brassMat.specularColor = new Color3(0.95, 0.85, 0.45)
+
+    this.copperMat = new StandardMaterial('steampunk-copper-mat', scene)
+    this.copperMat.diffuseColor = new Color3(0.78, 0.42, 0.22)
+    this.copperMat.specularColor = new Color3(0.85, 0.55, 0.35)
+
+    // Cryogenic Hydrogen Energy Core & Neon Blue Plasma Flame Materials
+    this.h2CoreMat = new StandardMaterial('h2-core-mat', scene)
+    this.h2CoreMat.diffuseColor = new Color3(0.05, 0.75, 0.95)
+    this.h2CoreMat.emissiveColor = new Color3(0.15, 0.85, 1.0)
+    this.h2CoreMat.specularColor = new Color3(0.95, 0.95, 1.0)
+    this.h2CoreMat.alpha = 0.88
+
+    this.flameMat = new StandardMaterial('h2-plasma-flame-mat', scene)
+    this.flameMat.diffuseColor = new Color3(0.55, 0.9, 1)
+    this.flameMat.emissiveColor = new Color3(0.25, 0.75, 1)
+    this.flameMat.specularColor = new Color3(0, 0, 0)
+    this.flameMat.alpha = 0.7
+    this.flameMat.backFaceCulling = false
+
+    // The flight starts under the chute. The suit is a pickup.
+    this.buildCanopyAndLines('paraglider')
 
     // Subscribe to line-art style manager
     this.unsubscribeStyle = LnStyleManager.getInstance().subscribe((palette) => {
@@ -190,34 +280,113 @@ export class ParagliderRig {
     // 3. Build Anatomically Proportional Human Character Model
     // Dynamic Head & Helmet Pivot (Articulated to look into turns and apexes)
     this.pilotHeadNode = new TransformNode('pilot-head-node', scene)
-    this.pilotHeadNode.position.set(0, 0.52, 0.03)
+    this.pilotHeadNode.position.set(0, 0.58, 0.03)
     this.pilotHeadNode.parent = this.pilotBodyPivot
 
-    // Aerodynamic full-face speed/acro helmet (realistic human head scale ~0.25m)
-    this.helmetMesh = MeshBuilder.CreateSphere('pilot-helmet', { diameter: 0.27, segments: 14 }, scene)
-    this.helmetMesh.scaling.set(0.92, 1.06, 1.16) // Streamlined aerodynamic oval
-    this.helmetMesh.position.set(0, 0.13, 0.01)
+    // Leather flying cap. It sits back so the face, beard, and goggles read in profile.
+    this.helmetMesh = MeshBuilder.CreateSphere('pilot-helmet', { diameter: 0.26, segments: 14 }, scene)
+    this.helmetMesh.scaling.set(1.02, 0.78, 0.92)
+    this.helmetMesh.position.set(0, 0.16, -0.03)
     this.helmetMesh.material = this.helmetMat
     this.helmetMesh.parent = this.pilotHeadNode
 
-    // Integrated curved aero visor
-    this.visorMesh = MeshBuilder.CreateSphere('pilot-visor', { diameter: 0.24, segments: 12 }, scene)
-    this.visorMesh.scaling.set(0.96, 0.48, 0.88)
-    this.visorMesh.position.set(0, 0.12, 0.09)
+    for (const side of [-1, 1]) {
+      const flap = MeshBuilder.CreateSphere(`pilot-ear-flap-${side}`, { diameter: 0.09, segments: 8 }, scene)
+      flap.scaling.set(0.42, 0.95, 0.7)
+      flap.position.set(side * 0.11, 0.1, -0.01)
+      flap.material = this.helmetMat
+      flap.parent = this.pilotHeadNode
+    }
+
+    const hairLock = MeshBuilder.CreateCylinder('pilot-hair-lock', { height: 0.16, diameterTop: 0.015, diameterBottom: 0.07, tessellation: 8 }, scene)
+    hairLock.rotation.x = -0.9
+    hairLock.rotation.z = 0.25
+    hairLock.position.set(0.03, 0.27, -0.05)
+    hairLock.material = hairMat
+    hairLock.parent = this.pilotHeadNode
+    for (const [name, x, y, z, d] of [
+      ['a', -0.05, 0.24, -0.08, 0.1],
+      ['b', 0.06, 0.22, -0.1, 0.09],
+      ['c', 0.0, 0.27, -0.02, 0.08],
+    ] as const) {
+      const clump = MeshBuilder.CreateSphere(`pilot-hair-${name}`, { diameter: d, segments: 6 }, scene)
+      clump.position.set(x, y, z)
+      clump.material = hairMat
+      clump.parent = this.pilotHeadNode
+    }
+
+    const face = MeshBuilder.CreateSphere('pilot-face', { diameter: 0.16, segments: 12 }, scene)
+    face.scaling.set(0.92, 1.05, 0.82)
+    face.position.set(0, 0.09, 0.055)
+    face.material = skinMat
+    face.parent = this.pilotHeadNode
+
+    const nose = MeshBuilder.CreateSphere('pilot-nose', { diameter: 0.038, segments: 8 }, scene)
+    nose.scaling.set(0.8, 0.9, 1.15)
+    nose.position.set(0, 0.1, 0.125)
+    nose.material = skinMat
+    nose.parent = this.pilotHeadNode
+
+    // Goggle rims stay brass when a city suit recolors the coat and the cap.
+    const goggleY = 0.125
+    const goggleZ = 0.112
+    this.visorMesh = MeshBuilder.CreateSphere('pilot-visor', { diameter: 0.052, segments: 10 }, scene)
+    this.visorMesh.scaling.set(1, 1, 0.38)
+    this.visorMesh.position.set(-0.042, goggleY, goggleZ + 0.006)
     this.visorMesh.material = this.visorMat
     this.visorMesh.parent = this.pilotHeadNode
+    const lensR = MeshBuilder.CreateSphere('pilot-goggle-lens-r', { diameter: 0.052, segments: 10 }, scene)
+    lensR.scaling.set(1, 1, 0.38)
+    lensR.position.set(0.042, goggleY, goggleZ + 0.006)
+    lensR.material = this.visorMat
+    lensR.parent = this.pilotHeadNode
+    for (const side of [-1, 1]) {
+      const rim = MeshBuilder.CreateTorus(`pilot-goggle-rim-${side}`, { diameter: 0.068, thickness: 0.012, tessellation: 14 }, scene)
+      rim.position.set(side * 0.042, goggleY, goggleZ)
+      rim.material = this.brassMat
+      rim.parent = this.pilotHeadNode
+    }
+    const goggleStrap = MeshBuilder.CreateBox('pilot-goggle-strap', { width: 0.2, height: 0.016, depth: 0.14 }, scene)
+    goggleStrap.position.set(0, 0.23, -0.02)
+    goggleStrap.material = leatherMat
+    goggleStrap.parent = this.pilotHeadNode
+    const goggleBridge = MeshBuilder.CreateBox('pilot-goggle-bridge', { width: 0.028, height: 0.012, depth: 0.012 }, scene)
+    goggleBridge.position.set(0, goggleY, goggleZ)
+    goggleBridge.material = this.brassMat
+    goggleBridge.parent = this.pilotHeadNode
 
-    // Full-face aerodynamic chin guard
-    const chinGuard = MeshBuilder.CreateBox('pilot-chin-guard', { width: 0.13, height: 0.07, depth: 0.10 }, scene)
-    chinGuard.position.set(0, 0.04, 0.08)
-    chinGuard.material = this.helmetMat
-    chinGuard.parent = this.pilotHeadNode
+    const beard = MeshBuilder.CreateSphere('pilot-beard', { diameter: 0.12, segments: 10 }, scene)
+    beard.scaling.set(1.05, 1.15, 0.72)
+    beard.position.set(0, 0.02, 0.07)
+    beard.material = hairMat
+    beard.parent = this.pilotHeadNode
+    const beardTip = MeshBuilder.CreateSphere('pilot-beard-tip', { diameter: 0.07, segments: 8 }, scene)
+    beardTip.position.set(0, -0.03, 0.06)
+    beardTip.material = hairMat
+    beardTip.parent = this.pilotHeadNode
+    const mustache = MeshBuilder.CreateSphere('pilot-mustache', { diameter: 0.055, segments: 8 }, scene)
+    mustache.scaling.set(1.7, 0.45, 0.7)
+    mustache.position.set(0, 0.075, 0.115)
+    mustache.material = hairMat
+    mustache.parent = this.pilotHeadNode
 
-    // Cervical neck & collar
+    // Cervical neck, wrapped by the scarf. One tail hangs off the shoulder.
     this.neckMesh = MeshBuilder.CreateCylinder('pilot-neck', { height: 0.12, diameter: 0.13, tessellation: 12 }, scene)
     this.neckMesh.position.set(0, 0.01, -0.01)
     this.neckMesh.material = skinMat
     this.neckMesh.parent = this.pilotHeadNode
+
+    const scarf = MeshBuilder.CreateTorus('pilot-scarf', { diameter: 0.2, thickness: 0.042, tessellation: 12 }, scene)
+    scarf.scaling.set(1.05, 0.62, 1.05)
+    scarf.position.set(0, 0.0, 0.02)
+    scarf.material = scarfMat
+    scarf.parent = this.pilotHeadNode
+    const scarfTail = MeshBuilder.CreateBox('pilot-scarf-tail', { width: 0.07, height: 0.24, depth: 0.02 }, scene)
+    scarfTail.rotation.z = 0.45
+    scarfTail.rotation.x = 0.3
+    scarfTail.position.set(0.1, -0.1, -0.04)
+    scarfTail.material = scarfMat
+    scarfTail.parent = this.pilotHeadNode
 
     // Anatomical Athletic Chest & Flight Suit Torso (~0.44m shoulder breadth)
     this.torsoMesh = MeshBuilder.CreateSphere('pilot-chest', { diameter: 0.44, segments: 12 }, scene)
@@ -227,6 +396,53 @@ export class ParagliderRig {
     this.torsoMesh.material = this.pilotSuitMat
     this.torsoMesh.parent = this.pilotBodyPivot
 
+    // Sculpted chest impact plate
+    const chestPlate = MeshBuilder.CreateBox('pilot-chest-plate', { width: 0.26, height: 0.22, depth: 0.05 }, scene)
+    chestPlate.position.set(0, 0.29, 0.17)
+    chestPlate.rotation.x = 0.22
+    chestPlate.material = this.pilotSuitMat
+    chestPlate.parent = this.pilotBodyPivot
+
+    // Cross harness nylon webbing straps & center buckle
+    const strapL = MeshBuilder.CreateBox('pilot-strap-l', { width: 0.038, height: 0.30, depth: 0.035 }, scene)
+    strapL.position.set(-0.10, 0.31, 0.16)
+    strapL.rotation.z = -0.24
+    strapL.rotation.x = 0.22
+    strapL.material = this.gloveMat
+    strapL.parent = this.pilotBodyPivot
+
+    const strapR = MeshBuilder.CreateBox('pilot-strap-r', { width: 0.038, height: 0.30, depth: 0.035 }, scene)
+    strapR.position.set(0.10, 0.31, 0.16)
+    strapR.rotation.z = 0.24
+    strapR.rotation.x = 0.22
+    strapR.material = this.gloveMat
+    strapR.parent = this.pilotBodyPivot
+
+    const centerBuckle = MeshBuilder.CreateBox('pilot-center-buckle', { width: 0.07, height: 0.06, depth: 0.03 }, scene)
+    centerBuckle.position.set(0, 0.30, 0.20)
+    centerBuckle.material = this.brassMat
+    centerBuckle.parent = this.pilotBodyPivot
+
+    for (const side of [-1, 1]) {
+      const lapel = MeshBuilder.CreateBox(`pilot-lapel-${side}`, { width: 0.045, height: 0.2, depth: 0.018 }, scene)
+      lapel.position.set(side * 0.07, 0.34, 0.185)
+      lapel.rotation.z = side * -0.45
+      lapel.rotation.x = 0.22
+      lapel.material = this.pilotSuitMat
+      lapel.parent = this.pilotBodyPivot
+    }
+    for (let i = 0; i < 4; i++) {
+      const button = MeshBuilder.CreateSphere(`pilot-button-${i}`, { diameter: 0.022, segments: 6 }, scene)
+      button.position.set(0, 0.4 - i * 0.055, 0.205)
+      button.material = this.brassMat
+      button.parent = this.pilotBodyPivot
+    }
+    const watch = MeshBuilder.CreateCylinder('pilot-watch', { height: 0.012, diameter: 0.05, tessellation: 12 }, scene)
+    watch.rotation.x = Math.PI / 2
+    watch.position.set(0.09, 0.27, 0.2)
+    watch.material = this.brassMat
+    watch.parent = this.pilotBodyPivot
+
     // Tapered athletic waist & abdominal core
     const waistMesh = MeshBuilder.CreateCylinder('pilot-waist', { height: 0.16, diameterTop: 0.30, diameterBottom: 0.35, tessellation: 12 }, scene)
     waistMesh.position.set(0, 0.13, 0.01)
@@ -234,21 +450,57 @@ export class ParagliderRig {
     waistMesh.parent = this.pilotBodyPivot
 
     // Modern Seated Acro / Pod Harness Bucket (Supports lumbar & wraps thighs)
-    this.harnessMesh = MeshBuilder.CreateSphere('pilot-harness-pod', { diameter: 0.54, segments: 12 }, scene)
-    this.harnessMesh.scaling.set(0.88, 0.82, 1.25)
-    this.harnessMesh.position.set(0, 0.04, -0.06)
-    this.harnessMesh.rotation.x = 0.28
-    this.harnessMesh.material = this.pilotSuitMat
+    this.harnessMesh = MeshBuilder.CreateSphere('pilot-harness-pod', { diameter: 0.5, segments: 12 }, scene)
+    this.harnessMesh.scaling.set(0.82, 0.5, 1.02)
+    this.harnessMesh.position.set(0, -0.02, -0.02)
+    this.harnessMesh.rotation.x = 0.2
+    this.harnessMesh.material = leatherMat
     this.harnessMesh.parent = this.pilotBodyPivot
+
+    for (const side of [-1, 1]) {
+      const tail = MeshBuilder.CreateBox(`pilot-coat-tail-${side}`, { width: 0.11, height: 0.26, depth: 0.016 }, scene)
+      tail.position.set(side * 0.08, 0.02, -0.15)
+      tail.rotation.x = 0.4
+      tail.material = this.pilotSuitMat
+      tail.parent = this.pilotBodyPivot
+    }
+
+    const satchel = MeshBuilder.CreateBox('pilot-satchel', { width: 0.13, height: 0.15, depth: 0.07 }, scene)
+    satchel.position.set(-0.26, 0.16, 0.02)
+    satchel.rotation.z = 0.12
+    satchel.material = leatherMat
+    satchel.parent = this.pilotBodyPivot
+    const satchelFlap = MeshBuilder.CreateBox('pilot-satchel-flap', { width: 0.13, height: 0.05, depth: 0.016 }, scene)
+    satchelFlap.position.set(-0.26, 0.22, 0.05)
+    satchelFlap.rotation.x = -0.5
+    satchelFlap.material = leatherMat
+    satchelFlap.parent = this.pilotBodyPivot
+    const satchelBuckle = MeshBuilder.CreateSphere('pilot-satchel-buckle', { diameter: 0.028, segments: 6 }, scene)
+    satchelBuckle.position.set(-0.26, 0.2, 0.06)
+    satchelBuckle.material = this.brassMat
+    satchelBuckle.parent = this.pilotBodyPivot
+
+    // Bedroll on the back while dropping. The hydrogen pack takes this spot under the chute.
+    this.travelerKit = new TransformNode('traveler-kit', scene)
+    this.travelerKit.parent = this.pilotBodyPivot
+    const bedroll = MeshBuilder.CreateCylinder('pilot-bedroll', { height: 0.36, diameter: 0.11, tessellation: 12 }, scene)
+    bedroll.rotation.z = Math.PI / 2
+    bedroll.position.set(0, 0.4, -0.2)
+    bedroll.material = leatherMat
+    bedroll.parent = this.travelerKit
+    const bedrollStrap = MeshBuilder.CreateBox('pilot-bedroll-strap', { width: 0.4, height: 0.016, depth: 0.03 }, scene)
+    bedrollStrap.position.set(0, 0.4, -0.2)
+    bedrollStrap.material = this.pilotSuitMat
+    bedrollStrap.parent = this.travelerKit
 
     // Carabiners rigidly mounted at realistic riser hang points
     this.leftCarabinerMesh = MeshBuilder.CreateTorus('carabiner-l', { diameter: 0.095, thickness: 0.018, tessellation: 16 }, scene)
-    this.leftCarabinerMesh.position.set(-0.22, 0.36, 0.05)
+    this.leftCarabinerMesh.position.set(-0.12, 0.34, 0.16)
     this.leftCarabinerMesh.material = metalMat
     this.leftCarabinerMesh.parent = this.pilotBodyPivot
 
     this.rightCarabinerMesh = MeshBuilder.CreateTorus('carabiner-r', { diameter: 0.095, thickness: 0.018, tessellation: 16 }, scene)
-    this.rightCarabinerMesh.position.set(0.22, 0.36, 0.05)
+    this.rightCarabinerMesh.position.set(0.12, 0.34, 0.16)
     this.rightCarabinerMesh.material = metalMat
     this.rightCarabinerMesh.parent = this.pilotBodyPivot
 
@@ -296,8 +548,8 @@ export class ParagliderRig {
     this.rightForearmMesh.parent = this.pilotBodyPivot
 
     // Hand transform nodes (travel vertically along risers from pulley level down past hips)
-    this.currentLeftHandPos = new Vector3(-0.24, 0.86, 0.05)
-    this.currentRightHandPos = new Vector3(0.24, 0.86, 0.05)
+    this.currentLeftHandPos = new Vector3(-0.26, 0.96, 0.06)
+    this.currentRightHandPos = new Vector3(0.26, 0.96, 0.06)
     this.leftHandNode = new TransformNode('hand-node-l', scene)
     this.leftHandNode.position.copyFrom(this.currentLeftHandPos)
     this.leftHandNode.parent = this.pilotBodyPivot
@@ -315,27 +567,38 @@ export class ParagliderRig {
     rGlove.material = this.gloveMat
     rGlove.parent = this.rightHandNode
 
-    // Brake toggle handles (gripped in pilot hands)
-    const lToggle = MeshBuilder.CreateTorus('toggle-l', { diameter: 0.085, thickness: 0.016, tessellation: 16 }, scene)
-    lToggle.rotation.x = Math.PI * 0.5
-    lToggle.material = this.toggleMat
-    lToggle.parent = this.leftHandNode
+    for (const hand of [this.leftHandNode, this.rightHandNode]) {
+      const band = MeshBuilder.CreateTorus(`glove-band-${hand.name}`, { diameter: 0.072, thickness: 0.01, tessellation: 10 }, scene)
+      band.rotation.x = Math.PI / 2
+      band.position.y = 0.045
+      band.material = this.brassMat
+      band.parent = hand
+    }
 
-    const rToggle = MeshBuilder.CreateTorus('toggle-r', { diameter: 0.085, thickness: 0.016, tessellation: 16 }, scene)
-    rToggle.rotation.x = Math.PI * 0.5
-    rToggle.material = this.toggleMat
-    rToggle.parent = this.rightHandNode
+    // Brake toggle handles (gripped in pilot hands)
+    this.leftToggle = MeshBuilder.CreateTorus('toggle-l', { diameter: 0.085, thickness: 0.016, tessellation: 16 }, scene)
+    this.leftToggle.rotation.x = Math.PI * 0.5
+    this.leftToggle.material = this.toggleMat
+    this.leftToggle.parent = this.leftHandNode
+
+    this.rightToggle = MeshBuilder.CreateTorus('toggle-r', { diameter: 0.085, thickness: 0.016, tessellation: 16 }, scene)
+    this.rightToggle.rotation.x = Math.PI * 0.5
+    this.rightToggle.material = this.toggleMat
+    this.rightToggle.parent = this.rightHandNode
 
     // Articulated Legs & Boots (Connected Anatomical Hierarchy - Zero Gaps)
     // Hip anchors
     this.leftLegNode = new TransformNode('leg-root-l', scene)
-    this.leftLegNode.position.set(-0.14, 0.08, 0.08)
-    this.leftLegNode.rotation.x = 0.55 // Natural forward recline
+    this.leftLegNode.position.set(-0.1, 0.03, 0.045)
+    // Negative pitch sends the thigh forward. Negative roll splays it outward.
+    this.leftLegNode.rotation.x = -1.02
+    this.leftLegNode.rotation.z = -0.16
     this.leftLegNode.parent = this.pilotBodyPivot
 
     this.rightLegNode = new TransformNode('leg-root-r', scene)
-    this.rightLegNode.position.set(0.14, 0.08, 0.08)
-    this.rightLegNode.rotation.x = 0.55
+    this.rightLegNode.position.set(0.1, 0.03, 0.045)
+    this.rightLegNode.rotation.x = -1.02
+    this.rightLegNode.rotation.z = 0.16
     this.rightLegNode.parent = this.pilotBodyPivot
 
     // Thigh cylinders along local -Y of leg node
@@ -352,22 +615,30 @@ export class ParagliderRig {
     // Knee joints: anchored at exact distal end of thighs (0, -0.44, 0)
     this.leftKneeNode = new TransformNode('knee-l', scene)
     this.leftKneeNode.position.set(0, -0.44, 0)
-    this.leftKneeNode.rotation.x = -0.75 // Default seated knee bend
+    this.leftKneeNode.rotation.x = 0.62 // Soft bend: the shin hangs, it does not tuck under the seat
     this.leftKneeNode.parent = this.leftLegNode
 
     this.rightKneeNode = new TransformNode('knee-r', scene)
     this.rightKneeNode.position.set(0, -0.44, 0)
-    this.rightKneeNode.rotation.x = -0.75
+    this.rightKneeNode.rotation.x = 0.62
     this.rightKneeNode.parent = this.rightLegNode
 
     // Knee joint spheres seamlessly bridging thigh and shin
-    const lKneeCap = MeshBuilder.CreateSphere('kneecap-l', { diameter: 0.16, segments: 10 }, scene)
+    const lKneeCap = MeshBuilder.CreateSphere('kneecap-l', { diameter: 0.14, segments: 10 }, scene)
     lKneeCap.material = this.pilotSuitMat
     lKneeCap.parent = this.leftKneeNode
 
-    const rKneeCap = MeshBuilder.CreateSphere('kneecap-r', { diameter: 0.16, segments: 10 }, scene)
+    const rKneeCap = MeshBuilder.CreateSphere('kneecap-r', { diameter: 0.14, segments: 10 }, scene)
     rKneeCap.material = this.pilotSuitMat
     rKneeCap.parent = this.rightKneeNode
+
+    for (const knee of [this.leftKneeNode, this.rightKneeNode]) {
+      const pad = MeshBuilder.CreateSphere(`knee-pad-${knee.name}`, { diameter: 0.1, segments: 8 }, scene)
+      pad.scaling.set(1.15, 0.7, 0.85)
+      pad.position.set(0, 0.01, 0.06)
+      pad.material = leatherMat
+      pad.parent = knee
+    }
 
     // Shin cylinders along local -Y of knee node
     const lShin = MeshBuilder.CreateCylinder('shin-l', { height: 0.42, diameter: 0.14, tessellation: 10 }, scene)
@@ -392,132 +663,279 @@ export class ParagliderRig {
     rSock.parent = this.rightKneeNode
 
     // Ankle joints: anchored at exact distal end of shins (0, -0.42, 0)
-    const lAnkleNode = new TransformNode('ankle-l', scene)
-    lAnkleNode.position.set(0, -0.42, 0)
-    lAnkleNode.parent = this.leftKneeNode
+    this.leftAnkleNode = new TransformNode('ankle-l', scene)
+    this.leftAnkleNode.position.set(0, -0.42, 0)
+    this.leftAnkleNode.parent = this.leftKneeNode
 
-    const rAnkleNode = new TransformNode('ankle-r', scene)
-    rAnkleNode.position.set(0, -0.42, 0)
-    rAnkleNode.parent = this.rightKneeNode
+    this.rightAnkleNode = new TransformNode('ankle-r', scene)
+    this.rightAnkleNode.position.set(0, -0.42, 0)
+    this.rightAnkleNode.parent = this.rightKneeNode
 
     // Athletic Trail Running Shoes
     const lBoot = MeshBuilder.CreateBox('boot-l', { width: 0.15, height: 0.12, depth: 0.32 }, scene)
     lBoot.position.set(0, -0.04, 0.08)
     lBoot.material = this.bootMat
-    lBoot.parent = lAnkleNode
+    lBoot.parent = this.leftAnkleNode
 
     const lSole = MeshBuilder.CreateBox('sole-l', { width: 0.16, height: 0.04, depth: 0.34 }, scene)
     lSole.position.set(0, -0.10, 0.08)
     lSole.material = this.soleMat
-    lSole.parent = lAnkleNode
+    lSole.parent = this.leftAnkleNode
 
     const rBoot = MeshBuilder.CreateBox('boot-r', { width: 0.15, height: 0.12, depth: 0.32 }, scene)
     rBoot.position.set(0, -0.04, 0.08)
     rBoot.material = this.bootMat
-    rBoot.parent = rAnkleNode
+    rBoot.parent = this.rightAnkleNode
 
     const rSole = MeshBuilder.CreateBox('sole-r', { width: 0.16, height: 0.04, depth: 0.34 }, scene)
     rSole.position.set(0, -0.10, 0.08)
     rSole.material = this.soleMat
-    rSole.parent = rAnkleNode
+    rSole.parent = this.rightAnkleNode
 
-    // 4. Build Powered Slalom Paramotor Rig (Ozone Freeride 2 Power Unit)
+    for (const ankle of [this.leftAnkleNode, this.rightAnkleNode]) {
+      const cuff = MeshBuilder.CreateCylinder(`boot-cuff-${ankle.name}`, { height: 0.05, diameter: 0.155, tessellation: 10 }, scene)
+      cuff.position.set(0, 0.03, 0.02)
+      cuff.material = leatherMat
+      cuff.parent = ankle
+      const buckle = MeshBuilder.CreateBox(`boot-buckle-${ankle.name}`, { width: 0.04, height: 0.022, depth: 0.01 }, scene)
+      buckle.position.set(0, -0.02, 0.25)
+      buckle.material = this.brassMat
+      buckle.parent = ankle
+    }
+
+    // 4. Build Steampunk Futuristic Blue Hydrogen Jetpack Unit
     this.paramotorNode = new TransformNode('paramotor-rig', scene)
     this.paramotorNode.parent = this.pilotBodyPivot
 
-    const cageMat = new StandardMaterial('paramotor-cage-mat', scene)
-    cageMat.diffuseColor = new Color3(0.85, 0.88, 0.92) // Titanium frame
-    cageMat.specularColor = new Color3(0.9, 0.9, 0.9)
-
     const engineMat = new StandardMaterial('paramotor-engine-mat', scene)
-    engineMat.diffuseColor = new Color3(0.2, 0.22, 0.25) // Cast aluminum 2-stroke engine
+    engineMat.diffuseColor = new Color3(0.2, 0.22, 0.25)
     engineMat.specularColor = new Color3(0.5, 0.5, 0.5)
 
-    const propMat = new StandardMaterial('paramotor-prop-mat', scene)
-    propMat.diffuseColor = new Color3(0.08, 0.08, 0.1) // High-gloss carbon fiber
-    propMat.specularColor = new Color3(0.8, 0.8, 0.8)
-
-    // Outer Titanium Hoop Cage (1.40m diameter)
-    const cageHoop = MeshBuilder.CreateTorus('paramotor-cage-hoop', { diameter: 1.40, thickness: 0.022, tessellation: 32 }, scene)
-    cageHoop.position.set(0, 0.38, -0.42)
-    cageHoop.material = cageMat
-    cageHoop.parent = this.paramotorNode
-
-    // Engine Block & Reduction Drive Hub
-    const engineBlock = MeshBuilder.CreateBox('paramotor-engine', { width: 0.22, height: 0.28, depth: 0.24 }, scene)
+    // Central jet body between the hydrogen tanks.
+    const engineBlock = MeshBuilder.CreateBox('paramotor-engine', { width: 0.24, height: 0.28, depth: 0.24 }, scene)
     engineBlock.position.set(0, 0.32, -0.32)
     engineBlock.material = engineMat
     engineBlock.parent = this.paramotorNode
 
-    // 2-Stroke Tuned Expansion Chamber Exhaust
-    const exhaust = MeshBuilder.CreateTorus('paramotor-exhaust', { diameter: 0.32, thickness: 0.045, tessellation: 20 }, scene)
-    exhaust.position.set(0.12, 0.22, -0.34)
-    exhaust.rotation.y = 0.4
-    exhaust.material = cageMat
-    exhaust.parent = this.paramotorNode
+    // Dual Cryogenic Spherical Hydrogen Tanks (Left & Right) with Brass Rings & Cyan Energy Windows
+    const h2TankL = MeshBuilder.CreateSphere('h2-tank-l', { diameter: 0.26, segments: 14 }, scene)
+    h2TankL.position.set(-0.25, 0.36, -0.30)
+    h2TankL.material = this.h2CoreMat
+    h2TankL.parent = this.paramotorNode
 
-    // Fuel Tank
-    const fuelTank = MeshBuilder.CreateBox('paramotor-tank', { width: 0.24, height: 0.16, depth: 0.18 }, scene)
-    fuelTank.position.set(0, 0.08, -0.28)
-    const tankMat = new StandardMaterial('paramotor-tank-mat', scene)
-    tankMat.diffuseColor = new Color3(0.9, 0.92, 0.95)
-    fuelTank.material = tankMat
-    fuelTank.parent = this.paramotorNode
+    const h2RingL = MeshBuilder.CreateTorus('h2-ring-l', { diameter: 0.27, thickness: 0.02, tessellation: 20 }, scene)
+    h2RingL.position.copyFrom(h2TankL.position)
+    h2RingL.material = this.brassMat
+    h2RingL.parent = this.paramotorNode
 
-    // Radial Titanium Struts (4 spokes connecting engine frame to outer hoop)
-    const spokeAngles = [Math.PI / 4, (3 * Math.PI) / 4, (5 * Math.PI) / 4, (7 * Math.PI) / 4]
-    spokeAngles.forEach((ang, idx) => {
-      const spoke = MeshBuilder.CreateCylinder(`paramotor-spoke-${idx}`, { height: 0.65, diameter: 0.016 }, scene)
-      spoke.position.set(Math.cos(ang) * 0.35, 0.38 + Math.sin(ang) * 0.35, -0.38)
-      spoke.rotation.z = ang + Math.PI / 2
-      spoke.material = cageMat
-      spoke.parent = this.paramotorNode
-    })
+    const h2TankR = MeshBuilder.CreateSphere('h2-tank-r', { diameter: 0.26, segments: 14 }, scene)
+    h2TankR.position.set(0.25, 0.36, -0.30)
+    h2TankR.material = this.h2CoreMat
+    h2TankR.parent = this.paramotorNode
 
-    // Carbon Fiber 2-Blade Propeller (1.30m prop)
-    this.propellerMesh = new Mesh('paramotor-propeller', scene)
-    this.propellerMesh.position.set(0, 0.38, -0.45)
-    this.propellerMesh.parent = this.paramotorNode
+    const h2RingR = MeshBuilder.CreateTorus('h2-ring-r', { diameter: 0.27, thickness: 0.02, tessellation: 20 }, scene)
+    h2RingR.position.copyFrom(h2TankR.position)
+    h2RingR.material = this.brassMat
+    h2RingR.parent = this.paramotorNode
 
-    const blade1 = MeshBuilder.CreateBox('prop-blade-1', { width: 0.11, height: 0.62, depth: 0.02 }, scene)
-    blade1.position.set(0, 0.31, 0)
-    blade1.rotation.y = 0.22 // Pitch angle
-    blade1.material = propMat
-    blade1.parent = this.propellerMesh
+    // Copper curved conduit pipes
+    const pipeL = MeshBuilder.CreateCylinder('pipe-l', { height: 0.22, diameter: 0.025, tessellation: 10 }, scene)
+    pipeL.position.set(-0.14, 0.28, -0.32)
+    pipeL.rotation.z = Math.PI * 0.3
+    pipeL.material = this.copperMat
+    pipeL.parent = this.paramotorNode
 
-    const blade2 = MeshBuilder.CreateBox('prop-blade-2', { width: 0.11, height: 0.62, depth: 0.02 }, scene)
-    blade2.position.set(0, -0.31, 0)
-    blade2.rotation.y = -0.22
-    blade2.material = propMat
-    blade2.parent = this.propellerMesh
+    const pipeR = MeshBuilder.CreateCylinder('pipe-r', { height: 0.22, diameter: 0.025, tessellation: 10 }, scene)
+    pipeR.position.set(0.14, 0.28, -0.32)
+    pipeR.rotation.z = -Math.PI * 0.3
+    pipeR.material = this.copperMat
+    pipeR.parent = this.paramotorNode
 
-    const propHub = MeshBuilder.CreateCylinder('prop-hub', { height: 0.06, diameter: 0.12 }, scene)
-    propHub.rotation.x = Math.PI / 2
-    propHub.material = cageMat
-    propHub.parent = this.propellerMesh
+    // Dual Analog Brass Pressure Gauges
+    const gaugeL = MeshBuilder.CreateCylinder('h2-gauge-l', { height: 0.04, diameter: 0.09, tessellation: 14 }, scene)
+    gaugeL.position.set(-0.24, 0.52, -0.28)
+    gaugeL.rotation.x = Math.PI * 0.5
+    gaugeL.material = this.brassMat
+    gaugeL.parent = this.paramotorNode
 
-    // High-Speed Motion Blur Propeller Disc
-    this.propBlurMesh = MeshBuilder.CreateDisc('paramotor-prop-blur', { radius: 0.65, tessellation: 32 }, scene)
-    this.propBlurMesh.position.set(0, 0.38, -0.46)
-    this.propBlurMesh.material = this.propBlurMat
-    this.propBlurMesh.parent = this.paramotorNode
+    const gaugeR = MeshBuilder.CreateCylinder('h2-gauge-r', { height: 0.04, diameter: 0.09, tessellation: 14 }, scene)
+    gaugeR.position.set(0.24, 0.52, -0.28)
+    gaugeR.rotation.x = Math.PI * 0.5
+    gaugeR.material = this.brassMat
+    gaugeR.parent = this.paramotorNode
+
+    // Dual Canted Vector Rocket Thruster Bells
+    this.thrusterBellL = MeshBuilder.CreateCylinder('thruster-bell-l', { height: 0.22, diameterTop: 0.10, diameterBottom: 0.16, tessellation: 16 }, scene)
+    this.thrusterBellL.position.set(-0.26, 0.22, -0.44)
+    this.thrusterBellL.rotation.x = -Math.PI * 0.5
+    this.thrusterBellL.rotation.y = -0.12 // Canted outward
+    this.thrusterBellL.material = this.brassMat
+    this.thrusterBellL.parent = this.paramotorNode
+
+    this.thrusterBellR = MeshBuilder.CreateCylinder('thruster-bell-r', { height: 0.22, diameterTop: 0.10, diameterBottom: 0.16, tessellation: 16 }, scene)
+    this.thrusterBellR.position.set(0.26, 0.22, -0.44)
+    this.thrusterBellR.rotation.x = -Math.PI * 0.5
+    this.thrusterBellR.rotation.y = 0.12
+    this.thrusterBellR.material = this.brassMat
+    this.thrusterBellR.parent = this.paramotorNode
+
+    // Short blue tongue out the back of each bell. +Y on the cone is aft (−Z).
+    this.flameMeshL = MeshBuilder.CreateCylinder('flame-cone-l', { height: 0.36, diameterTop: 0.02, diameterBottom: 0.09, tessellation: 12 }, scene)
+    this.flameMeshL.rotation.x = -Math.PI / 2
+    this.flameMeshL.position.set(-0.26, 0.2, -0.64)
+    this.flameMeshL.material = this.flameMat
+    this.flameMeshL.parent = this.paramotorNode
+    this.flameMeshL.setEnabled(false)
+
+    this.flameMeshR = MeshBuilder.CreateCylinder('flame-cone-r', { height: 0.36, diameterTop: 0.02, diameterBottom: 0.09, tessellation: 12 }, scene)
+    this.flameMeshR.rotation.x = -Math.PI / 2
+    this.flameMeshR.position.set(0.26, 0.2, -0.64)
+    this.flameMeshR.material = this.flameMat
+    this.flameMeshR.parent = this.paramotorNode
+    this.flameMeshR.setEnabled(false)
 
     this.paramotorNode.setEnabled(false)
+    this.buildDrogue(scene)
+    this.mountPaintedAirman()
+    this.figure = new ArticulatedPilot(
+      scene,
+      this.pilotBodyPivot,
+      this.pilotHeadNode,
+      this.leftLegNode,
+      this.rightLegNode,
+      this.leftKneeNode,
+      this.rightKneeNode,
+      this.shoulderL,
+      this.shoulderR,
+      this.pilotSuitMat,
+      this.helmetMat,
+      this.visorMat,
+      this.bootMat,
+      this.soleMat,
+      this.gloveMat,
+      this.brassMat,
+    )
   }
 
-  public buildCanopyAndLines(wingType: 'speedwing' | 'paraglider' | 'paramotor') {
+  // Painted stand-in. It faces the camera so the chase view shows the pilot, not an edge-on card.
+  private mountPaintedAirman(): void {
+    this.airmanBack = this.makeAirmanCard('airman-back', '/models/airman-back.png', 1.3, 1.8)
+    this.airmanSuit = this.makeAirmanCard('airman-suit', '/models/airman-suit.png', 2.05, 1.8)
+    this.airmanFront = this.makeAirmanCard('airman-front', '/models/airman-front.png', 1.15, 1.8)
+    const keep = new Set<Mesh>([this.flameMeshL, this.flameMeshR, this.airmanBack, this.airmanFront, this.airmanSuit])
+    this.sculptedPilot = this.pilotBodyPivot.getChildMeshes(false).filter((mesh) => !keep.has(mesh as Mesh)) as Mesh[]
+    this.hideSculptedPilot()
+  }
+
+  private hideSculptedPilot(): void {
+    for (const mesh of this.sculptedPilot) mesh.setEnabled(false)
+  }
+
+  private makeAirmanCard(name: string, url: string, width: number, height: number): Mesh {
+    const mesh = MeshBuilder.CreatePlane(name, { width, height }, this.scene)
+    mesh.position.y = 0.25
+    mesh.billboardMode = Mesh.BILLBOARDMODE_ALL
+    mesh.parent = this.pilotBodyPivot
+    mesh.isPickable = false
+    mesh.setEnabled(false)
+    const tex = new Texture(url, this.scene, false, true)
+    tex.hasAlpha = true
+    const mat = new StandardMaterial(`${name}-mat`, this.scene)
+    mat.diffuseTexture = tex
+    mat.emissiveTexture = tex
+    mat.useAlphaFromDiffuseTexture = true
+    mat.transparencyMode = Material.MATERIAL_ALPHATEST
+    mat.alphaCutOff = 0.35
+    mat.disableLighting = true
+    mat.backFaceCulling = false
+    mat.specularColor = Color3.Black()
+    mesh.material = mat
+    return mesh
+  }
+
+  /**
+   * Small trailing sock, low behind the pack. Babylon +Z is forward.
+   * The chase camera is only about 2 m back, so a disc facing it fills the lens.
+   */
+  private buildDrogue(scene: Scene) {
+    this.drogueRoot = new TransformNode('drogue-root', scene)
+    this.drogueRoot.parent = this.pilotBodyPivot
+    this.drogueRoot.position.set(0, 0.08, -0.62)
+
+    const cloth = new StandardMaterial('drogue-cloth', scene)
+    cloth.diffuseColor = new Color3(0.96, 0.91, 0.78)
+    cloth.emissiveColor = new Color3(0.32, 0.2, 0.08)
+    cloth.specularColor = new Color3(0.18, 0.14, 0.08)
+    cloth.backFaceCulling = false
+
+    const lineMat = new StandardMaterial('drogue-line', scene)
+    lineMat.diffuseColor = new Color3(0.45, 0.32, 0.16)
+    lineMat.specularColor = new Color3(0.1, 0.1, 0.1)
+
+    const sock = MeshBuilder.CreateSphere('drogue-sock', { diameter: 0.34, segments: 12 }, scene)
+    sock.scaling.set(0.8, 0.55, 1.55)
+    sock.position.set(0, -0.06, -0.28)
+    sock.material = cloth
+    sock.parent = this.drogueRoot
+
+    const mouth = MeshBuilder.CreateTorus('drogue-mouth', { diameter: 0.26, thickness: 0.016, tessellation: 16 }, scene)
+    mouth.position.set(0, -0.04, -0.08)
+    mouth.rotation.x = Math.PI / 2
+    mouth.material = cloth
+    mouth.parent = this.drogueRoot
+
+    const anchor = new Vector3(0, 0.06, 0.08)
+    for (let i = 0; i < 3; i++) {
+      const a = (i - 1) * 0.7
+      const end = new Vector3(Math.sin(a) * 0.12, -0.04, -0.08)
+      const dir = end.subtract(anchor)
+      const len = Math.max(0.05, dir.length())
+      const shroud = MeshBuilder.CreateCylinder(`drogue-line-${i}`, { height: len, diameter: 0.008, tessellation: 6 }, scene)
+      shroud.position.copyFrom(anchor.add(end).scaleInPlace(0.5))
+      const dirN = dir.scale(1 / len)
+      const axis = Vector3.Cross(Vector3.Up(), dirN)
+      const axisLen = axis.length()
+      if (axisLen < 1e-4) {
+        if (dirN.y < 0) shroud.rotation.x = Math.PI
+      } else {
+        shroud.rotationQuaternion = Quaternion.RotationAxis(axis.scaleInPlace(1 / axisLen), Math.acos(Math.max(-1, Math.min(1, dirN.y))))
+      }
+      shroud.material = lineMat
+      shroud.parent = this.drogueRoot
+    }
+
+    this.drogueRoot.setEnabled(false)
+  }
+
+  public buildCanopyAndLines(wingType: WingKind) {
     this.currentWingType = wingType
     if (this.canopyMesh) this.canopyMesh.dispose()
     if (this.underMesh) this.underMesh.dispose()
     if (this.suspensionLinesMesh) this.suspensionLinesMesh.dispose()
     if (this.risersMesh) this.risersMesh.dispose()
     if (this.brakeLinesMesh) this.brakeLinesMesh.dispose()
+    if (this.ribLinesMesh) this.ribLinesMesh.dispose()
+    this.disposeSailFrame()
+    this.canopyMesh = null
+    this.underMesh = null
+    this.suspensionLinesMesh = null
+    this.risersMesh = null
+    this.brakeLinesMesh = null
+    this.ribLinesMesh = null
 
     this.aLinePoints = []
     this.bLinePoints = []
     this.cLinePoints = []
     this.cellAttachmentPoints = []
     this.trailingEdgePoints = []
+    this.baseUpperLE = []
+    this.baseUpperTE = []
+    this.baseLowerLE = []
+    this.baseLowerTE = []
+    this.wasCollapsed = false
+
+    // The suit has no cloth overhead. Pulling the chute rebuilds the canopy.
+    if (wingType === 'wingsuit') return
 
     const isXc = wingType === 'paraglider'
     const isParamotor = wingType === 'paramotor'
@@ -534,10 +952,10 @@ export class ParagliderRig {
       const x = -halfSpan + u * halfSpan * 2
       const normX = Math.abs(x) / halfSpan
 
-      // Elliptical arch and aerodynamic wingtip sweep
+      // Elliptical arch. The chute tapers to a point and the tips rake back.
       const archY = (1 - Math.pow(normX, 1.9)) * (isXc ? 1.45 : (isParamotor ? 1.35 : 1.25))
-      const sweepZ = Math.pow(normX, 1.7) * (isXc ? 0.75 : (isParamotor ? 0.65 : 0.58))
-      const taperChord = chord * (1 - normX * (isXc ? 0.35 : (isParamotor ? 0.38 : 0.42)))
+      const sweepZ = Math.pow(normX, isXc ? 1.25 : 1.7) * (isXc ? 1.45 : (isParamotor ? 0.65 : 0.58))
+      const taperChord = chord * (1 - Math.pow(normX, isXc ? 1.2 : 1) * (isXc ? 0.9 : (isParamotor ? 0.38 : 0.42)))
       const maxThick = taperChord * (isXc ? 0.17 : (isParamotor ? 0.155 : 0.16))
 
       // Leading edge (+Z) and Trailing edge (-Z)
@@ -592,6 +1010,8 @@ export class ParagliderRig {
     )
     this.underMesh.material = isParamotor ? this.canopyUnderParamotorMat : this.canopyUnderMat
     this.underMesh.parent = this.canopyRoot
+
+    if (isXc) this.buildClearSailFrame()
 
     const leftCarabinerPos = new Vector3(-0.26, lineDrop, 0.06)
     const rightCarabinerPos = new Vector3(0.26, lineDrop, 0.06)
@@ -672,7 +1092,6 @@ export class ParagliderRig {
       this.scene,
     )
     this.brakeLinesMesh.setEnabled(this.showSuspensionLines)
-    if (this.ribLinesMesh) this.ribLinesMesh.dispose()
 
     const ribLines: Vector3[][] = []
     for (let c = 0; c <= numCells; c++) {
@@ -692,11 +1111,171 @@ export class ParagliderRig {
     this.applyPalette(LnStyleManager.getInstance().palette)
   }
 
+  // Copper tubes share the cloth's point count so a collapse can instance-update them.
+  private buildClearSailFrame(): void {
+    const le = this.baseUpperLE
+    const te = this.baseUpperTE
+    if (le.length < 2 || te.length !== le.length) return
+
+    this.leadingEdgeMesh = this.makeSailTube('sail-leading-edge', le, 0.05, 6, (index) => this.leadingEdgeRadius(index))
+    this.trailingEdgeMesh = this.makeSailTube('sail-trailing-edge', te, 0.022, 4)
+
+    this.sailBattens = []
+    this.sailBattenTs = [0.32, 0.68]
+    for (const t of this.sailBattenTs) {
+      this.sailBattens.push(this.makeSailTube(`sail-batten-${t}`, this.battenPath(le, te, t), 0.02, 4))
+    }
+
+    this.sailChordSpars = []
+    this.sailChordCells = []
+    const last = le.length - 1
+    for (const cell of [0, 6, 12, 18, 24, 30, 36, 42]) {
+      if (cell > last) continue
+      this.sailChordCells.push(cell)
+      this.sailChordSpars.push(this.makeSailTube(`sail-chord-${cell}`, this.chordPath(le, te, cell), 0.016, 4))
+    }
+  }
+
+  private refreshClearSailFrame(le: Vector3[], te: Vector3[]): void {
+    if (!this.leadingEdgeMesh || le.length < 2 || te.length !== le.length || le.length !== this.baseUpperLE.length) return
+    MeshBuilder.CreateTube('sail-leading-edge', {
+      path: le,
+      radiusFunction: (index) => this.leadingEdgeRadius(index),
+      instance: this.leadingEdgeMesh,
+    }, this.scene)
+    if (this.trailingEdgeMesh) {
+      MeshBuilder.CreateTube('sail-trailing-edge', { path: te, instance: this.trailingEdgeMesh }, this.scene)
+    }
+    for (let i = 0; i < this.sailBattens.length; i++) {
+      const t = this.sailBattenTs[i] ?? 0.5
+      MeshBuilder.CreateTube('sail-batten', {
+        path: this.battenPath(le, te, t),
+        instance: this.sailBattens[i],
+      }, this.scene)
+    }
+    for (let i = 0; i < this.sailChordSpars.length; i++) {
+      const cell = this.sailChordCells[i]
+      if (cell === undefined || cell >= le.length) continue
+      MeshBuilder.CreateTube('sail-chord', {
+        path: this.chordPath(le, te, cell),
+        instance: this.sailChordSpars[i],
+      }, this.scene)
+    }
+  }
+
+  private setSailFrameVisible(visible: boolean): void {
+    this.leadingEdgeMesh?.setEnabled(visible)
+    this.trailingEdgeMesh?.setEnabled(visible)
+    for (const mesh of this.sailBattens) mesh.setEnabled(visible)
+    for (const mesh of this.sailChordSpars) mesh.setEnabled(visible)
+  }
+
+  private disposeSailFrame(): void {
+    this.leadingEdgeMesh?.dispose()
+    this.trailingEdgeMesh?.dispose()
+    for (const mesh of this.sailBattens) mesh.dispose()
+    for (const mesh of this.sailChordSpars) mesh.dispose()
+    this.leadingEdgeMesh = null
+    this.trailingEdgeMesh = null
+    this.sailBattens = []
+    this.sailBattenTs = []
+    this.sailChordSpars = []
+    this.sailChordCells = []
+  }
+
+  private makeSailTube(
+    name: string,
+    path: Vector3[],
+    radius: number,
+    tessellation: number,
+    radiusFunction?: (index: number, distance: number) => number,
+  ): Mesh {
+    const mesh = MeshBuilder.CreateTube(name, {
+      path,
+      radius,
+      tessellation,
+      radiusFunction,
+      cap: Mesh.CAP_ALL,
+      updatable: true,
+    }, this.scene)
+    mesh.material = this.sailFrameMat
+    mesh.parent = this.canopyRoot
+    mesh.isPickable = false
+    return mesh
+  }
+
+  private leadingEdgeRadius(index: number): number {
+    const denom = Math.max(1, this.baseUpperLE.length - 1)
+    const edge = Math.abs(index / denom * 2 - 1)
+    return 0.05 * (1 - edge * edge * 0.78)
+  }
+
+  private battenPath(le: Vector3[], te: Vector3[], t: number): Vector3[] {
+    const path: Vector3[] = []
+    for (let i = 0; i < le.length; i++) {
+      const a = le[i]
+      const b = te[i]
+      path.push(a && b ? Vector3.Lerp(a, b, t) : new Vector3())
+    }
+    return path
+  }
+
+  // A 2-point tube needs a real tangent. Keep two points and nudge a pinched tip apart.
+  private chordPath(le: Vector3[], te: Vector3[], cell: number): Vector3[] {
+    const a = le[cell] ?? new Vector3()
+    const b = te[cell] ?? a.clone().add(new Vector3(0, 0, 0.05))
+    if (Vector3.DistanceSquared(a, b) < 0.0025) {
+      return [a.clone(), a.clone().add(new Vector3(0, 0, 0.05))]
+    }
+    return [a.clone(), b.clone()]
+  }
+
   public setSuspensionLinesVisible(visible: boolean): void {
     this.showSuspensionLines = visible
     if (this.suspensionLinesMesh) this.suspensionLinesMesh.setEnabled(visible && this.pilotVisible)
     if (this.risersMesh) this.risersMesh.setEnabled(visible && this.pilotVisible)
     if (this.brakeLinesMesh) this.brakeLinesMesh.setEnabled(visible && this.pilotVisible)
+  }
+
+  public getWingtipPositions(): { left: Vector3; right: Vector3 } {
+    if (this.currentWingType === 'wingsuit') {
+      // Vapor comes off the hands. The arms are the wing.
+      this.leftHandNode.computeWorldMatrix(true)
+      this.rightHandNode.computeWorldMatrix(true)
+      return {
+        left: this.leftHandNode.getAbsolutePosition(),
+        right: this.rightHandNode.getAbsolutePosition(),
+      }
+    }
+    const isXc = this.currentWingType === 'paraglider'
+    const isParamotor = this.currentWingType === 'paramotor'
+    const halfSpan = isXc ? 5.1 : (isParamotor ? 4.7 : 4.4)
+    const normX = 1.0
+    const archY = (1 - Math.pow(normX, 1.9)) * (isXc ? 1.45 : (isParamotor ? 1.35 : 1.25))
+    const sweepZ = Math.pow(normX, isXc ? 1.25 : 1.7) * (isXc ? 1.54 : (isParamotor ? 0.65 : 0.58))
+
+    this.canopyRoot.computeWorldMatrix(true)
+    const mat = this.canopyRoot.getWorldMatrix()
+    const leftLocal = new Vector3(-halfSpan, archY, sweepZ)
+    const rightLocal = new Vector3(halfSpan, archY, sweepZ)
+    return {
+      left: Vector3.TransformCoordinates(leftLocal, mat),
+      right: Vector3.TransformCoordinates(rightLocal, mat),
+    }
+  }
+
+  public getThrusterPositions(): { left: Vector3; right: Vector3 } | undefined {
+    if (!this.paramotorNode || !this.paramotorNode.isEnabled()) return undefined
+    this.paramotorNode.computeWorldMatrix(true)
+    const mat = this.paramotorNode.getWorldMatrix()
+    const beta = this.currentWingType === 'wingsuit' ? this.pilotBodyPivot.rotation.x : 0
+    const along = this.currentWingType === 'wingsuit' ? 0.7 : 0.34
+    const leftLocal = new Vector3(-0.26, 0.22 - Math.sin(beta) * along, -0.44 - Math.cos(beta) * along)
+    const rightLocal = new Vector3(0.26, 0.22 - Math.sin(beta) * along, -0.44 - Math.cos(beta) * along)
+    return {
+      left: Vector3.TransformCoordinates(leftLocal, mat),
+      right: Vector3.TransformCoordinates(rightLocal, mat),
+    }
   }
 
   public setPilotVisible(visible: boolean): void {
@@ -756,12 +1335,30 @@ export class ParagliderRig {
           this.canopyMesh.disableEdgesRendering()
           this.underMesh.disableEdgesRendering()
         } catch {}
+        if (isXc) {
+          const tint = this.equippedSkin?.canopy
+          if (tint) {
+            this.sailMat.diffuseColor = new Color3(0.55 + tint.r * 0.4, 0.5 + tint.g * 0.35, 0.42 + tint.b * 0.28)
+            this.sailMat.emissiveColor = new Color3(0.16 + tint.r * 0.22, 0.12 + tint.g * 0.16, 0.06 + tint.b * 0.1)
+          } else {
+            this.sailMat.diffuseColor = new Color3(0.93, 0.9, 0.82)
+            this.sailMat.emissiveColor = new Color3(0.38, 0.28, 0.14)
+          }
+          this.canopyMesh.material = this.sailMat
+          this.underMesh.material = this.sailMat
+          this.setSailFrameVisible(true)
+        } else {
+          this.setSailFrameVisible(false)
+        }
       }
     }
 
+    if (isLine) this.setSailFrameVisible(false)
+
     if (this.ribLinesMesh) {
-      this.ribLinesMesh.color = pal.canopyRibRgb
-      this.ribLinesMesh.setEnabled(isLine)
+      const clearSail = isXc && !isLine
+      this.ribLinesMesh.color = clearSail ? new Color3(0.55, 0.32, 0.14) : pal.canopyRibRgb
+      this.ribLinesMesh.setEnabled(isLine || clearSail)
     }
 
     if (this.suspensionLinesMesh && isLine) {
@@ -777,31 +1374,49 @@ export class ParagliderRig {
         ? new Color3(0.12, 0.14, 0.18)
         : skin
           ? new Color3(skin.suit.r, skin.suit.g, skin.suit.b)
-          : new Color3(0.15, 0.2, 0.28)
+          : new Color3(0.86, 0.4, 0.14)
+      this.pilotSuitMat.emissiveColor = this.pilotSuitMat.diffuseColor.scale(0.2)
     }
     if (this.helmetMat) {
       this.helmetMat.diffuseColor = isLine
         ? new Color3(0.95, 0.95, 0.98)
         : skin
           ? new Color3(skin.helmet.r, skin.helmet.g, skin.helmet.b)
-          : new Color3(0.98, 0.98, 1.0)
+          : new Color3(0.93, 0.9, 0.82)
+      this.helmetMat.emissiveColor = this.helmetMat.diffuseColor.scale(0.2)
     }
     if (this.visorMat) {
       this.visorMat.diffuseColor = skin && !isLine
         ? new Color3(skin.visor.r, skin.visor.g, skin.visor.b)
         : new Color3(0.04, 0.04, 0.06)
-      this.visorMat.specularColor = isLine ? pal.majorContourRgb : new Color3(0.95, 0.85, 0.35)
+      if (skin?.style === 'neon') {
+        this.visorMat.emissiveColor = new Color3(0.0, 0.95, 1.0)
+        this.visorMat.specularColor = new Color3(0.0, 0.95, 1.0)
+      } else if (skin?.style === 'steampunk') {
+        this.visorMat.emissiveColor = new Color3(0.28, 0.14, 0.03)
+        this.visorMat.specularColor = new Color3(0.95, 0.8, 0.35)
+      } else if (skin?.style === 'gold') {
+        this.visorMat.emissiveColor = new Color3(0.2, 0.15, 0.02)
+        this.visorMat.specularColor = new Color3(0.98, 0.85, 0.35)
+      } else if (skin?.style === 'carbon') {
+        this.visorMat.emissiveColor = new Color3(0.2, 0.02, 0.03)
+        this.visorMat.specularColor = new Color3(0.95, 0.1, 0.15)
+      } else {
+        this.visorMat.emissiveColor = Color3.Black()
+        this.visorMat.specularColor = isLine ? pal.majorContourRgb : new Color3(0.95, 0.85, 0.35)
+      }
     }
     if (this.gloveMat) {
-      this.gloveMat.diffuseColor = new Color3(0.10, 0.11, 0.14)
+      this.gloveMat.diffuseColor = new Color3(0.36, 0.22, 0.13)
     }
     if (this.bootMat) {
       this.bootMat.diffuseColor = skin && !isLine
         ? new Color3(skin.boots.r, skin.boots.g, skin.boots.b)
-        : new Color3(0.16, 0.19, 0.25)
+        : new Color3(0.48, 0.27, 0.13)
+      this.bootMat.emissiveColor = this.bootMat.diffuseColor.scale(0.2)
     }
     if (this.soleMat) {
-      this.soleMat.diffuseColor = new Color3(0.95, 0.95, 0.97)
+      this.soleMat.diffuseColor = new Color3(0.18, 0.12, 0.08)
     }
     if (this.toggleMat) {
       this.toggleMat.diffuseColor = new Color3(0.95, 0.24, 0.14)
@@ -813,26 +1428,73 @@ export class ParagliderRig {
       this.buildCanopyAndLines(sim.currentWingType)
     }
 
+    const isWingsuit = sim.currentWingType === 'wingsuit'
     const isParamotor = sim.currentWingType === 'paramotor'
+    const isParaglider = sim.currentWingType === 'paraglider'
+    // The pack rides under the chute. The suit is a bare drop.
+    const isPowered = isParaglider || isParamotor
     if (this.paramotorNode) {
-      this.paramotorNode.setEnabled(isParamotor)
-      if (isParamotor && this.propellerMesh) {
-        const rpm = sim.telemetry.engineRpm ?? 2000
-        const radPerSec = (rpm * 2 * Math.PI) / 60
-        this.propellerMesh.rotation.z += radPerSec * 0.016
-        if (this.propBlurMat) {
-          const blurAlpha = clamp((rpm - 2200) / 4500, 0, 0.45)
-          this.propBlurMat.alpha = blurAlpha
+      this.paramotorNode.setEnabled(isPowered)
+    }
+    if (this.travelerKit) this.travelerKit.setEnabled(!isPowered)
+    if (this.paramotorNode) {
+
+      // Hydrogen jets. Length follows throttle. No propeller.
+      if (this.flameMeshL && this.flameMeshR) {
+        const thrustFrac = clamp((sim.thrustNewtons - 80) / 420, 0, 1)
+        const lit = thrustFrac > 0.04
+        const t = performance.now() * 0.001
+        const flicker = 0.82 + Math.sin(t * 42) * 0.1 + Math.sin(t * 17) * 0.06
+        const scaleY = (0.55 + thrustFrac * 0.9) * flicker
+        this.flameMeshL.scaling.set(1, scaleY, 1)
+        this.flameMeshR.scaling.set(1, scaleY, 1)
+        if (isWingsuit) {
+          // Body pitch swings the back upward. Aim the bells down the spine so the burn stays aft.
+          const beta = this.pilotBodyPivot.rotation.x
+          const aimX = -Math.PI / 2 - beta
+          this.thrusterBellL.rotation.x = aimX
+          this.thrusterBellR.rotation.x = aimX
+          this.flameMeshL.rotation.x = aimX
+          this.flameMeshR.rotation.x = aimX
+          const along = 0.32 + 0.18 * scaleY
+          const axisY = -Math.sin(beta)
+          const axisZ = -Math.cos(beta)
+          this.flameMeshL.position.set(-0.26, 0.22 + axisY * along, -0.44 + axisZ * along)
+          this.flameMeshR.position.set(0.26, 0.22 + axisY * along, -0.44 + axisZ * along)
+        } else {
+          this.thrusterBellL.rotation.x = -Math.PI / 2
+          this.thrusterBellR.rotation.x = -Math.PI / 2
+          this.flameMeshL.rotation.x = -Math.PI / 2
+          this.flameMeshR.rotation.x = -Math.PI / 2
+          const aft = -0.5 - 0.18 * scaleY
+          this.flameMeshL.position.y = 0.2
+          this.flameMeshR.position.y = 0.2
+          this.flameMeshL.position.z = aft
+          this.flameMeshR.position.z = aft
         }
+        this.flameMeshL.setEnabled(lit)
+        this.flameMeshR.setEnabled(lit)
       }
     }
 
-    // In pilot FPV, disable head and torso to eliminate camera clipping while keeping legs, boots, arms, and harness visible
+    if (this.drogueRoot) {
+      const open = isParamotor || isParaglider ? sim.drogueOpen : 0
+      const show = open > 0.04
+      this.drogueRoot.setEnabled(show)
+      if (show) {
+        const s = 0.2 + open * 0.8
+        this.drogueRoot.scaling.set(s, s, s)
+      }
+    }
+
+    // FPV hides the helmet so the camera is not inside it. Arms and legs stay.
     const isFpv = vantage === 'pilot-fpv'
-    this.helmetMesh.setEnabled(!isFpv)
-    this.visorMesh.setEnabled(!isFpv)
-    this.neckMesh.setEnabled(!isFpv)
-    this.torsoMesh.setEnabled(!isFpv)
+    this.hideSculptedPilot()
+    this.airmanFront?.setEnabled(false)
+    this.airmanSuit?.setEnabled(false)
+    this.airmanBack?.setEnabled(false)
+    this.pilotHeadNode.setEnabled(!isFpv)
+    this.torsoMesh.setEnabled(false)
 
     // 1. Position & Orientation
     this.canopyRoot.position.set(
@@ -966,6 +1628,8 @@ export class ParagliderRig {
         )
       }
 
+      this.refreshClearSailFrame(this.deformedUpperLE, this.deformedUpperTE)
+
       // Update line attachment points to match deformed under-surface
       for (let k = 0; k < this.aLinePoints.length; k++) {
         const cellIdx = k * 2
@@ -1009,6 +1673,7 @@ export class ParagliderRig {
           this.scene,
         )
       }
+      this.refreshClearSailFrame(this.baseUpperLE, this.baseUpperTE)
       for (let k = 0; k < this.aLinePoints.length; k++) {
         this.aLinePoints[k].copyFrom(this.baseALinePoints[k])
         this.bLinePoints[k].copyFrom(this.baseBLinePoints[k])
@@ -1022,7 +1687,14 @@ export class ParagliderRig {
     // Torso weight-shifts naturally into turns without lunging forward or twisting out of the line pyramid!
     const targetBodyRoll = -weightShift * 0.20 // ~11° authentic athletic weight shift
     const targetBodyPosX = -weightShift * 0.05 // 5cm subtle hip shift inside harness
-    let targetBodyPitch = symBrake * 0.08 - speedBar * 0.08 // Snug, natural seated recline
+    // +1.2 rad about local X tips the spine from the tether (+Y) toward +Z.
+    // +Z is forward on this rig, and the chest rotates toward -Y, so the suit flies belly-down.
+    // Looking down is a dive. +X pitches the chest from the tether toward forward,
+    // so the suit and the harness both nose down instead of sitting in the glide.
+    const divePose = clamp(speedBar, 0, 1)
+    let targetBodyPitch = sim.currentWingType === 'wingsuit'
+      ? 1.2 + divePose * 0.62
+      : symBrake * 0.08 + divePose * 0.78
     if (collapseFrac > 0.15) {
       targetBodyPitch = 0.15 * collapseFrac
     }
@@ -1040,35 +1712,51 @@ export class ParagliderRig {
 
     // Dynamic Head Tracking: Pilot smoothly looks through the turn apex
     const targetHeadYaw = weightShift * 0.45 // ~26° head rotation looking through apex
-    const targetHeadPitch = -sim.telemetry.verticalSpeedMps * 0.02
+    const targetHeadPitch = clamp(
+      -sim.telemetry.verticalSpeedMps * 0.012 + divePose * (sim.currentWingType === 'wingsuit' ? 0.32 : 0.48),
+      -0.3,
+      0.7,
+    )
     const headFollowFactor = Math.min(1.0, 8.5 * rigDt)
     this.pilotHeadNode.rotation.y += (targetHeadYaw - this.pilotHeadNode.rotation.y) * headFollowFactor
     this.pilotHeadNode.rotation.x += (targetHeadPitch - this.pilotHeadNode.rotation.x) * headFollowFactor
 
-    // 2. Anatomical Arm & Dynamic Brake Toggle Articulation
-    // Hands up at trim: reaching straight UP overhead to brake pulleys (Y = 0.86m, X = ±0.24m)
-    // Pulling down: inside hand drives all the way down past the hip/seatboard (Y ~ 0.04m)
+    // Trim holds both hands straight up on the toggles. A turn drops the
+    // inside hand from there. Reach stays inside 0.55 m.
     const computeHandTarget = (side: number, brake: number) => {
-      let targetX = side * (0.24 + brake * 0.05)
-      let targetY = 0.86 - brake * 0.82
-      let targetZ = 0.05 - brake * 0.06
+      if (sim.currentWingType === 'wingsuit' && collapseFrac <= 0.15) {
+        // Arms sweep aft as the dive steepens. Stay inside the 0.55 m reach.
+        return new Vector3(
+          side * (0.73 - divePose * 0.22),
+          0.4 - divePose * 0.16,
+          -0.1 - divePose * 0.28,
+        )
+      }
+
+      let targetX = side * (0.26 + brake * 0.04)
+      let targetY = 0.96 - brake * 0.78
+      let targetZ = 0.06 - brake * 0.08
 
       if (collapseFrac > 0.15) {
-        // In freefall, arms drop limp as lines go slack
-        targetY = 0.86 - 0.52 * collapseFrac
-        targetX = side * (0.24 - 0.06 * collapseFrac)
-        targetZ = 0.05 - 0.08 * collapseFrac
+        targetY = 0.96 - 0.62 * collapseFrac
+        targetX = side * (0.26 + 0.08 * collapseFrac)
+        targetZ = 0.06 - 0.1 * collapseFrac
       } else {
-        // Dynamic riser reach when that hand's brake toggle is released
-        if (brake < 0.20 && (pullingA > 0.05 || speedBar > 0.05)) {
-          const pushFrac = Math.max(pullingA, speedBar) * (1.0 - brake / 0.20)
-          targetZ += pushFrac * 0.14
-          targetY += pushFrac * 0.04
-        } else if (brake < 0.20 && pullingB > 0.05) {
-          const pullFrac = pullingB * (1.0 - brake / 0.20)
-          targetY -= pullFrac * 0.30
+        const inside = Math.max(0, side * weightShift)
+        targetY -= inside * 0.58
+        targetX += side * inside * 0.06
+        targetZ -= inside * 0.04
+        if (brake < 0.2 && (pullingA > 0.05 || speedBar > 0.05)) {
+          const pushFrac = Math.max(pullingA, speedBar) * (1.0 - brake / 0.2)
+          targetZ += pushFrac * 0.18
+          targetY -= pushFrac * 0.22
+        } else if (brake < 0.2 && pullingB > 0.05) {
+          const pullFrac = pullingB * (1.0 - brake / 0.2)
+          targetY -= pullFrac * 0.2
         }
       }
+      if (targetY < 0.02) targetY = 0.02
+      if (targetY > 0.98) targetY = 0.98
       return new Vector3(targetX, targetY, targetZ)
     }
 
@@ -1148,41 +1836,42 @@ export class ParagliderRig {
       }
     }
 
-    const leftShoulder = new Vector3(-0.23, 0.44, 0.03)
-    const rightShoulder = new Vector3(0.23, 0.44, 0.03)
+    updateArmIK(this.shoulderL, this.currentLeftHandPos, -1, this.leftUpperArmMesh, this.leftForearmMesh, this.leftElbowMesh)
+    updateArmIK(this.shoulderR, this.currentRightHandPos, 1, this.rightUpperArmMesh, this.rightForearmMesh, this.rightElbowMesh)
 
-    updateArmIK(leftShoulder, this.currentLeftHandPos, -1, this.leftUpperArmMesh, this.leftForearmMesh, this.leftElbowMesh)
-    updateArmIK(rightShoulder, this.currentRightHandPos, 1, this.rightUpperArmMesh, this.rightForearmMesh, this.rightElbowMesh)
-
-    // 3. Dynamic Leg Articulation (Forward kinematic angles & Speedbar Extension)
-    const isDiving = sim.canopy.airspeedKmh > 75 || speedBar > 0.3
+    // 3. Dynamic Leg Articulation
     const isSkimming = sim.isFootDragging
 
-    let targetHipAngle = 0.55  // Seated recline
-    let targetKneeAngle = -0.75 // Seated knee flex
+    // Negative hip pitch swings the thigh forward, out of the seat, for the
+    // harness hang. A dive opens that hinge: positive pitch trails the thigh
+    // aft and the knee straightens, the way a skydiver's legs stream behind.
+    const seatedHip = -1.02
+    const hangKnee = 0.62
+    let targetHipAngle = seatedHip
+    let targetKneeAngle = hangKnee
 
-    if (collapseFrac > 0.15) {
-      // Freefall plunge: legs dangle loose vertically with air resistance
-      targetHipAngle = 0.20 * (1 - collapseFrac)
-      targetKneeAngle = -0.30 * (1 - collapseFrac)
-    } else if (speedBar > 0.05) {
-      // Speedbar push: legs extend forward smoothly to press the stirrup, maintaining athletic knee flex
-      targetHipAngle = 0.58 + speedBar * 0.18
-      targetKneeAngle = -0.70 + speedBar * 0.35
-    } else if (symBrake > 0.20) {
-      // Dynamic flare: pilot sits back into harness with knees flexed
-      targetHipAngle = 0.48 - symBrake * 0.12
-      targetKneeAngle = -0.80
+    if (sim.currentWingType === 'wingsuit' && collapseFrac <= 0.15) {
+      targetHipAngle = 0.15 + divePose * 0.85
+      targetKneeAngle = 0.22 * (1 - divePose)
+    } else if (collapseFrac > 0.15) {
+      targetHipAngle = -0.15 * (1 - collapseFrac)
+      targetKneeAngle = 0.2 * (1 - collapseFrac)
     } else if (isSkimming) {
-      targetHipAngle = 0.75   // Extend legs down towards terrain
-      targetKneeAngle = -0.35 // Slightly straightened knees to skim
-    } else if (isDiving) {
-      targetHipAngle = 0.64
-      targetKneeAngle = -0.45
+      targetHipAngle = -0.22
+      targetKneeAngle = 0.16
+    } else if (divePose > 0.02) {
+      const extend = Math.pow(divePose, 0.6)
+      const trailHip = 0.9
+      const trailKnee = 0.08
+      targetHipAngle = seatedHip + extend * (trailHip - seatedHip)
+      targetKneeAngle = hangKnee + extend * (trailKnee - hangKnee)
+    } else if (symBrake > 0.2) {
+      targetHipAngle = -1.16
+      targetKneeAngle = 0.82
     }
 
-    // Carve Leg Asymmetry: inside leg relaxes slightly, outside leg extends to brace against harness
-    const legAsymmetry = weightShift * 0.22
+    // Outside thigh reaches forward. Inside thigh stays more bent.
+    const legAsymmetry = weightShift * 0.18
     const targetLeftHip = targetHipAngle - legAsymmetry
     const targetRightHip = targetHipAngle + legAsymmetry
 
@@ -1191,6 +1880,19 @@ export class ParagliderRig {
     this.rightLegNode.rotation.x += (targetRightHip - this.rightLegNode.rotation.x) * legFollowFactor
     this.leftKneeNode.rotation.x += (targetKneeAngle - this.leftKneeNode.rotation.x) * legFollowFactor
     this.rightKneeNode.rotation.x += (targetKneeAngle - this.rightKneeNode.rotation.x) * legFollowFactor
+
+    const suited = sim.currentWingType === 'wingsuit'
+    this.harnessMesh.setEnabled(false)
+    this.leftCarabinerMesh.setEnabled(!suited && !isFpv)
+    this.rightCarabinerMesh.setEnabled(!suited && !isFpv)
+    this.leftToggle.setEnabled(!suited && !isFpv)
+    this.rightToggle.setEnabled(!suited && !isFpv)
+    this.figure.pose(
+      this.shoulderL, this.leftElbowMesh.position, this.currentLeftHandPos,
+      this.shoulderR, this.rightElbowMesh.position, this.currentRightHandPos,
+      suited,
+      isFpv,
+    )
 
     // 4. Update Dynamic Suspension Lines & Risers (if visible)
     if (!this.showSuspensionLines) {
@@ -1306,6 +2008,7 @@ export class ParagliderRig {
 
   public dispose(): void {
     this.unsubscribeStyle?.()
+    this.disposeSailFrame()
     if (this.ribLinesMesh) this.ribLinesMesh.dispose()
     if (this.canopyMesh) this.canopyMesh.dispose()
     if (this.underMesh) this.underMesh.dispose()

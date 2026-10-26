@@ -23,6 +23,7 @@ import {
 } from './GodsEyeGlobeEngine'
 import { LnStyleManager } from '../rendering/LnStyleManager'
 import { TORONTO_ELEVATORS } from './TorontoCourse'
+import { StreetNameLayer } from './StreetNames'
 
 function decimateRing(
   ring: Array<{ x: number; z: number }>,
@@ -371,6 +372,11 @@ export class GoogleEarthWorld implements FlightWorld {
 
   private onTerrainUpdatedCallbacks: (() => void)[] = []
   public statusMessage = ''
+  private streetNames: StreetNameLayer
+  private streetFetchToken = 0
+  private streetFetchBusy = false
+  private lastStreetLat = Number.NaN
+  private lastStreetLon = Number.NaN
 
   constructor(
     scene: Scene,
@@ -378,6 +384,7 @@ export class GoogleEarthWorld implements FlightWorld {
     onStatusChange?: (msg: string) => void,
   ) {
     this.scene = scene
+    this.streetNames = new StreetNameLayer(scene)
     if (typeof siteOrId === 'string') {
       this.site = GLOBAL_EARTH_SITES[siteOrId] || GLOBAL_EARTH_SITES.rio
     } else {
@@ -967,6 +974,7 @@ export class GoogleEarthWorld implements FlightWorld {
     } else {
       this.statusMessage = `🛰️ God's Eye 3D Globe • Keyless 3D Terrain & Satellite (${this.site.shortLabel})`
     }
+    this.refreshStreetNames(this.site.lat, this.site.lon, true)
     onStatusChange?.(this.statusMessage)
 
     for (const cb of this.onTerrainUpdatedCallbacks) {
@@ -1511,8 +1519,41 @@ export class GoogleEarthWorld implements FlightWorld {
     }
   }
 
+  /** New names appear as you roam. A short move keeps the signs you already have. */
+  public refreshStreetNames(lat: number, lon: number, force = false): void {
+    if (this.isDisposed || this.streetFetchBusy) return
+    if (!force && Number.isFinite(this.lastStreetLat)) {
+      const dLat = (lat - this.lastStreetLat) * 111320
+      const dLon = (lon - this.lastStreetLon) * 111320 * Math.cos((lat * Math.PI) / 180)
+      if (Math.hypot(dLat, dLon) < 700) return
+    }
+    this.streetFetchBusy = true
+    this.lastStreetLat = lat
+    this.lastStreetLon = lon
+    const token = ++this.streetFetchToken
+    void GodsEyeGlobeEngine.getInstance()
+      .fetchNamedStreets(lat, lon)
+      .then((streets) => {
+        this.streetFetchBusy = false
+        if (this.isDisposed || token !== this.streetFetchToken) return
+        this.streetNames.setStreets(streets, (streetLat, streetLon) => {
+          const xz = this.latLonToLocalXZ(streetLat, streetLon)
+          const inside = Math.abs(xz.x) < 1700 && xz.z > -300 && xz.z < 3100
+          const ground = inside
+            ? this.sampleHeight(xz.x, xz.z)
+            : (GodsEyeGlobeEngine.getInstance().sampleGlobeTerrainHeight(streetLat, streetLon) ??
+              this.site.launchElevationM)
+          return { x: xz.x, y: ground + 1.6, z: xz.z }
+        }, this.site.headingDeg)
+      })
+      .catch(() => {
+        this.streetFetchBusy = false
+      })
+  }
+
   public dispose(): void {
     this.isDisposed = true
+    this.streetNames.dispose()
     if (this.unsubscribeStyle) {
       this.unsubscribeStyle()
       this.unsubscribeStyle = null

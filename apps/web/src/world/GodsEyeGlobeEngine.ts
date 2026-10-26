@@ -37,6 +37,15 @@ export interface DecodedOpenFreeMapRoad {
   pointsLatLon: Array<{ lat: number; lon: number }>
 }
 
+export interface NamedStreet {
+  name: string
+  roadClass: string
+  lat: number
+  lon: number
+  /** Clockwise degrees from true north, along the road at the label. */
+  bearingDeg: number
+}
+
 export interface DecodedOpenFreeMapData {
   buildings: DecodedOpenFreeMapBuilding[]
   roads: DecodedOpenFreeMapRoad[]
@@ -87,11 +96,20 @@ export class GodsEyeGlobeEngine {
   private headingRad = (112 * Math.PI) / 180
   private google3dTileset: Cesium.Cesium3DTileset | null = null
   private osmBuildingsTileset: Cesium.Cesium3DTileset | null = null
+  /** A newer load wins. A slow failure must not clear the city that already arrived. */
+  private tilesetLoadGen = 0
   private onTilesetReadyCallbacks: Array<(hasPhotoreal: boolean) => void> = []
   private openFreeMapTemplateUrl: string | null = null
   private tileCache = new Map<string, DecodedOpenFreeMapData>()
   private frameCounter = 0
   private cachedGroundH: number | null = null
+  private pickingEarth = false
+  private activeBeforePick = false
+  private pickHandler: Cesium.ScreenSpaceEventHandler | null = null
+  private pickPin: Cesium.Entity | null = null
+  private pickLat: number | null = null
+  private pickLon: number | null = null
+  private onEarthPicked: ((lat: number, lon: number) => void) | null = null
 
   private constructor() {}
 
@@ -233,24 +251,17 @@ export class GodsEyeGlobeEngine {
   }
 
   /**
-   * Loads the actual Google Photorealistic 3D Tileset (real 3D textured buildings, bridges, trees, terrain):
-   * 1. Uses a direct Google Maps API key if supplied.
-   * 2. Otherwise automatically loads Google Photorealistic 3D Tiles via Cesium Ion Asset `2275207`
-   *    (exact `createGoogleIonTileset` architecture from `bilawalsidhu/gods-eye-view/src/maps/google3d.js`).
-   * 3. Falls back to Cesium OSM 3D Buildings (`96188`) + Esri World Imagery if offline/unavailable.
+   * Loads Google Photorealistic 3D Tiles (real buildings, bridges, trees, terrain).
+   * Cesium Ion asset 2275207 is first. The project key often 404s, and waiting on it
+   * left the block buildings up. The direct key is only a backup.
+   * A reload keeps the city that is already on screen until the new one is ready.
    */
   public async setOptionalGoogleApiKey(apiKey: string | null): Promise<void> {
     const viewer = this.viewer
     if (!viewer) return
 
-    if (this.google3dTileset) {
-      viewer.scene.primitives.remove(this.google3dTileset)
-      if (!this.google3dTileset.isDestroyed()) {
-        this.google3dTileset.destroy()
-      }
-      this.google3dTileset = null
-    }
-
+    const gen = ++this.tilesetLoadGen
+    const cleanedKey = apiKey?.trim() || ''
     const isMobile = /iPhone|iPad|iPod|Android/i.test(navigator.userAgent || '')
     const tileOptions: Cesium.Cesium3DTileset.ConstructorOptions = {
       maximumScreenSpaceError: isMobile ? 20 : 10,
@@ -265,9 +276,31 @@ export class GodsEyeGlobeEngine {
       preloadWhenHidden: false,
     }
 
-    const cleanedKey = apiKey?.trim() || ''
+    const stale = () => gen !== this.tilesetLoadGen
 
-    // Route 1: Direct Google Maps API Key if configured
+    const install = (tileset: Cesium.Cesium3DTileset) => {
+      if (stale()) {
+        if (!tileset.isDestroyed()) tileset.destroy()
+        return
+      }
+      this.swapPhotorealTileset(viewer, tileset)
+      if (this.osmBuildingsTileset) this.osmBuildingsTileset.show = false
+      viewer.scene.globe.show = false
+      viewer.scene.requestRender()
+      for (const cb of this.onTilesetReadyCallbacks) cb(true)
+    }
+
+    try {
+      const ionResource = await Cesium.IonResource.fromAssetId(2275207)
+      if (stale()) return
+      const tileset = await Cesium.Cesium3DTileset.fromUrl(ionResource, tileOptions)
+      install(tileset)
+      return
+    } catch (err) {
+      if (stale()) return
+      console.warn('[GodsEyeGlobeEngine] Ion 2275207 photoreal failed:', err)
+    }
+
     if (cleanedKey) {
       try {
         const resource = new Cesium.Resource({
@@ -275,48 +308,54 @@ export class GodsEyeGlobeEngine {
           queryParameters: { key: cleanedKey },
         })
         const tileset = await Cesium.Cesium3DTileset.fromUrl(resource, tileOptions)
-        this.armTilesetCollision(tileset)
-        this.google3dTileset = tileset
-        viewer.scene.primitives.add(tileset)
-        viewer.scene.globe.show = false
-        viewer.scene.requestRender()
-        for (const cb of this.onTilesetReadyCallbacks) cb(true)
+        install(tileset)
         return
       } catch (err) {
-        console.warn('[GodsEyeGlobeEngine] Direct Google 3D key failed, trying Ion 2275207:', err)
+        if (stale()) return
+        console.warn('[GodsEyeGlobeEngine] Direct Google 3D key failed:', err)
       }
     }
 
-    // Route 2: Automatic Google Photorealistic 3D Tiles via Cesium Ion Asset 2275207 (no user key needed!)
-    try {
-      const ionResource = await Cesium.IonResource.fromAssetId(2275207)
-      const tileset = await Cesium.Cesium3DTileset.fromUrl(ionResource, tileOptions)
-      this.armTilesetCollision(tileset)
-      this.google3dTileset = tileset
-      viewer.scene.primitives.add(tileset)
-      viewer.scene.globe.show = false
-      viewer.scene.requestRender()
+    if (stale()) return
+    if (this.hasPhotoreal3DTiles()) {
       for (const cb of this.onTilesetReadyCallbacks) cb(true)
       return
-    } catch (err) {
-      console.warn('[GodsEyeGlobeEngine] Ion 2275207 Photoreal 3D Tiles fallback:', err)
     }
 
-    // Route 3: Fallback to Esri World Imagery + Cesium OSM 3D Buildings (Asset 96188)
+    // Last resort: satellite globe plus Cesium OSM buildings. These are the block meshes.
     viewer.scene.globe.show = true
     if (!this.osmBuildingsTileset) {
       try {
         const osmRes = await Cesium.IonResource.fromAssetId(96188)
+        if (stale()) return
         const osmTileset = await Cesium.Cesium3DTileset.fromUrl(osmRes, tileOptions)
+        if (stale()) {
+          if (!osmTileset.isDestroyed()) osmTileset.destroy()
+          return
+        }
         this.armTilesetCollision(osmTileset)
         this.osmBuildingsTileset = osmTileset
         viewer.scene.primitives.add(osmTileset)
       } catch {
         // Ignore if offline
       }
+    } else {
+      this.osmBuildingsTileset.show = true
     }
     viewer.scene.requestRender()
     for (const cb of this.onTilesetReadyCallbacks) cb(false)
+  }
+
+  /** Drop the previous photoreal set only after its replacement exists. */
+  private swapPhotorealTileset(viewer: Cesium.Viewer, tileset: Cesium.Cesium3DTileset): void {
+    const previous = this.google3dTileset
+    this.armTilesetCollision(tileset)
+    this.google3dTileset = tileset
+    viewer.scene.primitives.add(tileset)
+    if (previous && previous !== tileset) {
+      viewer.scene.primitives.remove(previous)
+      if (!previous.isDestroyed()) previous.destroy()
+    }
   }
 
   public setActive(active: boolean): void {
@@ -448,11 +487,190 @@ export class GodsEyeGlobeEngine {
     return this.sampleGlobeTerrainHeight(lat, lon)
   }
 
+  public isPickingEarth(): boolean {
+    return this.pickingEarth
+  }
+
+  /** Orbit the whole planet, tap a spot, then drop into flight there. */
+  public beginWholeEarthPick(onPick: (lat: number, lon: number) => void): void {
+    this.onEarthPicked = onPick
+    this.activeBeforePick = this.isActive
+    this.pickingEarth = true
+    this.pickLat = null
+    this.pickLon = null
+    const viewer = this.ensureViewer()
+    this.setActive(true)
+    if (!viewer) return
+
+    viewer.scene.globe.show = true
+    if (this.google3dTileset) this.google3dTileset.show = false
+    if (this.osmBuildingsTileset) this.osmBuildingsTileset.show = false
+    viewer.scene.requestRenderMode = false
+    viewer.resize()
+
+    const ctrl = viewer.scene.screenSpaceCameraController
+    ctrl.enableInputs = true
+    ctrl.enableRotate = true
+    ctrl.enableZoom = true
+    ctrl.enableTilt = true
+    ctrl.enableLook = false
+    ctrl.enableTranslate = true
+    ctrl.enableCollisionDetection = true
+    ctrl.minimumZoomDistance = 180
+    this.container?.classList.add('earth-pick')
+
+    this.clearPickPin()
+    this.pickHandler?.destroy()
+    const handler = new Cesium.ScreenSpaceEventHandler(viewer.scene.canvas)
+    handler.setInputAction((click: { position: Cesium.Cartesian2 }) => {
+      const picked = this.pickLatLon(click.position)
+      if (!picked) return
+      this.markPick(picked.lat, picked.lon, 14000)
+    }, Cesium.ScreenSpaceEventType.LEFT_CLICK)
+    this.pickHandler = handler
+
+    viewer.camera.flyTo({
+      destination: Cesium.Cartesian3.fromDegrees(this.originLon, this.originLat, 16000000),
+      duration: 1.3,
+    })
+  }
+
+  public endWholeEarthPick(): void {
+    const viewer = this.viewer
+    this.pickingEarth = false
+    this.onEarthPicked = null
+    this.pickHandler?.destroy()
+    this.pickHandler = null
+    this.clearPickPin()
+    this.container?.classList.remove('earth-pick')
+    if (viewer) {
+      const ctrl = viewer.scene.screenSpaceCameraController
+      ctrl.enableInputs = false
+      ctrl.enableCollisionDetection = false
+      viewer.scene.requestRenderMode = true
+      const photoreal = this.hasPhotoreal3DTiles()
+      viewer.scene.globe.show = !photoreal
+      if (this.google3dTileset) this.google3dTileset.show = true
+      if (this.osmBuildingsTileset) this.osmBuildingsTileset.show = true
+      viewer.scene.requestRender()
+    }
+    if (!this.activeBeforePick) this.setActive(false)
+  }
+
+  public getPickLatLon(): { lat: number; lon: number } | null {
+    if (this.pickLat === null || this.pickLon === null) return null
+    return { lat: this.pickLat, lon: this.pickLon }
+  }
+
+  /** Cesium heading is clockwise from north, matching the flight heading. */
+  public getPickHeadingDeg(): number {
+    const viewer = this.viewer
+    if (!viewer) return 90
+    let deg = Cesium.Math.toDegrees(viewer.camera.heading)
+    deg = ((deg % 360) + 360) % 360
+    return deg
+  }
+
+  public flyToPlace(lat: number, lon: number, heightM = 14000, notify = true): void {
+    this.markPick(lat, lon, heightM, notify)
+  }
+
+  public async searchPlace(query: string): Promise<{ lat: number; lon: number; name: string } | null> {
+    const q = query.trim()
+    if (q.length < 2) return null
+    try {
+      const url = `https://photon.komoot.io/api/?limit=1&q=${encodeURIComponent(q)}`
+      const res = await fetch(url, { signal: AbortSignal.timeout(5000) })
+      if (!res.ok) return null
+      const json = await res.json()
+      const feature = json?.features?.[0]
+      const coords = feature?.geometry?.coordinates
+      if (!coords || coords.length < 2) return null
+      const props = feature.properties || {}
+      const bits = [props.name, props.street, props.city, props.state, props.country].filter(
+        (part: unknown) => typeof part === 'string' && part.length > 0,
+      )
+      const unique = [...new Set(bits)]
+      return {
+        lon: Number(coords[0]),
+        lat: Number(coords[1]),
+        name: unique.slice(0, 3).join(', ') || q,
+      }
+    } catch {
+      return null
+    }
+  }
+
+  public async reversePlace(lat: number, lon: number): Promise<string | null> {
+    try {
+      const url = `https://photon.komoot.io/reverse?lon=${lon}&lat=${lat}`
+      const res = await fetch(url, { signal: AbortSignal.timeout(4000) })
+      if (!res.ok) return null
+      const json = await res.json()
+      const props = json?.features?.[0]?.properties
+      if (!props) return null
+      const bits = [props.name, props.street, props.city, props.country].filter(
+        (part: unknown) => typeof part === 'string' && part.length > 0,
+      )
+      const unique = [...new Set(bits)]
+      return unique.slice(0, 3).join(', ') || null
+    } catch {
+      return null
+    }
+  }
+
+  private pickLatLon(position: Cesium.Cartesian2): { lat: number; lon: number } | null {
+    const viewer = this.viewer
+    if (!viewer) return null
+    const ray = viewer.camera.getPickRay(position)
+    if (!ray) return null
+    const cartesian = viewer.scene.globe.pick(ray, viewer.scene)
+    if (!cartesian) return null
+    const carto = Cesium.Cartographic.fromCartesian(cartesian)
+    return {
+      lat: Cesium.Math.toDegrees(carto.latitude),
+      lon: Cesium.Math.toDegrees(carto.longitude),
+    }
+  }
+
+  private markPick(lat: number, lon: number, heightM: number, notify = true): void {
+    const viewer = this.viewer
+    if (!viewer) return
+    this.pickLat = lat
+    this.pickLon = lon
+    this.clearPickPin()
+    this.pickPin = viewer.entities.add({
+      position: Cesium.Cartesian3.fromDegrees(lon, lat),
+      point: {
+        pixelSize: 16,
+        color: Cesium.Color.fromCssColorString('#fbbf24'),
+        outlineColor: Cesium.Color.WHITE,
+        outlineWidth: 2,
+        disableDepthTestDistance: Number.POSITIVE_INFINITY,
+      },
+    })
+    const heading = viewer.camera.heading
+    const pitch = Math.min(viewer.camera.pitch, Cesium.Math.toRadians(-32))
+    viewer.camera.flyTo({
+      destination: Cesium.Cartesian3.fromDegrees(lon, lat, heightM),
+      orientation: { heading, pitch, roll: 0 },
+      duration: 1.05,
+    })
+    if (notify) this.onEarthPicked?.(lat, lon)
+  }
+
+  private clearPickPin(): void {
+    if (this.pickPin && this.viewer) {
+      this.viewer.entities.remove(this.pickPin)
+    }
+    this.pickPin = null
+  }
+
   public syncFromBabylonCamera(
     babylonCamera: FreeCamera,
     altitudeOffsetMeters = 0,
   ): void {
-    if (!this.isActive || !this.viewer) return
+    if (this.pickingEarth || !this.isActive || !this.viewer) return
     const viewer = this.viewer
 
     const camPos = babylonCamera.position
@@ -558,6 +776,24 @@ export class GodsEyeGlobeEngine {
     viewer.scene.requestRender()
   }
 
+  private async ensureOpenFreeMapTemplate(): Promise<string | null> {
+    if (this.openFreeMapTemplateUrl) return this.openFreeMapTemplateUrl
+    try {
+      const res = await fetch(OPENFREEMAP_TILEJSON_URL, {
+        signal: AbortSignal.timeout(5000),
+      })
+      if (res.ok) {
+        const json = await res.json()
+        if (Array.isArray(json?.tiles) && typeof json.tiles[0] === 'string') {
+          this.openFreeMapTemplateUrl = json.tiles[0]
+        }
+      }
+    } catch {
+      // Fallback handled by the caller
+    }
+    return this.openFreeMapTemplateUrl
+  }
+
   public async fetchOpenFreeMapFeatures(
     centerLat: number,
     centerLon: number,
@@ -566,23 +802,7 @@ export class GodsEyeGlobeEngine {
     const cached = this.tileCache.get(cacheKey)
     if (cached) return cached
 
-    if (!this.openFreeMapTemplateUrl) {
-      try {
-        const res = await fetch(OPENFREEMAP_TILEJSON_URL, {
-          signal: AbortSignal.timeout(5000),
-        })
-        if (res.ok) {
-          const json = await res.json()
-          if (Array.isArray(json?.tiles) && typeof json.tiles[0] === 'string') {
-            this.openFreeMapTemplateUrl = json.tiles[0]
-          }
-        }
-      } catch {
-        // Fallback handled below
-      }
-    }
-
-    const template = this.openFreeMapTemplateUrl
+    const template = await this.ensureOpenFreeMapTemplate()
     if (!template) {
       return { buildings: [], roads: [] }
     }
@@ -724,4 +944,109 @@ export class GodsEyeGlobeEngine {
     this.tileCache.set(cacheKey, result)
     return result
   }
+
+  /** Named streets from OpenFreeMap around a point. Local names, not highway shields. */
+  public async fetchNamedStreets(centerLat: number, centerLon: number): Promise<NamedStreet[]> {
+    const template = await this.ensureOpenFreeMapTemplate()
+    if (!template) return []
+
+    const zoom = 14
+    const center = lonLatToTileXY(centerLon, centerLat, zoom)
+    const tiles = [
+      { x: center.x, y: center.y },
+      { x: center.x + (center.exactX - center.x >= 0.5 ? 1 : -1), y: center.y },
+      { x: center.x, y: center.y + (center.exactY - center.y >= 0.5 ? 1 : -1) },
+      {
+        x: center.x + (center.exactX - center.x >= 0.5 ? 1 : -1),
+        y: center.y + (center.exactY - center.y >= 0.5 ? 1 : -1),
+      },
+    ]
+    const rank: Record<string, number> = {
+      motorway: 90,
+      trunk: 80,
+      primary: 68,
+      secondary: 52,
+      tertiary: 36,
+      minor: 20,
+      residential: 20,
+      unclassified: 16,
+    }
+    const best = new Map<string, NamedStreet & { score: number }>()
+
+    await Promise.all(
+      tiles.map(async ({ x, y }) => {
+        const url = template
+          .replace('{z}', String(zoom))
+          .replace('{x}', String(x))
+          .replace('{y}', String(y))
+        try {
+          const res = await fetch(url, { signal: AbortSignal.timeout(6000) })
+          if (!res.ok) return
+          const buf = await res.arrayBuffer()
+          const tile = new VectorTile(new Pbf(new Uint8Array(buf)))
+          const layer = tile.layers['transportation_name']
+          if (!layer) return
+          const count = Math.min(layer.length, 500)
+          for (let i = 0; i < count; i++) {
+            const feat = layer.feature(i)
+            const props = feat.properties || {}
+            const roadClass = typeof props.class === 'string' ? props.class : ''
+            const weight = rank[roadClass]
+            const name = typeof props.name === 'string' ? props.name.trim() : ''
+            if (!weight || name.length < 2 || name.length > 42) continue
+            const geom = feat.toGeoJSON(x, y, zoom).geometry as {
+              type?: string
+              coordinates?: number[][] | number[][][]
+            }
+            let line: number[][] = []
+            if (geom?.type === 'LineString' && Array.isArray(geom.coordinates)) {
+              line = geom.coordinates as number[][]
+            } else if (geom?.type === 'MultiLineString' && Array.isArray(geom.coordinates)) {
+              for (const part of geom.coordinates as number[][][]) {
+                if (part.length > line.length) line = part
+              }
+            }
+            if (line.length < 2) continue
+            const midIndex = Math.floor(line.length / 2)
+            const mid = line[midIndex]
+            if (!mid) continue
+            const lon = mid[0]
+            const lat = mid[1]
+            const meters = streetMeters(centerLat, centerLon, lat, lon)
+            if (meters > 1800) continue
+            const before = line[Math.max(0, midIndex - 1)]
+            const after = line[Math.min(line.length - 1, midIndex + 1)]
+            if (!before || !after) continue
+            const bearingDeg = streetBearingDeg(before[1], before[0], after[1], after[0])
+            const score = weight * 8 - meters
+            const prev = best.get(name)
+            if (prev && prev.score >= score) continue
+            best.set(name, { name, roadClass, lat, lon, bearingDeg, score })
+          }
+        } catch {
+          // One tile can fail without dropping the rest.
+        }
+      }),
+    )
+
+    return [...best.values()]
+      .sort((a, b) => b.score - a.score)
+      .slice(0, 36)
+      .map(({ name, roadClass, lat, lon, bearingDeg }) => ({ name, roadClass, lat, lon, bearingDeg }))
+  }
+}
+
+function streetMeters(lat1: number, lon1: number, lat2: number, lon2: number): number {
+  const mLat = 111320
+  const mLon = 111320 * Math.cos((lat1 * Math.PI) / 180)
+  return Math.hypot((lat2 - lat1) * mLat, (lon2 - lon1) * mLon)
+}
+
+/** Clockwise degrees from true north. */
+function streetBearingDeg(lat1: number, lon1: number, lat2: number, lon2: number): number {
+  const cosLat = Math.cos((((lat1 + lat2) * 0.5 * Math.PI) / 180))
+  const east = (lon2 - lon1) * cosLat
+  const north = lat2 - lat1
+  if (east * east + north * north < 1e-12) return 0
+  return (((Math.atan2(east, north) * 180) / Math.PI) + 360) % 360
 }

@@ -98,6 +98,8 @@ export const PARAGLIDER_XC_24M: WingGeometry = {
   minSpeedKmh: 24.0,
   maxSpeedKmh: 135.0,
   glideRatio: 10.5,
+  hasMotor: true,
+  maxThrustNewtons: 740.0, // Hydrogen jet on the exploration chute. Newtons only size the flame.
 }
 
 export const PARAMOTOR_FREERIDE_18M: WingGeometry = {
@@ -125,6 +127,32 @@ export const PARAMOTOR_FREERIDE_18M: WingGeometry = {
   maxThrustNewtons: 740.0, // ~75 kg static thrust from tuned 185cc 2-stroke engine (Moster 185)
   isReflex: true,
   reflexPitchMoment: 0.035, // Positive pitching moment (nose up reflex stability at high speed)
+}
+
+// The flight point sits in the torso. There is no canopy and no jet.
+// The arms are the wing. It always descends.
+export const WINGSUIT_TRACK: WingGeometry = {
+  spanMeters: 1.7,
+  projectedSpanMeters: 1.6,
+  areaSquareMeters: 1.4,
+  projectedAreaSquareMeters: 1.2,
+  chordMeters: 0.7,
+  aspectRatio: 2.2,
+  arcAngleDeg: 4.0,
+  tetherLengthMeters: 0.35,
+  riggingAngleDeg: -4.0,
+  speedBarAngleDeg: 8.0,
+  weightShiftMeters: 0.08,
+  canopyMassKg: 1.2,
+  enclosedAirKg: 0.2,
+  pilotMassKg: 90.0,
+  pilotDragAreaM2: 0.22,
+  lineDragAreaM2: 0,
+  trimSpeedKmh: 155.0,
+  minSpeedKmh: 90.0,
+  maxSpeedKmh: 252.0,
+  glideRatio: 2.7,
+  hasMotor: false,
 }
 
 export const STANDARD_WING: WingGeometry = SPEEDWING_13M

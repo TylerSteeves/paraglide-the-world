@@ -165,17 +165,17 @@ export class FlightSoundscape {
 
       // 7. Paramotor 2-Stroke Tuned Pipe Engine Synthesizer (Vittorazi Moster 185)
       this.engineOsc = this.ctx.createOscillator()
-      this.engineOsc.type = 'sawtooth'
-      this.engineOsc.frequency.value = 32
+      this.engineOsc.type = 'sine'
+      this.engineOsc.frequency.value = 164.81
 
       this.engineSubOsc = this.ctx.createOscillator()
-      this.engineSubOsc.type = 'triangle'
-      this.engineSubOsc.frequency.value = 16
+      this.engineSubOsc.type = 'sine'
+      this.engineSubOsc.frequency.value = 110
 
       this.engineFilter = this.ctx.createBiquadFilter()
-      this.engineFilter.type = 'bandpass'
-      this.engineFilter.frequency.value = 240
-      this.engineFilter.Q.value = 2.8
+      this.engineFilter.type = 'lowpass'
+      this.engineFilter.frequency.value = 480
+      this.engineFilter.Q.value = 0.5
 
       this.engineGain = this.ctx.createGain()
       this.engineGain.gain.value = 0
@@ -187,7 +187,7 @@ export class FlightSoundscape {
       this.engineOsc.start()
       this.engineSubOsc.start()
 
-      // Propeller Wash Noise (carbon prop thrust chop)
+      // Kept silent. The jet is two quiet chord tones, not a hiss.
       const propNoise = this.ctx.createBufferSource()
       propNoise.buffer = noiseBuffer
       propNoise.loop = true
@@ -303,9 +303,6 @@ export class FlightSoundscape {
       const thin = 1 - zeroGFloat * 0.7
       chord = chord.map((gain) => gain * thin)
     }
-    if (wingType === 'paramotor' && engineRpm > 500) {
-      chord = chord.map((gain) => gain * 0.5)
-    }
     const chordNow = this.ctx.currentTime
     for (let i = 0; i < this.chordVoices.length; i++) {
       this.chordVoices[i].gain.gain.setTargetAtTime(chord[i] ?? 0, chordNow, 0.22)
@@ -344,7 +341,8 @@ export class FlightSoundscape {
 
     // 5. Variometer: a soft chirp on a real climb, a rare low tone on a hard sink.
     const climbing = wingType !== 'speedwing' && verticalSpeedMps > 0.75 && !this.varioMuted
-    const hardSink = wingType !== 'speedwing' && verticalSpeedMps < -4.5 && !this.varioMuted
+    // A wingsuit glide sinks the whole time. That is not a stall warning.
+    const hardSink = wingType !== 'speedwing' && wingType !== 'wingsuit' && verticalSpeedMps < -4.5 && !this.varioMuted
     if (climbing || hardSink) {
       const climbRate = climbing ? Math.min(5.0, verticalSpeedMps) : 0
       const climbNotes = [440, 554.37, 659.25]
@@ -360,7 +358,7 @@ export class FlightSoundscape {
       this.varioGain.gain.setTargetAtTime(0, this.ctx.currentTime, 0.08)
     }
 
-    // 7. Paramotor Engine Sound Dynamics (Vittorazi Moster 185 2-Stroke)
+    // 7. Hydrogen jet. A quiet fifth in the same chord, never a hiss.
     if (
       this.engineGain &&
       this.engineOsc &&
@@ -369,27 +367,13 @@ export class FlightSoundscape {
       this.propWashGain &&
       this.propWashFilter
     ) {
-      if (wingType === 'paramotor' && engineRpm > 500) {
-        // Firing frequency f0 = RPM / 60 (2-stroke single cylinder fires once per rev)
-        const firingFreq = Math.max(25, Math.min(145, engineRpm / 60))
-        this.engineOsc.frequency.setTargetAtTime(firingFreq, this.ctx.currentTime, 0.03)
-        this.engineSubOsc.frequency.setTargetAtTime(firingFreq * 0.5, this.ctx.currentTime, 0.03)
-
-        // Expansion chamber resonant frequency shifts upward under high throttle / RPM
-        const throttleFrac = Math.max(0, Math.min(1, throttlePercent / 100))
-        const pipeFreq = 180 + throttleFrac * 360 + (engineRpm / 8400) * 220
-        this.engineFilter.frequency.setTargetAtTime(pipeFreq, this.ctx.currentTime, 0.04)
-
-        const targetVol = 0.04 + throttleFrac * 0.1
-        this.engineGain.gain.setTargetAtTime(targetVol, this.ctx.currentTime, 0.06)
-
-        const propVol = 0.012 + Math.pow(throttleFrac, 1.4) * 0.06
-        this.propWashGain.gain.setTargetAtTime(propVol, this.ctx.currentTime, 0.04)
-        this.propWashFilter.frequency.setTargetAtTime(320 + throttleFrac * 680, this.ctx.currentTime, 0.04)
-      } else {
-        this.engineGain.gain.setTargetAtTime(0, this.ctx.currentTime, 0.08)
-        this.propWashGain.gain.setTargetAtTime(0, this.ctx.currentTime, 0.08)
-      }
+      this.propWashGain.gain.setTargetAtTime(0, this.ctx.currentTime, 0.2)
+      const throttleFrac = Math.max(0, Math.min(1, throttlePercent / 100))
+      const lit = (wingType === 'paramotor' || wingType === 'paraglider') && engineRpm > 500 && throttleFrac > 0.08
+      const level = lit ? throttleFrac * throttleFrac * 0.01 : 0
+      this.engineOsc.frequency.setTargetAtTime(164.81, this.ctx.currentTime, 0.5)
+      this.engineSubOsc.frequency.setTargetAtTime(110, this.ctx.currentTime, 0.5)
+      this.engineGain.gain.setTargetAtTime(level, this.ctx.currentTime, 0.45)
     }
   }
 

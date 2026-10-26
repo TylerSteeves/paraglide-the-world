@@ -49,6 +49,9 @@ export class FlightHUD {
   private wingIconEl: HTMLElement | null = null
   private wingLabelEl: HTMLElement | null = null
   private objectiveEl: HTMLElement | null = null
+  private compassTapeEl: HTMLElement | null = null
+  private compassWindowEl: HTMLElement | null = null
+  private compassDegEl: HTMLElement | null = null
   private ctrlModeBtnEl: HTMLElement | null = null
   private ctrlModeIconEl: HTMLElement | null = null
   private ctrlModeLabelEl: HTMLElement | null = null
@@ -76,9 +79,12 @@ export class FlightHUD {
   private throttleRailEl: HTMLElement | null = null
   private throttleTrackEl: HTMLElement | null = null
   private throttleFillEl: HTMLElement | null = null
+  private throttleChuteFillEl: HTMLElement | null = null
   private throttleKnobEl: HTMLElement | null = null
   private throttleReadoutEl: HTMLElement | null = null
   private throttleDragging = false
+  /** suit: glide / pull chute. jet: hydrogen / coast / slow. glide: the rail does nothing. */
+  private railMode: 'suit' | 'jet' | 'glide' = 'suit'
   private onThrottleCallback: (value: number) => void = () => {}
 
   // Pilot Mass Elements
@@ -98,6 +104,10 @@ export class FlightHUD {
   private onCycleWorldCallback: () => void = () => {}
   private onSelectWorldCallback: (worldId: string) => void = () => {}
   private onTeleportCustomGpsCallback: (lat: number, lon: number, headingDeg: number, name: string) => void = () => {}
+  private onOpenEarthPickCallback: () => void = () => {}
+  private onEarthSearchCallback: (query: string) => void = () => {}
+  private onEarthDropCallback: () => void = () => {}
+  private onEarthBackCallback: () => void = () => {}
   private onSaveGoogleApiKeyCallback: (apiKey: string) => void = () => {}
   private worldModalEl: HTMLElement | null = null
   private onToggleGhostCallback: () => void = () => {}
@@ -136,6 +146,32 @@ export class FlightHUD {
 
   public setOnOpenLocker(cb: () => void) {
     this.onOpenLockerCallback = cb
+  }
+
+  private onCycleCamVantageCallback: () => void = () => {}
+  private onCycleCrashCamCallback: () => void = () => {}
+  private onReplayWipeoutCallback: () => void = () => {}
+
+  public setOnCycleCamVantage(cb: () => void) {
+    this.onCycleCamVantageCallback = cb
+  }
+
+  public setOnCycleCrashCam(cb: () => void) {
+    this.onCycleCrashCamCallback = cb
+  }
+
+  public setOnReplayWipeout(cb: () => void) {
+    this.onReplayWipeoutCallback = cb
+  }
+
+  public setCamVantageLabel(label: string) {
+    const el = document.getElementById('hud-cam-label')
+    if (el) el.textContent = label
+  }
+
+  public setCrashCamLabel(label: string) {
+    const el = document.getElementById('wasted-cam-label')
+    if (el) el.textContent = label.toUpperCase()
   }
 
   public setSkinLabel(name: string) {
@@ -209,6 +245,34 @@ export class FlightHUD {
     this.onTeleportCustomGpsCallback = callback
   }
 
+  public setOnOpenEarthPick(callback: () => void) {
+    this.onOpenEarthPickCallback = callback
+  }
+
+  public setOnEarthSearch(callback: (query: string) => void) {
+    this.onEarthSearchCallback = callback
+  }
+
+  public setOnEarthDrop(callback: () => void) {
+    this.onEarthDropCallback = callback
+  }
+
+  public setOnEarthBack(callback: () => void) {
+    this.onEarthBackCallback = callback
+  }
+
+  public setEarthDropVisible(on: boolean) {
+    const bar = document.getElementById('earth-drop-bar')
+    if (bar) bar.style.display = on ? 'flex' : 'none'
+    document.body.classList.toggle('earth-picking', on)
+    if (on && this.worldModalEl) this.worldModalEl.style.display = 'none'
+  }
+
+  public setEarthDropLabel(text: string) {
+    const label = document.getElementById('earth-drop-label')
+    if (label) label.textContent = text
+  }
+
   public setOnSaveGoogleApiKey(callback: (apiKey: string) => void) {
     this.onSaveGoogleApiKeyCallback = callback
   }
@@ -262,9 +326,25 @@ export class FlightHUD {
 
   private paintThrottle(value: number) {
     const v = Math.max(0, Math.min(1, value))
-    if (this.throttleFillEl) this.throttleFillEl.style.height = `${v * 100}%`
-    if (this.throttleKnobEl) this.throttleKnobEl.style.bottom = `${v * 100}%`
-    if (this.throttleReadoutEl) this.throttleReadoutEl.textContent = `${Math.round(v * 100)}`
+    const prop = Math.max(0, Math.min(1, (v - 0.5) / 0.5))
+    const chute = Math.max(0, Math.min(1, (0.5 - v) / 0.5))
+    const suit = this.railMode === 'suit'
+    const jet = this.railMode === 'jet'
+    if (this.throttleFillEl) this.throttleFillEl.style.height = jet ? `${prop * 50}%` : '0%'
+    if (this.throttleChuteFillEl) this.throttleChuteFillEl.style.height = `${chute * 50}%`
+    if (this.throttleKnobEl) {
+      this.throttleKnobEl.style.bottom = `${v * 100}%`
+      this.throttleKnobEl.style.background = chute > 0.04 ? '#e7e5e4' : jet && prop > 0.04 ? '#fbbf24' : '#f8fafc'
+    }
+    if (this.throttleReadoutEl) {
+      const label = suit
+        ? chute > 0.04 ? 'PULL CHUTE' : 'GLIDE'
+        : jet
+          ? prop > 0.04 ? `JET ${Math.round(prop * 100)}` : chute > 0.04 ? `SLOW ${Math.round(chute * 100)}` : 'COAST'
+          : 'GLIDE'
+      this.throttleReadoutEl.textContent = label
+      this.throttleReadoutEl.style.color = chute > 0.04 ? '#e7e5e4' : jet ? '#fde68a' : '#e2e8f0'
+    }
   }
 
   private bindThrottleSlider() {
@@ -317,6 +397,40 @@ export class FlightHUD {
     if (this.wingBtnEl) {
       this.wingBtnEl.classList.toggle('power-on', label === 'POWER')
     }
+  }
+
+  private readonly compassPxPerDeg = 2.8
+
+  public setCompass(headingDeg: number) {
+    const deg = ((headingDeg % 360) + 360) % 360
+    if (this.compassDegEl) {
+      const rounded = Math.round(deg) % 360
+      const text = `${rounded.toString().padStart(3, '0')}°`
+      if (this.compassDegEl.textContent !== text) this.compassDegEl.textContent = text
+    }
+    if (!this.compassTapeEl || !this.compassWindowEl) return
+    const width = this.compassWindowEl.clientWidth || 220
+    const x = width * 0.5 - (deg + 360) * this.compassPxPerDeg
+    this.compassTapeEl.style.transform = `translateX(${x}px)`
+  }
+
+  private buildCompassTape() {
+    const tape = this.compassTapeEl
+    if (!tape) return
+    const cards = ['N', 'NE', 'E', 'SE', 'S', 'SW', 'W', 'NW']
+    const parts: string[] = []
+    for (let d = 0; d <= 720; d += 15) {
+      const shown = d % 360
+      const north = shown === 0
+      const major = shown % 90 === 0
+      const mid = !major && shown % 45 === 0
+      const label = major || mid ? (cards[(shown / 45) % 8] ?? '') : String(shown)
+      const cls = north ? 'north major' : major ? 'major' : mid ? 'mid' : ''
+      parts.push(
+        `<span class="hud-compass-tick ${cls}" style="left:${d * this.compassPxPerDeg}px">${label}</span>`,
+      )
+    }
+    tape.innerHTML = parts.join('')
   }
 
   public setObjective(text: string) {
@@ -517,6 +631,11 @@ export class FlightHUD {
             <span id="hud-skin-label">Slate</span>
           </button>
 
+          <button class="hud-icon-btn" id="btn-cam" title="Camera Viewpoint [V]" style="padding: 0 10px; font-size: 13px; font-weight: 700; width: auto; gap: 4px;">
+            <span>🎥</span>
+            <span id="hud-cam-label">Action 360</span>
+          </button>
+
           <div class="hud-paramotor-pill" id="hud-paramotor-pill" style="display: none; align-items: center; gap: 6px; background: rgba(245, 158, 11, 0.25); border: 1px solid rgba(245, 158, 11, 0.5); border-radius: 9999px; padding: 4px 10px; font-size: 12px; font-weight: 700; color: #fef3c7;">
             <span>🚁</span>
             <span id="hud-rpm">2200</span><small>RPM</small>
@@ -544,6 +663,13 @@ export class FlightHUD {
           <button id="btn-bailout" style="display: none;"></button>
           <button id="btn-roll-right" style="display: none;"></button>
         </div>
+      </div>
+      <div id="hud-compass" class="hud-compass">
+        <div id="hud-compass-window" class="hud-compass-window">
+          <div id="hud-compass-tape" class="hud-compass-tape"></div>
+          <div class="hud-compass-lubber"></div>
+        </div>
+        <div id="hud-compass-deg">000°</div>
       </div>
       <div id="hud-objective" class="hud-objective">Follow the rings. Grab the amber wing on the tower line.</div>
       </div>
@@ -589,6 +715,16 @@ export class FlightHUD {
               <div id="wasted-bill" style="font-size: 15px; color: #fbbf24; font-weight: 900;">$84,200</div>
             </div>
           </div>
+          <div style="display: flex; gap: 8px; margin-bottom: 10px;">
+            <button id="btn-wasted-cam" style="flex: 1; background: rgba(30, 41, 59, 0.95); color: #f8fafc; border: 1px solid rgba(56, 189, 248, 0.45); border-radius: 9999px; padding: 10px 14px; font-size: 12px; font-weight: 800; cursor: pointer; display: flex; align-items: center; justify-content: center; gap: 6px;">
+              <span>🎥 CAM:</span>
+              <span id="wasted-cam-label" style="color: #38bdf8;">ORBIT</span>
+            </button>
+            <button id="btn-wasted-replay" style="flex: 1; background: rgba(30, 41, 59, 0.95); color: #f8fafc; border: 1px solid rgba(251, 191, 36, 0.5); border-radius: 9999px; padding: 10px 14px; font-size: 12px; font-weight: 800; cursor: pointer; display: flex; align-items: center; justify-content: center; gap: 6px;">
+              <span>⏪</span>
+              <span id="wasted-replay-label" style="color: #fbbf24;">SLOW-MO REPLAY</span>
+            </button>
+          </div>
           <div style="display: flex; gap: 8px;">
             <button id="btn-wasted-relaunch" style="flex: 1; background: linear-gradient(135deg, #dc2626, #991b1b); color: #fff; border: 1px solid rgba(254, 202, 202, 0.45); border-radius: 9999px; padding: 13px 18px; font-size: 14px; font-weight: 900; letter-spacing: 0.8px; cursor: pointer; box-shadow: 0 4px 20px rgba(220, 38, 38, 0.65);">
               🪂 RESPAWN ABOVE
@@ -601,12 +737,14 @@ export class FlightHUD {
       </div>
 
       <div id="hud-throttle-slider" class="throttle-rail" style="display: none;">
-        <div class="throttle-rail-label">POWER</div>
+        <div class="throttle-rail-label">ACCEL</div>
         <div class="throttle-track" id="throttle-track">
           <div class="throttle-fill" id="throttle-fill"></div>
+          <div class="throttle-chute-fill" id="throttle-chute-fill"></div>
+          <div class="throttle-center"></div>
           <div class="throttle-knob" id="throttle-knob"></div>
         </div>
-        <div class="throttle-readout" id="throttle-readout">0</div>
+        <div class="throttle-readout" id="throttle-readout">GLIDE</div>
       </div>
 
       <!-- Visible Paramotor & Propeller Control Dock -->
@@ -691,9 +829,9 @@ export class FlightHUD {
             </div>
 
             <div class="diagram-section ppg-section">
-              <div class="section-tag cyan">⚡ OZONE FREERIDE 2 PARAMOTOR (Reflex Slalom)</div>
-              <div class="section-desc">Powered reflex paramotor wing. Full throttle unleashes 740N forward thrust (+5.5 m/s zoom climb, 80+ km/h terrain skimming). Reflex airfoil resists collapses at high speeds.</div>
-              <div class="section-keys"><b>Controls:</b> Hold <b>[Space]</b> / <b>[W]</b> to power up • <b>[X]</b> cut power • <b>[Z]</b> lock level cruise • <b>[K]</b> switch wing</div>
+              <div class="section-tag cyan">🪽 WINGSUIT</div>
+              <div class="section-desc">You drop in under the chute. Middle holds altitude, up is the hydrogen jet, and down almost stops you. Ride the harbour elevator. The wingsuit is waiting at the top. It always descends, and looking down is a real dive, so the buildings can hit you. Drag the rail to the bottom and the paraglider opens again.</div>
+              <div class="section-keys"><b>Controls:</b> Fly through the suit at the top of the elevator. Rail down pulls the chute. Under the chute, up is hydrogen and down is slow. <b>[K]</b> or the wing button drops the suit once you have it and you are high.</div>
             </div>
           </div>
 
@@ -709,8 +847,8 @@ export class FlightHUD {
       <div class="relaunch-overlay" id="hud-relaunch">
         <div class="relaunch-card">
           <div style="font-size: 11px; font-weight: 800; color: #38bdf8; letter-spacing: 1.5px; margin-bottom: 8px;">🪂 PARAGLIDE THE WORLD</div>
-          <h2 id="relaunch-title">TRUE PARAGLIDER FLIGHT</h2>
-          <p id="relaunch-sub" style="margin-bottom: 16px;">Tilt and the wing banks into the turn first, then pulls you around. A level phone holds altitude. Look up and the wing climbs. Look down and the wing dives right away. Hold the steep dive and the speed builds into it. Each ring boosts your speed, and hitting the next one keeps the boost. Drift off that line into a building and you explode. The amber ring on the tower line is a powered wing. Grab it and a throttle appears on the right — drag up to accelerate, drag down to idle.</p>
+          <h2 id="relaunch-title">WINGSUIT THE CITY</h2>
+          <p id="relaunch-sub" style="margin-bottom: 16px;">You drop in with the wingsuit. No rockets: it always descends, and a real dive can hit the towers. Drag the rail to the bottom to pull the chute. Under it, hydrogen boosters cover the map. Up rips, the middle holds altitude, down almost stops you. Climb high, then drop back into the suit.</p>
           <div style="display: flex; flex-direction: column; gap: 10px; align-items: center;">
             <button id="btn-play-portrait" style="background: linear-gradient(135deg, #0284c7, #0369a1); color: #fff; border: 1px solid rgba(255,255,255,0.3); border-radius: 9999px; padding: 14px 32px; font-size: 16px; font-weight: 800; box-shadow: 0 4px 24px rgba(2,132,199,0.6); pointer-events: auto; cursor: pointer; display: inline-block;">
               TAP TO FLY (DUAL TOGGLE & TILT)
@@ -745,6 +883,10 @@ export class FlightHUD {
             </div>
           </div>
 
+          <button id="btn-whole-earth" style="width: 100%; text-align: left; background: linear-gradient(135deg, #0369a1, #0f766e); border: 1px solid rgba(125, 211, 252, 0.7); border-radius: 14px; padding: 12px 14px; color: #fff; cursor: pointer; margin-bottom: 12px;">
+            <div style="font-size: 15px; font-weight: 900;">🛰️ Whole Earth</div>
+            <div style="font-size: 12px; color: #e0f2fe; margin-top: 2px;">Spin the planet, search a place, tap it, and drop in.</div>
+          </button>
           <div style="font-size: 10px; font-weight: 800; color: #fdba74; letter-spacing: 1.2px; margin-bottom: 8px;">CITY RUNS · SOLID BUILDINGS</div>
           <div style="display: grid; grid-template-columns: repeat(2, 1fr); gap: 8px; margin-bottom: 12px;">
             <button class="world-card-btn" data-world-id="manhattan" style="text-align: left; background: rgba(30, 41, 59, 0.92); border: 1px solid rgba(251, 146, 60, 0.65); border-radius: 12px; padding: 10px; color: #fff; cursor: pointer;">
@@ -832,6 +974,19 @@ export class FlightHUD {
           </div>
         </div>
       </div>
+
+      <div id="earth-drop-bar">
+        <div id="earth-drop-title">WHOLE EARTH</div>
+        <div id="earth-drop-label">Drag to spin. Tap where you want to drop.</div>
+        <div id="earth-drop-search-row">
+          <input id="earth-search" type="text" placeholder="City, street, peak…" enterkeyhint="search" />
+          <button id="btn-earth-search" type="button">GO</button>
+        </div>
+        <div id="earth-drop-actions">
+          <button id="btn-earth-back" type="button">BACK</button>
+          <button id="btn-earth-drop" type="button">DROP IN</button>
+        </div>
+      </div>
     `
 
     this.speedEl = document.getElementById('hud-speed')!
@@ -879,6 +1034,10 @@ export class FlightHUD {
     this.wingIconEl = document.getElementById('hud-wing-icon')
     this.wingLabelEl = document.getElementById('hud-wing-label')
     this.objectiveEl = document.getElementById('hud-objective')
+    this.compassWindowEl = document.getElementById('hud-compass-window')
+    this.compassTapeEl = document.getElementById('hud-compass-tape')
+    this.compassDegEl = document.getElementById('hud-compass-deg')
+    this.buildCompassTape()
     this.ctrlModeBtnEl = document.getElementById('btn-ctrl-mode')
     this.ctrlModeIconEl = document.getElementById('hud-ctrl-icon')
     this.ctrlModeLabelEl = document.getElementById('hud-ctrl-label')
@@ -905,6 +1064,7 @@ export class FlightHUD {
     this.throttleRailEl = document.getElementById('hud-throttle-slider')
     this.throttleTrackEl = document.getElementById('throttle-track')
     this.throttleFillEl = document.getElementById('throttle-fill')
+    this.throttleChuteFillEl = document.getElementById('throttle-chute-fill')
     this.throttleKnobEl = document.getElementById('throttle-knob')
     this.throttleReadoutEl = document.getElementById('throttle-readout')
     this.bindThrottleSlider()
@@ -1013,6 +1173,32 @@ export class FlightHUD {
         })
       })
     }
+
+    document.getElementById('btn-whole-earth')?.addEventListener('click', (e) => {
+      e.stopPropagation()
+      this.onOpenEarthPickCallback()
+    })
+
+    const runEarthSearch = () => {
+      const query = (document.getElementById('earth-search') as HTMLInputElement | null)?.value || ''
+      this.onEarthSearchCallback(query)
+    }
+    document.getElementById('btn-earth-search')?.addEventListener('click', (e) => {
+      e.stopPropagation()
+      runEarthSearch()
+    })
+    document.getElementById('earth-search')?.addEventListener('keydown', (e) => {
+      e.stopPropagation()
+      if (e.key === 'Enter') runEarthSearch()
+    })
+    document.getElementById('btn-earth-drop')?.addEventListener('click', (e) => {
+      e.stopPropagation()
+      this.onEarthDropCallback()
+    })
+    document.getElementById('btn-earth-back')?.addEventListener('click', (e) => {
+      e.stopPropagation()
+      this.onEarthBackCallback()
+    })
 
     const teleportGpsBtn = document.getElementById('btn-teleport-gps')
     teleportGpsBtn?.addEventListener('click', (e) => {
@@ -1171,6 +1357,30 @@ export class FlightHUD {
         e.stopPropagation()
         bailToggle = !bailToggle
         this.onBailoutCollapseCallback(bailToggle)
+      })
+    }
+
+    const vantageBtn = document.getElementById('btn-cam')
+    if (vantageBtn) {
+      vantageBtn.addEventListener('click', (e) => {
+        e.stopPropagation()
+        this.onCycleCamVantageCallback()
+      })
+    }
+
+    const wastedCamBtn = document.getElementById('btn-wasted-cam')
+    if (wastedCamBtn) {
+      wastedCamBtn.addEventListener('click', (e) => {
+        e.stopPropagation()
+        this.onCycleCrashCamCallback()
+      })
+    }
+
+    const wastedReplayBtn = document.getElementById('btn-wasted-replay')
+    if (wastedReplayBtn) {
+      wastedReplayBtn.addEventListener('click', (e) => {
+        e.stopPropagation()
+        this.onReplayWipeoutCallback()
       })
     }
 
@@ -1454,6 +1664,9 @@ export class FlightHUD {
 
     // Paramotor HUD & Throttle Dock Update
     const isParamotor = telemetry.wingType === 'paramotor'
+    const isWingsuit = telemetry.wingType === 'wingsuit'
+    const isParaglider = telemetry.wingType === 'paraglider'
+    this.railMode = isWingsuit ? 'suit' : isParaglider || isParamotor ? 'jet' : 'glide'
     if (this.paramotorPillEl) {
       this.paramotorPillEl.style.display = isParamotor ? 'inline-flex' : 'none'
     }
@@ -1464,7 +1677,11 @@ export class FlightHUD {
       this.dockBtnThrottle.style.display = 'none'
     }
     if (this.hintThrottleEl) {
-      this.hintThrottleEl.style.display = isParamotor ? 'inline-block' : 'none'
+      const showHint = isParamotor || isWingsuit || isParaglider
+      this.hintThrottleEl.style.display = showHint ? 'inline-block' : 'none'
+      this.hintThrottleEl.textContent = isWingsuit
+        ? 'DOWN pull chute'
+        : 'UP hydrogen · DOWN slow'
     }
 
     if (isParamotor) {

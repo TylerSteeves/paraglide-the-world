@@ -14,7 +14,7 @@ export type FlightControls = {
   speedBar: number // 0 to 1
   pullingA: number // 0 to 1 (A-risers / Speed bar leading edge pull)
   pullingB: number // 0 to 1 (B-risers / B-line stall)
-  throttle?: number // 0 (idle) to 1 (full power) for Paramotor / PPG
+  throttle?: number // 0.5 coasts. On the chute, 1 is the hydrogen jet and 0 opens the drogue sock. On a wingsuit, 0 pulls the chute. The suit has no jet.
   trimmers?: number // 0 (slow trim) to 1 (fast reflex) for Paramotor / Slalom
   reverseStance: boolean // Pilot flipped 180° in harness facing wing for ground-handling / kiting
   isCollapsed?: boolean // Full wing collapse triggered by looking straight up
@@ -90,6 +90,8 @@ export type TrickState = {
   announcementTimer: number
 }
 
+export type WingKind = 'speedwing' | 'paraglider' | 'paramotor' | 'wingsuit'
+
 export type FlightTelemetry = {
   altitudeMeters: number
   terrainHeightMeters: number
@@ -115,7 +117,7 @@ export type FlightTelemetry = {
   bankDeg: number
   pitchDeg: number
   headingDeg: number
-  wingType: 'speedwing' | 'paraglider' | 'paramotor'
+  wingType: WingKind
   xcDistanceMeters: number
   maxAltitudeMeters: number
   thermalClimbMps: number

@@ -71,6 +71,8 @@ export class MobileInputManager {
   public controlMode: ControlMode = 'direct-tilt'
   public invertRollSteering: boolean = false // tilt left turns left, tilt right turns right
   public isCruiseLocked: boolean = false
+  /** False on the wingsuit, so cruise cannot hold the rail above the chute pull. */
+  public cruiseAllowed: boolean = false
   public targetThrottle: number = 0
 
   // Legacy touch visual placeholders for HUD / UI compatibility
@@ -189,8 +191,13 @@ export class MobileInputManager {
   }
 
   public toggleCruiseLock(): boolean {
+    if (!this.cruiseAllowed) {
+      this.isCruiseLocked = false
+      return false
+    }
     this.isCruiseLocked = !this.isCruiseLocked
-    this.targetThrottle = this.isCruiseLocked ? 0.35 : 0
+    // 0.675 is 35% prop above the coast. Unlock returns to center, not the sock.
+    this.targetThrottle = this.isCruiseLocked ? 0.675 : 0.5
     return this.isCruiseLocked
   }
 
@@ -308,7 +315,7 @@ export class MobileInputManager {
       'pointerdown',
       (e) => {
         const target = e.target as HTMLElement | null
-        if (target && target.closest && target.closest('button, .hud-pill, .guide-card, a, #hud-locker-modal, #hud-world-modal, #hud-wasted-overlay, #hud-throttle-slider')) {
+        if (target && target.closest && target.closest('button, .hud-pill, .guide-card, a, #hud-locker-modal, #hud-world-modal, #hud-wasted-overlay, #hud-throttle-slider, #cesiumContainer, #earth-drop-bar, input, textarea')) {
           return
         }
         const w = window.innerWidth || 400
@@ -490,7 +497,7 @@ export class MobileInputManager {
     // - Looking STRAIGHT DOWN (< 15° down to 0° flat): Full 136+ km/h steep speed dive + camera points straight down the mountain!
     const neutral = clamp(this.neutralElevationDeg, 78.0, 92.0)
     const downDeadband = 8.0 // A small nod stays level. Looking down is a deliberate dive.
-    const upDeadband = 5.0   // A small look up starts the climb.
+    const upDeadband = 2.0   // A small look up starts the climb.
 
     const deltaElev = this.smoothedElevationDeg - neutral
 
@@ -507,12 +514,12 @@ export class MobileInputManager {
     } else if (deltaElev > upDeadband) {
       // Looking UP past vertical (90° -> 118°): float, slow down, climb, and look up at the sky!
       const backwardLean = deltaElev - upDeadband
-      const fullFlareTravel = 12.0 // A comfortable look up is a full climb.
+      const fullFlareTravel = 14.0 // The view and the climb rise across the tilt, not in one step.
       const norm = clamp(backwardLean / fullFlareTravel, 0, 1)
-      this.flareDemand = Math.pow(norm, 0.85)
+      this.flareDemand = Math.pow(norm, 0.9)
       this.diveDemand = 0
       this.pitchDemand = -this.flareDemand
-      this.tiltParallaxPitch = this.flareDemand * 0.62 // Strong upward camera tilt as you look up
+      this.tiltParallaxPitch = this.flareDemand * 0.62
     } else {
       // Pure Vertical Neutral Glide (~81° to 90° looking straight at screen)
       this.diveDemand = 0
@@ -587,8 +594,8 @@ export class MobileInputManager {
     let desiredThrottle = this.targetThrottle
     if (isThrottleKeyDown) {
       desiredThrottle = 1.0
-    } else if (this.isCruiseLocked) {
-      desiredThrottle = Math.max(desiredThrottle, 0.35)
+    } else if (this.cruiseAllowed && this.isCruiseLocked) {
+      desiredThrottle = Math.max(desiredThrottle, 0.675)
     }
 
     this.controls.weightShift += (targetWeightShift - this.controls.weightShift) * Math.min(1.0, steerFollow * dt)
@@ -599,7 +606,9 @@ export class MobileInputManager {
     this.controls.speedBar += (targetSpeedBar - this.controls.speedBar) * Math.min(1.0, barFollow * dt)
     this.controls.pullingA = this.controls.speedBar
     const curThrottle = this.controls.throttle ?? 0
-    this.controls.throttle = curThrottle + (desiredThrottle - curThrottle) * Math.min(1.0, throttleFollow * dt)
+    // A jump from the chute half up to the prop must not drag the chute open on the way.
+    const from = desiredThrottle >= 0.5 && curThrottle < 0.5 ? 0.5 : curThrottle
+    this.controls.throttle = from + (desiredThrottle - from) * Math.min(1.0, throttleFollow * dt)
     ;(this.controls as any).isCollapsed = this.isWingCollapsed || wantsKeyboardCollapse
   }
 
