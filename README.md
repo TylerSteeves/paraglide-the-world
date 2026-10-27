@@ -6,8 +6,70 @@
 </p>
 
 <p align="center">
-  <img src="docs/assets/gameplay-chase.png" alt="Paraglide the World - Flight Chase" width="85%" style="border-radius: 8px; box-shadow: 0 4px 20px rgba(0,0,0,0.3);" />
+  <img src="docs/assets/dest-rio-christ.jpg" alt="Paragliding in front of Christ the Redeemer, Rio de Janeiro" width="92%" style="border-radius: 8px; box-shadow: 0 6px 24px rgba(0,0,0,0.45);" />
 </p>
+
+---
+
+## 🗺️ Fly the landmarks
+
+The same orange wing, in front of places you can point the nose at. These are portrait shots for the repo. The in-engine captures are further down.
+
+| Christ the Redeemer, Rio | Eiffel Tower, Paris |
+|:---:|:---:|
+| <img src="docs/assets/dest-rio-christ.jpg" width="100%" alt="Paraglider in front of Christ the Redeemer" /> | <img src="docs/assets/dest-eiffel.jpg" width="100%" alt="Paraglider beside the Eiffel Tower" /> |
+| *Corcovado, Sugarloaf, and Guanabara Bay.* | *Late light over the Champ de Mars and the Seine.* |
+
+| CN Tower, Toronto | Palm Jumeirah, from the edge of space |
+|:---:|:---:|
+| <img src="docs/assets/dest-cn-tower.jpg" width="100%" alt="Paraglider beside the CN Tower" /> | <img src="docs/assets/dest-dubai-islands.jpg" width="100%" alt="Paraglider above Palm Jumeirah, seen from the edge of space" /> |
+| *The shaft, the pod, and the lake.* | *The palm and the Dubai coast, with the curve of the Earth.* |
+
+| Great Wall of China | Sydney Opera House |
+|:---:|:---:|
+| <img src="docs/assets/dest-great-wall.jpg" width="100%" alt="Paraglider along the Great Wall of China" /> | <img src="docs/assets/dest-sydney-opera.jpg" width="100%" alt="Paraglider in front of the Sydney Opera House" /> |
+| *Watchtowers climbing the ridge.* | *The shell roofs on Sydney Harbour.* |
+
+---
+
+## 🏛️ Bjarke Ingels buildings
+
+Completed landmarks by Bjarke Ingels Group. A few were designed with another studio, named in the caption.
+
+| VIA 57 West, Manhattan | CopenHill, Copenhagen |
+|:---:|:---:|
+| <img src="docs/assets/big-via57.jpg" width="100%" alt="Paraglider beside VIA 57 West" /> | <img src="docs/assets/big-copenhill.jpg" width="100%" alt="Paraglider beside CopenHill" /> |
+| *The tetrahedral courtscraper on the Hudson.* | *A ski slope and a climbing wall on a power plant.* |
+
+| 8 House, Copenhagen | Mountain Dwellings, Copenhagen |
+|:---:|:---:|
+| <img src="docs/assets/big-8-house.jpg" width="100%" alt="Paraglider over 8 House" /> | <img src="docs/assets/big-mountain.jpg" width="100%" alt="Paraglider beside the Mountain Dwellings" /> |
+| *A figure-eight block with a roof you can walk.* | *Homes terraced over a parking mountain. With JDS.* |
+
+| LEGO House, Billund | The Twist, Kistefos |
+|:---:|:---:|
+| <img src="docs/assets/big-lego-house.jpg" width="100%" alt="Paraglider over the LEGO House" /> | <img src="docs/assets/big-twist.jpg" width="100%" alt="Paraglider over The Twist" /> |
+| *Interlocking brick volumes in the square.* | *A gallery that turns from a deck into a wall over the river.* |
+
+| Vancouver House | Sluishuis, Amsterdam |
+|:---:|:---:|
+| <img src="docs/assets/big-vancouver-house.jpg" width="100%" alt="Paraglider beside Vancouver House" /> | <img src="docs/assets/big-sluishuis.jpg" width="100%" alt="Paraglider beside the Sluishuis" /> |
+| *A tower that flares out from under the bridge.* | *Housing on the water, with a gate boats pass through.* |
+
+| IQON, Quito | The Plus, Magnor |
+|:---:|:---:|
+| <img src="docs/assets/big-iqon.jpg" width="100%" alt="Paraglider beside IQON in Quito" /> | <img src="docs/assets/big-the-plus.jpg" width="100%" alt="Paraglider over The Plus factory" /> |
+| *Planted balconies stepping out over the Andes.* | *A cross-shaped factory in the forest.* |
+
+| Bay View, Mountain View | MÉCA, Bordeaux |
+|:---:|:---:|
+| <img src="docs/assets/big-bay-view.jpg" width="100%" alt="Paraglider over Bay View" /> | <img src="docs/assets/big-meca.jpg" width="100%" alt="Paraglider beside MÉCA in Bordeaux" /> |
+| *Tent canopies over the South Bay. With Heatherwick Studio.* | *The riverfront house of creative culture.* |
+
+<p align="center">
+  <img src="docs/assets/big-telus-sky.jpg" alt="Paraglider beside Telus Sky in Calgary" width="70%" />
+</p>
+<p align="center"><i>Telus Sky, Calgary. With Dialog.</i></p>
 
 ---
 
@@ -27,22 +89,48 @@ flowchart LR
 
 ---
 
-## 📸 Gameplay & Visual Showcase
+## 📸 In-Engine 3D Gameplay Showcase
 
-| High-Altitude Soaring | Banking Carve Turn |
+| High-Speed CN Tower Dive | Urban Proximity Soaring (Downtown Toronto) |
 |:---:|:---:|
-| <img src="docs/assets/gameplay-flight.png" width="100%" alt="High-Altitude Flight" /> | <img src="docs/assets/gameplay-carve.png" width="100%" alt="Banking Carve Turn" /> |
-| *Soaring over procedural mountain terrain with live variometer audio.* | *Deep weight-shift carve generating aerodynamic wingtip vapor.* |
+| <img src="docs/assets/gameplay-toronto-dive.png" width="100%" alt="High-Speed CN Tower Dive" /> | <img src="docs/assets/gameplay-flight.png" width="100%" alt="Downtown Toronto Soaring" /> |
+| *Diving past Toronto's CN Tower with glowing blue rocket exhaust and wingtip smoke.* | *Cruising above photorealistic 3D city buildings hunting air rings and thermals.* |
 
-| Speedbar Glide & Acceleration | Dynamic Stall & Aerodynamic Recovery |
+| Aerodynamic Banking Carve | Pilot Rig & Close Action Camera |
 |:---:|:---:|
-| <img src="docs/assets/gameplay-speedbar.png" width="100%" alt="Speedbar Glide" /> | <img src="docs/assets/gameplay-stall-recovery.png" width="100%" alt="Stall Recovery" /> |
-| *Pushing the speed bar to flatten wing pitch and maximize groundspeed.* | *Asymmetric brake pull collapsing the canopy into an aerobatic tumble.* |
+| <img src="docs/assets/gameplay-carve.png" width="100%" alt="Aerodynamic Banking Carve" /> | <img src="docs/assets/gameplay-action-close.png" width="100%" alt="Pilot Close Camera" /> |
+| *Deep weight-shift carve generating dynamic wingtip vapor vortices.* | *Custom pilot geometry with brass-goggled flight helmet, pod harness, and cryogenic jetpack.* |
 
-| Pilot Geometry & Pod Harness | Steampunk Glider Aesthetic |
+| Global Destination Selector | Full Speedbar Acceleration |
 |:---:|:---:|
-| <img src="docs/assets/gameplay-cockpit-pilot.png" width="100%" alt="Pilot Close-up" /> | <img src="docs/assets/art-steampunk-glider.png" width="100%" alt="Steampunk Paraglider" /> |
-| *Custom pilot geometry with teardrop speed helmet, visor, and flight harness.* | *Concept exploration: futuristic blue-hydrogen rocket-assisted paraglider.* |
+| <img src="docs/assets/gameplay-world-selector.png" width="100%" alt="World Destination Selector" /> | <img src="docs/assets/gameplay-speedbar.png" width="100%" alt="Speedbar Glide" /> |
+| *Instant travel to Manhattan, Paris, Rio, Egypt, Rome, London, SF, and Toronto.* | *Speedbar engagement flattening canopy pitch to penetrate strong headwind corridors.* |
+
+| Paris & Eiffel Tower Proximity | Rio de Janeiro Coastal Ridge |
+|:---:|:---:|
+| <img src="docs/assets/gameplay-paris-eiffel.png" width="100%" alt="Paris Eiffel Tower" /> | <img src="docs/assets/gameplay-rio-de-janeiro.png" width="100%" alt="Rio de Janeiro Coastal Ridge" /> |
+| *Navigating the Parisian skyline with real elevation terrain and landmark 3D tiles.* | *Ridge soaring high above Guanabara Bay, Sugarloaf Mountain, and the Atlantic coastline.* |
+
+---
+
+## 🎨 Visual Targets & Art Direction
+
+Created by Tyler and Grok to establish the world aesthetic, character wardrobe, and atmospheric rendering goals.
+
+| Curved Globe Soaring | Sunset Metropolis Rooftops |
+|:---:|:---:|
+| <img src="docs/assets/art-fisheye-globe.png" width="100%" alt="Curved Globe Soaring" /> | <img src="docs/assets/art-sunset-city-rooftops.png" width="100%" alt="Sunset Metropolis Rooftops" /> |
+| *Atmospheric wide-angle globe projection soaring into high-altitude sunset cloudscapes.* | *Low-level twilight carving above reflective urban rooftops and skyscraper canyons.* |
+
+| Steampunk Paraglider & Airship Flotilla | Aero Steampower Pilot & Cryo Jetpack |
+|:---:|:---:|
+| <img src="docs/assets/art-steampunk-airship.png" width="100%" alt="Steampunk Paraglider and Airships" /> | <img src="docs/assets/art-steampunk-pilot.png" width="100%" alt="Aero Steampower Pilot" /> |
+| *Vintage aeronautical canvas canopy flying in formation with massive steam-driven zeppelins.* | *Heavy leather aviator jacket, brass telemetry dials, goggles, and dual hydrogen thrusters.* |
+
+| Hyper-Realistic Alpine Explorer | Acro Racing Pilot Wardrobe |
+|:---:|:---:|
+| <img src="docs/assets/art-hyper-explorer.png" width="100%" alt="Hyper-Realistic Alpine Explorer" /> | <img src="docs/assets/art-female-pilot.png" width="100%" alt="Acro Racing Pilot Wardrobe" /> |
+| *Aerodynamic high-aspect cross-country pod harness engineered for long-distance mountain thermal flight.* | *Futuristic carbon-weave flight suit with reflective visor and specialized acro line controls.* |
 
 ---
 
@@ -50,7 +138,8 @@ flowchart LR
 
 ### 🌐 Real-World 3D Planet & Global Metropolises
 - **Keyless Global Satellite & Elevation**: Streams global high-resolution terrain tiles (AWS Terrarium) and satellite imagery (Esri World Imagery) without requiring proprietary API keys.
-- **3D Urban Skylines**: Procedural and OpenFreeMap 3D building generation across iconic soaring destinations: **Toronto**, **New York**, **Paris**, **Rio de Janeiro**, **Rome**, **London**, and the **Great Pyramids of Giza**.
+- **3D Urban Skylines**: Procedural and OpenFreeMap 3D building generation across iconic soaring destinations: **Toronto**, **New York Manhattan**, **Paris**, **Rio de Janeiro**, **Rome**, **London**, and the **Great Pyramids of Giza**.
+- **Interactive Globe Selector**: Seamlessly jump across global hotspots directly from the in-game flight interface.
 
 ### 💨 Aeromechanical Pendulum Physics
 - **Living Air Mass**: Real-time aerodynamic model simulating ridge lift, thermal updrafts, rotor sink, turbulent eddies, and dynamic wind gradients.
@@ -124,11 +213,11 @@ paraglide-the-world/
 │   └── ParaglideTheWorld.xcodeproj # Xcode project (CoreMotion 60 FPS & Taptic Engine bridges)
 ├── Art direction/             # Visual style guides, character designs & concept art
 ├── docs/
-│   ├── assets/                # Curated gameplay screenshots and art showcases
+│   ├── assets/                # Curated in-game screenshots and visual art targets
 │   ├── game-design.md         # Game loop, progression, and design specifications
 │   ├── physics-tuning-sheet.md# Flight mechanics constants & aerodynamic coefficients
 │   └── technical-architecture.md# Rendering pipeline & system architecture
-├── tools/                     # Automated flight physics test suites & Xcode project generator
+├── tools/                     # Automated flight physics test suites & screenshot capture tools
 └── Old, not used/             # Archived historical artifacts (Unreal 5, CADAM, old references)
 ```
 
@@ -175,4 +264,4 @@ Select an iPhone Simulator or your connected iPhone and press **Cmd + R**.
 ---
 
 ## 📄 License
-Private repository — All rights reserved © 2026 Tyler Steeves.
+All rights reserved © 2026 Tyler Steeves.
