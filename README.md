@@ -65,7 +65,7 @@ Completed landmarks by Bjarke Ingels Group. A few were designed with another stu
 
 ## 💥 Crashes
 
-In-game wipeouts. The wing collapses and the pilot tumbles.
+In-game wipeouts. The wing collapses, the body comes apart, and the blood stays in the air.
 
 | Hoover Dam | Golden Gate Bridge |
 |:---:|:---:|
