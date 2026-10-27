@@ -1691,7 +1691,11 @@ export class ParagliderRig {
     // +Z is forward on this rig, and the chest rotates toward -Y, so the suit flies belly-down.
     // Looking down is a dive. +X pitches the chest from the tether toward forward,
     // so the suit and the harness both nose down instead of sitting in the glide.
-    const divePose = clamp(speedBar, 0, 1)
+    // The bar is the request. Canopy pitch is the dive already happening, so the
+    // hips keep trailing after the phone comes back up and the wing is still steep.
+    // Trim sits near 8°. Past that, the nose itself opens the harness hinge.
+    const noseDown = clamp((sim.canopy.pitchDeg - 12) / 40, 0, 1)
+    const divePose = clamp(Math.max(speedBar, noseDown), 0, 1)
     let targetBodyPitch = sim.currentWingType === 'wingsuit'
       ? 1.2 + divePose * 0.62
       : symBrake * 0.08 + divePose * 0.78
