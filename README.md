@@ -63,6 +63,22 @@ Completed landmarks by Bjarke Ingels Group. A few were designed with another stu
 
 ---
 
+## 💥 Crashes
+
+In-game wipeouts. The wing collapses and the pilot tumbles.
+
+| Hoover Dam | Golden Gate Bridge |
+|:---:|:---:|
+| <img src="docs/assets/crash-hoover-dam.jpg" width="100%" alt="Crash above Hoover Dam" /> | <img src="docs/assets/crash-golden-gate.jpg" width="100%" alt="Crash on the Golden Gate Bridge" /> |
+| *Into the face, with Lake Mead behind the crest.* | *Onto the deck, San Francisco across the bay.* |
+
+| Horseshoe Falls, Niagara | Great Pyramid, Giza |
+|:---:|:---:|
+| <img src="docs/assets/crash-niagara.jpg" width="100%" alt="Crash over Horseshoe Falls" /> | <img src="docs/assets/crash-pyramid.jpg" width="100%" alt="Crash on the Great Pyramid" /> |
+| *Over the brink.* | *Into the stone.* |
+
+---
+
 ## 🌍 What is Paraglide the World?
 
 **Paraglide the World** blends the physics-accurate aeromechanics of unpowered free flight with high-speed arcade adrenaline. Pilots launch over real-world photorealistic terrain and iconic global cityscapes, hunting rising thermals, carving along razor-sharp mountain ridges, boosting through tight urban corridors, and surviving high-stakes wipeouts.
