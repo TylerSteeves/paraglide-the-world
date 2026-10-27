@@ -13,22 +13,22 @@
 
 ## 🗺️ Fly the landmarks
 
-The same orange wing, in front of places you can point the nose at. These are portrait shots for the repo. The in-engine captures are further down.
+Screenshots from the game, flying the orange wing over the photoreal map.
 
 | Christ the Redeemer, Rio | Eiffel Tower, Paris |
 |:---:|:---:|
 | <img src="docs/assets/dest-rio-christ.jpg" width="100%" alt="Paraglider in front of Christ the Redeemer" /> | <img src="docs/assets/dest-eiffel.jpg" width="100%" alt="Paraglider beside the Eiffel Tower" /> |
-| *Corcovado, Sugarloaf, and Guanabara Bay.* | *Late light over the Champ de Mars and the Seine.* |
+| *Christ the Redeemer on Corcovado.* | *Over the Champ de Mars and the Seine.* |
 
 | CN Tower, Toronto | Palm Jumeirah, from the edge of space |
 |:---:|:---:|
 | <img src="docs/assets/dest-cn-tower.jpg" width="100%" alt="Paraglider beside the CN Tower" /> | <img src="docs/assets/dest-dubai-islands.jpg" width="100%" alt="Paraglider above Palm Jumeirah, seen from the edge of space" /> |
-| *The shaft, the pod, and the lake.* | *The palm and the Dubai coast, with the curve of the Earth.* |
+| *The pod over the downtown skyline.* | *Palm Jumeirah and The World, high over the coast.* |
 
-| Great Wall of China | Sydney Opera House |
-|:---:|:---:|
-| <img src="docs/assets/dest-great-wall.jpg" width="100%" alt="Paraglider along the Great Wall of China" /> | <img src="docs/assets/dest-sydney-opera.jpg" width="100%" alt="Paraglider in front of the Sydney Opera House" /> |
-| *Watchtowers climbing the ridge.* | *The shell roofs on Sydney Harbour.* |
+<p align="center">
+  <img src="docs/assets/dest-sydney-opera.jpg" alt="Paraglider beside the Sydney Opera House and the Harbour Bridge" width="92%" />
+</p>
+<p align="center"><i>Sydney Opera House and the Harbour Bridge.</i></p>
 
 ---
 
@@ -46,30 +46,20 @@ Completed landmarks by Bjarke Ingels Group. A few were designed with another stu
 | <img src="docs/assets/big-8-house.jpg" width="100%" alt="Paraglider over 8 House" /> | <img src="docs/assets/big-mountain.jpg" width="100%" alt="Paraglider beside the Mountain Dwellings" /> |
 | *A figure-eight block with a roof you can walk.* | *Homes terraced over a parking mountain. With JDS.* |
 
-| LEGO House, Billund | The Twist, Kistefos |
-|:---:|:---:|
-| <img src="docs/assets/big-lego-house.jpg" width="100%" alt="Paraglider over the LEGO House" /> | <img src="docs/assets/big-twist.jpg" width="100%" alt="Paraglider over The Twist" /> |
-| *Interlocking brick volumes in the square.* | *A gallery that turns from a deck into a wall over the river.* |
-
 | Vancouver House | Sluishuis, Amsterdam |
 |:---:|:---:|
 | <img src="docs/assets/big-vancouver-house.jpg" width="100%" alt="Paraglider beside Vancouver House" /> | <img src="docs/assets/big-sluishuis.jpg" width="100%" alt="Paraglider beside the Sluishuis" /> |
 | *A tower that flares out from under the bridge.* | *Housing on the water, with a gate boats pass through.* |
 
-| IQON, Quito | The Plus, Magnor |
+| The Plus, Magnor | Bay View, Mountain View |
 |:---:|:---:|
-| <img src="docs/assets/big-iqon.jpg" width="100%" alt="Paraglider beside IQON in Quito" /> | <img src="docs/assets/big-the-plus.jpg" width="100%" alt="Paraglider over The Plus factory" /> |
-| *Planted balconies stepping out over the Andes.* | *A cross-shaped factory in the forest.* |
-
-| Bay View, Mountain View | MÉCA, Bordeaux |
-|:---:|:---:|
-| <img src="docs/assets/big-bay-view.jpg" width="100%" alt="Paraglider over Bay View" /> | <img src="docs/assets/big-meca.jpg" width="100%" alt="Paraglider beside MÉCA in Bordeaux" /> |
-| *Tent canopies over the South Bay. With Heatherwick Studio.* | *The riverfront house of creative culture.* |
+| <img src="docs/assets/big-the-plus.jpg" width="100%" alt="Paraglider over The Plus factory" /> | <img src="docs/assets/big-bay-view.jpg" width="100%" alt="Paraglider over Bay View" /> |
+| *A cross-shaped factory in the forest.* | *Tent canopies over the South Bay. With Heatherwick Studio.* |
 
 <p align="center">
-  <img src="docs/assets/big-telus-sky.jpg" alt="Paraglider beside Telus Sky in Calgary" width="70%" />
+  <img src="docs/assets/big-meca.jpg" alt="Paraglider beside MÉCA in Bordeaux" width="70%" />
 </p>
-<p align="center"><i>Telus Sky, Calgary. With Dialog.</i></p>
+<p align="center"><i>MÉCA, Bordeaux. The riverfront house of creative culture.</i></p>
 
 ---
 
